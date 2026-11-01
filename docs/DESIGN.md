@@ -135,6 +135,7 @@ src/
     Preflight.ts                 decide(op, resolution) -> Pass | ordered failure list; Preflight.Mode (internal)
     Recompute.ts                 50013/50001/dedicated-code path: refresh, resolve, attribute or Unattributed
     Observed.ts *                hand-edited constants decided by the live matrix (§8); replay test enforces them
+                                 (M1 adds the two the table's types read: slowmodeAppliesToBots, botsCanBeTimedOut)
     Require.ts *                 Permissions.require
   payload/
     Message.ts *                 CreateMessage, CreateMessageV2, EditMessage, Embed, FileUpload, Poll, StickerRef,
@@ -653,8 +654,13 @@ is `OpErrors<G>[op]` plus argument-derived limit tags):
   addMember, but not on send (C16, H-035). The matrix confirms this.
 - **CommunicationDisabled** is in every row whose required flags the timeout
   mask removes (everything except View and ReadMessageHistory, H-020), gated by
-  `Observed.botsCanBeTimedOut`. Rows needing only those two flags (`pins`,
-  `join`, `leave`, own `delete`) do not list it.
+  `Observed.botsCanBeTimedOut`. Rows needing only those two flags
+  (`channel.pins`, `join`, `leave`, own `delete`) do not list it; `voice.pins`
+  needs Connect, which the mask removes, so it does (M1).
+- **PermissionDeniedUnattributed** is in every row that sends a guild request,
+  including `channel.pins`, `voice.pins`, `join` and `leave`: a 50001 there
+  goes through the recompute, which may find nothing (§3.1, §4.9). Only
+  `dm.send` and `permissions.require` omit it (M1).
 - Reaction removal and overwrite editing (H-144, H-070) are **out of phase-1
   scope**; they are not in the API and not in the matrix (§8, item 19).
 
@@ -1464,7 +1470,9 @@ handles, or the interaction's `app_permissions` (and resolved channels'
   without a cast because the narrow Effect is assignable to the wide one. That
   is the one trusted boundary per operation; three tests guard it.
 - **Errors are built only through `errorFor(op, flag, cause)`**
-  (`[sd:src/ops.ts]`). Its constructor table `variantConstructors` is typed
+  (`[sd:src/ops.ts]`), an overload whose signature returns
+  `OpPermissionErrors[Op][F]` over a wide implementation (rule 7 of §2.12).
+  Its constructor table `variantConstructors` is typed
   `{ [V in Variant]: { [F in PermissionFlag]: (cause) => VariantErrors[V][F] } }`,
   so building the base class where the type promises the `...ForReply` variant
   is a compile error (`[sd:probe2/variant-table.ts]`). Revision 1 built the base
@@ -2400,13 +2408,16 @@ Live milestones run serially, under the lock.
 - Scope: `src/Snowflake.ts`, `src/errors/*` (generator with `ErrorCategories`,
   Cause with `NoResponse`, Category, Variants, Permission, State, Payload,
   Transient), `src/permissions/Operations.ts` (table, derived types,
-  `variantConstructors`, `errorFor`), `AllErrors`.
+  `variantConstructors`, `errorFor`), `src/permissions/Observed.ts` (the two
+  constants the table's types read), `AllErrors`.
 - Tests:
   - runtime marker test: prototype, frozen, not encoded, inherited correctly;
   - `errorFor` builds the promised variant for every (op, flag), checked
     against `ErrorCategories`;
   - D6 invariant;
   - generator `--check`;
+  - the table invariants of §2.4-§2.5 (TwoFactorRequired, CommunicationDisabled,
+    PermissionDeniedUnattributed per row);
   - pass fixtures for catchTag/catchCategory exactness, for `OpErrors` rows and
     for ID distinctness (no brand assignable to another);
   - a fail fixture for catching an absent category. The ID-mixing fail

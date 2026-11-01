@@ -144,6 +144,6 @@ export const registryProblems = (rules: ReadonlyArray<Rule>, view: RepositoryVie
 
 /** Checks of §5.5 whose inputs do not exist yet; rules-check prints them so they are never mistaken for passes. */
 export const pendingChecks: ReadonlyArray<string> = [
-  "flag coverage per (operation row, flag) and per payload-rule flag, with flip controls (needs src/permissions/Operations.ts, PayloadRules and fixtures/truth-table.json)",
+  "flag coverage per (operation row, flag) and per payload-rule flag, with flip controls (src/permissions/Operations.ts exists; still needs PayloadRules and fixtures/truth-table.json)",
   "a live intent pair for every event in EventIntents (needs src/gateway/Intents.ts and the truth table)"
 ]

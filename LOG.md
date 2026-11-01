@@ -59,6 +59,18 @@ the same commit.
   the fixture moves to M6, whose scope already has "type fixtures ... for §2.1" and "the registry entries". M1
   keeps the type-level proof as a pass fixture: `test/types/pass/ids.ts` asserts that no brand is assignable to
   any other (all 90 ordered pairs), that a plain `string` is none of them, and that `make` returns the brand.
+- **M1: `voice.pins` lists `CommunicationDisabled`.** The prototype row (`[sd:src/ops.ts]`) omitted it, but §2.4
+  puts the tag in every row whose flags the timeout mask removes (everything but ViewChannel and
+  ReadMessageHistory, H-020), and `voice.pins` needs Connect. The new table-invariant test
+  (`test/unit/operations.test.ts`) failed on exactly this row (`listsCommunicationDisabled: false` for
+  `voice.pins`). §2.4's "pins" exception now reads `channel.pins`.
+- **M1: `channel.pins`, `voice.pins`, `thread.join` and `thread.leave` list `PermissionDeniedUnattributed`.** The
+  prototype rows omitted it, but §3.1 raises it from "every op that can return 50013/50001", and §4.9 sends a
+  50001 through the recompute, which returns `PermissionDeniedUnattributed` when the fresh state shows nothing
+  missing. All four are guild requests that return 50001 without View (H-080), so the recompute can produce
+  the tag; without it in the row the type would not name a failure the runtime produces (M5's op-errors test
+  would also have caught it). Only `dm.send` and `permissions.require` omit it; a unit test asserts exactly
+  that.
 - **M1: the transient classes type their cause as one member of `ErrorCause`.** `RequestTimedOut` and
   `NetworkError` take `NoResponse`, `DiscordUnavailable` and `RateLimited` take `DiscordResponse`, as §2.2 and
   §3.1 describe them, instead of the prototype's `ErrorCause`. Nothing else can produce them, so a transient
@@ -68,6 +80,16 @@ the same commit.
   the variants, and duplicating the hand-written classes' categories in it would add a second source.
   `test/types/pass/error-categories.ts` checks each entry against `Categories<>` of its class, and
   `test/unit/d6-invariant.test.ts` reads every other class's marker. §2.2 is clarified.
+- **M1: `errorFor` is an overload.** As an arrow function typed `OpPermissionErrors[Op][F]`, tsc rejected the
+  body (TS2375, then TS2719 when spelled through `VariantErrors`), because the property read
+  `Operations[op].variant` widens to every row's variant for a generic `Op`. Rule 7 of §2.12 is the pattern
+  for this: the public signature returns `OpPermissionErrors[Op][F]` over a wide implementation, and
+  `test/unit/error-for.test.ts` checks every (operation, flag) at run time. `test/types/pass/operations-table.ts`
+  asserts the precise return (`errorFor("channel.send", "ReadMessageHistory", cause)` is
+  `MissingReadMessageHistoryForReply`). §4.7 says so.
+- **M1: `src/permissions/Observed.ts` arrives in M1** with only `slowmodeAppliesToBots: false` and
+  `botsCanBeTimedOut: true`, because `TagClasses` maps the gated tags through them (§2.4). M3/M4 add the
+  other constants (`codeForLevel`).
 
 ## Escalated rules
 
@@ -112,3 +134,38 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   1 hover marker). Temporary fail fixtures with a wrong mention, a wrong TS code and a missing import
   (`Cannot find name 'UserId'`, TS2304) each made `bun run test:types` exit 1 with exactly that gate reason,
   with their snapshots written first so the snapshot check could not be the cause. They were removed after.
+
+### M1 Errors, categories, IDs, operation table
+
+- `src/Snowflake.ts`: the ten branded IDs; `X.make` throws on a malformed snowflake (unit-tested).
+- `src/errors/`: `Category.ts` (the `[cc:src/category.ts]` port: `withCategory`, `hasCategory`,
+  `catchCategory`), `Cause.ts`, `Missing.generated.ts` (52 classes, `PermissionFlags`, `PermissionErrors`,
+  `missing`, `MissingClasses`, `ErrorCategories` with 54 entries), `Variants.ts`, `Permission.ts`, `State.ts`,
+  `Payload.ts`, `Transient.ts` (with the `Transient` union), and `index.ts` (`ErrorClasses`,
+  `PermissionErrorClasses`, `AllErrors`). Each hand-written module exports a `*Classes` record so the D6 test
+  enumerates every class; a unit test checks the record matches every error class the barrel exports.
+- `scripts/gen-errors.ts` with the pure `scripts/lib/genErrors.ts`. It reads `PermissionFlagsBits`, drops
+  `ManageEmojisAndStickers` (H-059), and refuses an unlisted alias (two names on one bit), a listed alias that
+  aliases nothing, and a category-table flag that does not exist. `--check` exits 1 on a missing or stale
+  module, naming the first different line (checked by hand-editing a doc comment: `stale from line 99`, exit 1).
+  Never edit `src/errors/Missing.generated.ts`; run `bun run gen:errors`.
+- `src/permissions/Operations.ts`: the 40-row table, `TagClasses`, `VariantErrors`, `OpFlags`, `OpTags`,
+  `OpPermissionErrors`, `Revoked`, `OpErrors<G>`, `variantConstructors` and `errorFor`.
+- Unit tests: `category.test.ts` (marker on the prototype, non-enumerable, frozen and non-configurable, not
+  encoded, survives a decode, inherited without mutating the base; runtime catchCategory), `error-for.test.ts`
+  (every one of 40 x 52 (operation, flag) builds the exact promised class, tag, flag and `ErrorCategories`
+  categories), `d6-invariant.test.ts`, `operations.test.ts` (TwoFactorRequired exactly on 2FA-starred rows,
+  CommunicationDisabled on every timeout-masked row, PermissionDeniedUnattributed on every guild request, View
+  first and Connect second, variants, ThreadArchived never on send), `gen-errors.test.ts`, `snowflake.test.ts`.
+- Type fixtures: pass `catch-tag-exact.ts` (now with library errors and the same-tag variants),
+  `catch-category-exact.ts`, `operations-table.ts` (one exact union per row of `OpErrors<never>`, D8, D5,
+  Observed gating, `errorFor`'s precise return), `error-categories.ts` (the mirror equals the type-level
+  categories; D6 at the type level), `ids.ts`; fail `catch-category-exact.ts` (an absent category, alone, in a
+  list, and data-first; each names the category, largest 325 gated characters). Registry: `R-catch-category-exact`
+  (pure-typing). Hover: `test/hover/op-errors.ts` shows an `OpErrors` lookup as class names, with `Transient`
+  kept as its alias name.
+- Mutation checks (each reverted): dropping `ThreadArchived` from `message.pin.thread`, giving the reaction
+  variant `state` instead of `access`, branding `StickerId` as `EmojiId`, and making `RateLimited` also `state`
+  each made `bun run test:types` exit 1 in the fixture meant to catch it.
+- Compile cost of `src/` alone (`--checkers 1`, two identical runs): 27,933 types, 112,607 instantiations,
+  about 0.1 s check time (design measurement for the error module: 25,994 and 106,218).
