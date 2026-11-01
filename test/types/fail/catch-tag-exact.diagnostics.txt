@@ -1,0 +1,2 @@
+L12:65 TS2345
+Argument of type '"Beta"' is not assignable to parameter of type '"Alpha" | readonly ["Alpha", ..."Alpha"[]]'.
