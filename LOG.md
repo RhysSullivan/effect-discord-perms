@@ -433,4 +433,9 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
     fields not read; the overwrite sub-route length check; thread names ignored, thread-from-message creates
     unchecked, the thread-create method check; the thread slowmode restore; and the read-back ignoring thread
     slowmode, `@everyone`, timeouts or system message types, and `unseen` going blind.
+  - Exit runs on the committed code, in order: `harness:selftest` exited 0 (initial reset 0, 13 steps and 37
+    writes, 34 problems seen, reset 28, at baseline, second reset 0); `harness:smoke` exited 0 twice (`reset:
+    writes 0`, `provision: created 0; writes 0`, oracle available with 10 reads, the control matching, 75
+    requests, 0 writes, 0 invalid); `harness:reset` reported `writes: 0` twice; the lock was gone afterwards.
+    `bun run verify:offline` is green (291 unit tests in 21 files).
 
