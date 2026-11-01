@@ -161,6 +161,8 @@ src/
     Coded429.ts                  base HttpClient interceptor for nonzero-coded 429s (G2)
     Schemas.ts                   response schemas (Message incl. reactions, Channel, Thread, Member, Role, Guild)
     Oracle.ts                    GET /channels/{c}/permissions/member/{u} etc. via rest.httpClient (harness only)
+                                 (ErrorMap.ts's dfx failure classifier, `classify`, arrives in M2 for startup and
+                                 the harness; M5 adds the table)
   state/
     GuildState.ts                service: SubscriptionRef<Snapshot> with per-entity generations; awaitGuild, refresh
     Reducer.ts                   pure (Snapshot, dispatch) -> Snapshot; stamps guild_id; obfuscation; bot member; idempotent
@@ -172,7 +174,7 @@ src/
   bot/
     Bot.ts *                     Bot.make, Bot.layerWith (platform open), Bot.layer (Bun), Bot.on; per-event fibers
     Handler.ts *                 Handled<A,E,R>, UnhandledErrors<What> (T3O by category, D1/D6)
-    Startup.ts                   fail-fast checks (D19) -> StartupFailed
+    Startup.ts                   fail-fast checks (D19) -> StartupFailed; restChecks (checks 1-3) from M2
     Internals.ts *               NOT exported: layerWith returning BotRuntime | SubjectRaw (harness only)
   commands/
     Command.ts *                 Command.chatInput / withSubcommands; CheckName; Ordered; CheckedSubs; ChatInputCommand<N, I>
@@ -188,7 +190,7 @@ src/
   config/
     Credentials.ts *             ConfigProvider.fromDotEnv layer; Config.Redacted readers; takes the live lock (§5.6)
 harness/
-  main.ts                        CLI: reset | smoke | run [--repeat N] [--only glob] [--write] [--compare]
+  main.ts                        CLI: reset | smoke | inventory | run [--repeat N] [--only glob] [--write] [--compare]
   Identities.ts *                SharedHttpClient (paced, counted) outside every fresh; HarnessRest, TargetRest; subject
   IdentityCheck.ts               app IDs, distinct users, READY user, sent intents, the guild is Perms Lab (§4.4)
   Lab.ts                         Perms Lab guard on EVERY identity's writes, incl. SubjectRaw and library member ops
@@ -203,6 +205,9 @@ harness/
   Outcome.ts                     raw outcome classifier, degradation readback (D35)
   Agreement.ts                   pure: row -> agree | mismatch kind (shared with offline replay)
   Pacing.ts                      global token bucket, invalid-request counter and cap, write counter per route
+  Wire.ts                        schemas for the Discord objects the harness reads (dfx casts 2xx bodies); raw
+                                 requests through rest.httpClient for routes dfx lacks (GuildMedia create)
+  Smoke.ts                       harness:smoke's oracle reads (with a target positive control) and `inventory`
   TruthTable.ts *                schema + canonicalJson; write / compare
   scenario/
     Dsl.ts *                     Setup, Operation, Observation, Scenario
@@ -1328,11 +1333,18 @@ when they are built, so their methods have `R = never`.
 
 - for each identity, `getMyApplication().id` equals its `DISCORD_<ID>_APP_ID`,
   and the three `getMyUser().id` values are distinct;
-- the subject gateway's READY `user.id` equals the subject's `getMyUser().id`;
+- the subject gateway's READY `user.id` equals the subject's `getMyUser().id`
+  (from M3, when the subject is the library's bot layer with its gateway; M2's
+  subject is REST-only and the check is printed as not checked yet);
 - the intents bitfield the codec actually sent in op 2 (recorded by
-  `gateway/Codec.ts`) equals the declared intents;
+  `gateway/Codec.ts`) equals the declared intents (from M7, with the codec);
 - `getGuild(DISCORD_TEST_GUILD_ID)` is named "Perms Lab" and contains
-  `#rules` and `#mod-updates`.
+  `#rules` and `#mod-updates`;
+- the harness's highest role is the highest role in the guild.
+
+Checks 1-3 of `Bot.layer` live in `bot/Startup.ts` as `restChecks` (M2), which
+the harness runs for each identity with its privileged intents (harness:
+GuildMembers; subject: GuildMembers and MessageContent).
 
 The harness also reads its own application flags to learn whether its REST
 reads see content (D35).
@@ -1969,19 +1981,27 @@ The registry (`test/rules.ts`). IDs use the `R-` prefix; "raw" means through
 - **Lab guard** (`harness/Lab.ts`) wraps **every** identity's writes: the
   harness's narrow `Lab` interface, `TargetRest`, `SubjectRaw`, and the
   library's member operations when the subject runs them in steps (b) and (d).
-  Each write asserts the following, and any violation is a defect that aborts
-  the run:
-  - the guild is `DISCORD_TEST_GUILD_ID`;
-  - the channel or role is in the provisioned lab set (by stored ID) and is
-    never `#rules` or `#mod-updates`;
+  It runs in the shared base `HttpClient`, below every identity's dfx stack
+  (M2), so no identity can bypass it; the "narrow interface" is a route
+  allowlist: a write is sent only if its route is one the lab needs and its
+  target is an admitted lab object. Nothing is written before the identity
+  checks arm it. Each write asserts the following, and any violation is a
+  defect that aborts the run before the request is sent:
+  - the guild is `DISCORD_TEST_GUILD_ID` (reads too, for guild routes);
+  - the channel or role is in the provisioned lab set (by stored ID, admitted
+    after the harness read or created it and checked its `lab`/`lab-*` name)
+    and is never `#rules` or `#mod-updates`; the harness's own top role may
+    appear only in a role-position PATCH (§5.7);
   - member edits target only the subject or the target bot;
   - **kick and ban** run only when the docs model predicts failure from
     **harness-side reads taken just before the call**: the subject lacks the
     flag (harness's own computation from the role and overwrite reads), or the
     target's highest role, including both bots' managed roles, is not below the
     subject's. Otherwise the guard refuses. "Expected to fail" never comes from
-    the resolver under test;
-  - nothing is ever sent to a DM channel with a human.
+    the resolver under test. Until the members family brings that predicate
+    (M4), every kick and ban route is refused;
+  - nothing is ever sent to a DM channel with a human, and nothing leaves the
+    guild, edits the guild itself, global commands, webhooks or invites.
 - **Safety** (`scenario/Safety.ts`) is a pure check that runs offline over the
   whole catalog (a unit test) and again at run start, against the
   **materialized** desired state, for steps (c) **and** (d):
@@ -2015,18 +2035,27 @@ writes, and that is M2's exit check.
    owner and unaffected.
 2. Delete `lab-*` channels and roles that are not in the provision spec.
 3. Restore member state: remove non-baseline `lab-*` roles from the subject and
-   the target (the target keeps `lab-target`), clear their member overwrites,
-   timeouts and nicknames, and check that both managed roles have no
-   permissions.
-4. Restore channel settings: name variant `a`, slowmode 0, forum `REQUIRE_TAG`
-   off and tags reset, thread auto-archive 10080 minutes.
+   the target (the target keeps `lab-target` and `lab-unmentionable`), clear
+   their member overwrites, timeouts and nicknames, and set both managed roles'
+   permissions to none where the bots have managed roles (in Perms Lab they do
+   not, M2). A subject or target holding a role outside the lab fails the reset.
+   Lab roles get their spec's permissions and mentionability back.
+4. Restore channel settings: name variant `a`, parent `lab`, slowmode 0,
+   overwrites exactly `lab-target`'s allow (which clears every scenario's role
+   and member overwrites), forum `REQUIRE_TAG` off and tags reset to `lab-tag`,
+   thread auto-archive 10080 minutes.
 5. Threads: enumerate active **and** archived threads (public archived, private
    archived and joined private archived, threads.mdx) in lab channels; delete
    scenario threads; unarchive and unlock the provisioned threads; restore the
-   subject's membership of `lab-private-thread` to its baseline (not a member).
+   subject's membership of every provisioned thread to its baseline (not a
+   member), and the target's (a member of all four, so it can post fixtures in
+   `lab-private-thread`).
 6. Remove pins, and bulk-delete messages younger than 14 days in lab channels,
    listed by author (harness, subject, target), so untracked messages from a
-   timed-out request are removed too.
+   timed-out request are removed too; older ones are deleted singly. A forum
+   post's starter message is kept, and system messages Discord never lets
+   anyone delete (types 1-5 and 21, for example the "added to the thread"
+   notice adding the target posts) are left (deleting one is 403 50021, M2).
 7. Reset the subject's guild commands to an empty list.
 8. Delete AutoMod rules named `lab-*`.
 
@@ -2037,13 +2066,25 @@ Reset never touches `#rules`, `#mod-updates`, or anything not in the lab set.
 - Category: `lab`.
 - Channels: `lab-text`, `lab-announcement`, `lab-voice`, `lab-stage`,
   `lab-forum`, `lab-media`, and `lab-bots-only` (for content-intent tests).
+  A channel Discord refuses to create because its kind is not available in the
+  guild (400 50024) is recorded in `.lab-state.json` as `unavailable` and not
+  retried; its scenarios record `setup-unsupported: kind-not-available`
+  (§5.10). In Perms Lab that is `lab-media` (M2).
 - Threads: `lab-public-thread` and `lab-private-thread` under `lab-text`,
   `lab-announcement-thread`, and `lab-forum-post`, all with auto-archive 10080.
 - Roles, top to bottom: harness-managed, `lab-high`, `lab-mid`, `lab-low`,
   `lab-grant`, `lab-allow`, `lab-deny`, `lab-admin`, `lab-target`,
   `lab-mentionable`, `lab-unmentionable` (not mentionable; members: the target
-  only). Both bots' managed roles are placed explicitly relative to `lab-low`
-  and recorded (H-073), and positions are set once.
+  only). `lab-admin` holds Administrator (the `administrator` grant source);
+  every other lab role has no permissions at baseline. Both bots' managed
+  roles, where they exist, are placed directly below `lab-low` (the subject's
+  above the target's) and recorded (H-073); in Perms Lab neither bot has one
+  (M2), so ranks come only from the lab roles a scenario assigns. Positions
+  are set once, as one block at the bottom of the hierarchy with distinct
+  positions, and read back. Discord gives every role created through the API
+  position 1 without renumbering the others, so the block is written whenever
+  positions tie; the position PATCH must also move the harness's own top role
+  above the block, or Discord answers 400 50013 (M2).
 - `lab-target` gets a channel **role-overwrite allow** (View, Send, SMIT, RMH,
   AddReactions) on every lab channel, so `@everyone` overwrite denies never
   remove the target's ability to post fixtures (H-007). An offline check asserts
@@ -2435,7 +2476,10 @@ Live milestones run serially, under the lock.
     `Layer.fresh`, `HarnessRest`, `TargetRest`, plus the fake-client auth test
     built from the exported layers;
   - `harness/IdentityCheck.ts` and the startup checks (§4.4) for three
-    identities;
+    identities: `bot/Startup.ts`'s REST checks 1-3 (with `rest/ErrorMap.ts`'s
+    `classify`), the app IDs, distinct users and the guild; the subject is a
+    REST-only identity here (`SubjectRaw`, tag in `bot/Internals.ts`), so the
+    READY and sent-intents checks wait for M3 and M7;
   - `Lab.ts` (guard on every identity), `Lock.ts`, `LabIds.ts`, `Provision.ts`,
     `Reset.ts`, `Pacing.ts`;
   - `rest/Oracle.ts`;
@@ -2688,7 +2732,10 @@ fails if a constant disagrees with the table.
    for bots (H-240, H-241)?** It is compared with `missingBeforeMasks`
    (implicit=false). If it reflects timeouts, `OracleScope.includesTimeout` adds
    the timeout mask to the comparison. If it is unavailable, the header says so
-   and flip controls carry the blame check.
+   and flip controls carry the blame check. M2: the route exists; it answered
+   for every lab channel and thread, and a positive control (the target in
+   `lab-text`) returned exactly `lab-target`'s overwrite allow. The timeout
+   question (H-241) is still open.
 10. **Do rejected command creates count toward 200 per day (H-205)?** Negative
     tests use one command name, a local daily counter aborts at 150, and
     `LOG.md` records the before/after GET counts.
@@ -2711,7 +2758,8 @@ fails if a constant disagrees with the table.
     the unions. An observed 200000 or 200001 is an unmapped defect until it is
     added to the table through `Observed.ts`.
 16. **2FA (`mfaLevel`).** If Perms Lab is `mfaLevel = 0`, `TwoFactorRequired`
-    stays in the unions as a documented, resolver-only tag.
+    stays in the unions as a documented, resolver-only tag. M2: Perms Lab is
+    `mfaLevel = 0`.
 17. **The DM content exception (PROMPT: "Verify these exceptions live").** A
     bot cannot open a DM with another bot, and the harness must never DM Rhys.
     Verifying it needs a human DM. Escalated to Rhys through `LOG.md` and the

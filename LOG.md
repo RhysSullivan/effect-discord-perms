@@ -9,15 +9,63 @@ milestone appends its entries.
 
 ## Waiting for Rhys
 
-Nothing yet.
+- **GuildMedia channels (decision, not blocking).** Perms Lab cannot have a media channel: creating one
+  (`POST /guilds/{guild.id}/channels`, type 16) answers 400 50024 "Cannot execute action on this channel type",
+  even with a minimal body `{name, type}` (M2). Provisioning records `lab-media` as unavailable in
+  `.lab-state.json` and every media scenario will record `setup-unsupported: kind-not-available` (§5.10).
+  If Rhys wants the media kind verified live, the server would need media channels enabled by Discord (they are
+  not offered to this guild today); otherwise the media rows stay resolver-only. Everything else proceeds.
 
 ## Live findings
 
-Where live Discord differed from the docs, each citing its H-id. No live run has happened yet.
+Where live Discord differed from the docs, each citing its H-id.
+
+- **M2, H-240 (oracle): available.** `GET /channels/{c}/permissions/member/{u}?implicit=false` answered 200 for
+  all ten lab channels and threads (the subject: no flags, as expected with an empty `@everyone` and no roles).
+  A positive control, the target in `lab-text`, returned exactly `lab-target`'s overwrite allow (AddReactions,
+  ViewChannel, SendMessages, ReadMessageHistory, SendMessagesInThreads). H-241 (timeouts) is still open.
+- **M2, H-072: Perms Lab is `mfa_level = 0`.** `TwoFactorRequired` stays a documented, resolver-only tag (§8 item 16).
+- **M2, D35: the harness application has the Message Content flag** (`GatewayMessageContent` or its
+  `...Limited` flag in `getMyApplication().flags`), so the harness's REST reads see message content.
+- **M2, H-073 refuted for Perms Lab: neither the subject nor the target has a managed role.** The guild's only
+  managed role is the harness's (`Perms Harness`, Administrator). The two bots joined with no permissions, and
+  Discord created no managed role for either (consistent with invites that request no permissions). "Both managed roles' positions": none
+  exist; the subject's rank comes only from the lab roles a scenario assigns, and by default the target
+  (`lab-target`, position 3) outranks the subject (no roles). Provisioning would place them directly below
+  `lab-low` if they ever appear.
+- **M2: roles created through the API all get position 1, and nothing is renumbered.** After creating the ten lab
+  roles, every role but `@everyone` (including `Perms Harness`) was at position 1, ordered only by the ID
+  tie-break. Provisioning therefore requires distinct positions, not just the right tie-broken order.
+- **M2: a role-position PATCH that moves lab roles above the harness's numeric position fails with 400 50013**
+  (status 400, where 50013 usually comes with 403), even though the harness ranked highest by tie-break. The same PATCH
+  that also moves the harness's own top role above the block succeeds, and Discord applies the positions as
+  sent: `Perms Harness` 11, then `lab-high` 10 down to `lab-unmentionable` 1.
+- **M2: GuildMedia (16) cannot be created in Perms Lab** (400 50024, see "Waiting for Rhys").
+- **M2: adding the target to a thread posts a system message nobody can delete.** Reset's first single delete of a
+  harness message in `lab-public-thread` answered 403 50021 "Cannot execute action on a system message": the
+  RECIPIENT_ADD (type 1) notice the harness's `PUT .../thread-members/{target}` posted. message.mdx lists types
+  1-5 and 21 as not deletable; reset now leaves exactly those.
+- **M2: `@everyone` had Discord's default permissions** (CreateInstantInvite, AddReactions, View, Send, ...) before the
+  first reset, as the brief said; the first reset's only write set them to none.
 
 ## dfx deviations
 
-Where dfx got in the way and we wrapped or adapted it, and why. None yet.
+Where dfx got in the way and we wrapped or adapted it, and why.
+
+- **M2: the base `HttpClient` handed to every dfx stack is ours** (`harness/Identities.ts`): the Lab guard, the
+  global pacing bucket and the request, write and invalid-response counters run there, below dfx's own limiter,
+  so they see every identity and every retry dfx makes after a 429 (dfx re-executes through the base client).
+  dfx is unchanged; it just receives a wrapped client.
+- **M2: GuildMedia channels are created through `rest.httpClient`.** dfx's generated `CreateGuildChannelRequest`
+  has no type 16 (dfx.md §0), so provisioning sends all channel creates as raw JSON through the identity's
+  authenticated, rate-limited `rest.httpClient` and decodes the response itself (`harness/Wire.ts`).
+- **M2: the permission oracle goes through `rest.httpClient`** (`src/rest/Oracle.ts`): neither dfx 1.1.1 nor
+  discord-api-types knows `GET /channels/{c}/permissions/member/{u}` (published 2026-10-30).
+- **M2: dfx's 2xx bodies are re-decoded.** dfx casts every response to its generated type without validation, so
+  the harness decodes each body it acts on with its own schemas (`harness/Wire.ts`), and startup decodes the
+  user, application and member it reads; a mismatch is a defect.
+- **M2: dfx's `DiscordRestError.code` is never read** (it is `undefined` at run time, dfx.md §3);
+  `src/rest/ErrorMap.ts`'s `classify` reads `e.data.code` and decodes the body with Schema.
 
 ## Design deviations
 
@@ -91,6 +139,39 @@ the same commit.
   `botsCanBeTimedOut: true`, because `TagClasses` maps the gated tags through them (§2.4). M3/M4 add the
   other constants (`codeForLevel`).
 
+- **M2: the Lab guard runs in the shared base `HttpClient`, as a route allowlist** (§5.6 clarified). §5.6 asked for
+  a guard on every identity's writes and a "narrow `Lab` interface" for the harness. One guard below every dfx
+  stack covers all identities, `SubjectRaw` and (from M6) the library's own operations at once, and cannot be
+  bypassed; the narrow interface is its allowlist of the routes the lab needs. `test/unit/lab-guard.test.ts`
+  checks each refusal. Kick and ban are refused outright until M4 adds the harness-side failure prediction.
+- **M2: the subject is a REST-only identity, and the READY and sent-intents identity checks are staged** (§4.4 and
+  §6 M2 updated). M2 has no gateway (the library's bot layer arrives in M3, the codec in M7), so `SubjectRaw`
+  is a fresh REST stack like `HarnessRest` and `TargetRest` (its tag lives in `src/bot/Internals.ts`, where
+  M3 builds it from `BotInternals.layerWith`), and `harness:smoke` prints the two gateway checks as "not
+  checked yet".
+- **M2: `src/bot/Startup.ts` (`restChecks`, checks 1-3 of §4.4) and `src/rest/ErrorMap.ts` (`classify`, the dfx
+  failure shapes of §4.9) arrive early**, because "the startup checks for three identities" is M2 scope. M7
+  calls `restChecks` from `Bot.layer`; M5 adds the error table on top of `classify`. A member read answering
+  403 50001 is also mapped to `not-in-guild` (unverified live: Perms Lab is the only guild the bots may touch).
+- **M2: `harness/Wire.ts` and `harness/Smoke.ts` are new modules** (§1.2 updated): the harness's response schemas
+  and raw-request helper, and smoke's oracle reads and the read-only `inventory` command.
+- **M2: thread membership baseline covers every provisioned thread** (§5.7 step 5 updated). §5.7 named only the
+  subject's membership of `lab-private-thread`. The subject now starts as a member of no provisioned thread
+  (sending auto-joins it, H-034, so a public-thread row would otherwise leak into the next), and the target as a
+  member of all four, so it can post fixtures in the private thread (it has no ManageThreads).
+- **M2: role positions require distinct positions, and the position PATCH carries the harness's role** (§5.7
+  updated, with the guard's positions-only admission of that role). Evidence in "Live findings".
+- **M2: `lab-media` is recorded as unavailable instead of failing provisioning** (§5.7 updated). `.lab-state.json`
+  gained `unavailable` (name to the status and code Discord gave), and §5.10's `kind-not-available` covers the
+  scenarios.
+- **M2: reset leaves undeletable system messages, deletes old bot messages singly, and restores parents, overwrites
+  and lab-role permissions** (§5.7 updated). Evidence for the first in "Live findings"; the rest makes "a second
+  reset makes zero writes" hold after scenarios that edit those settings. A subject or target holding a non-lab
+  role fails the reset with `LabCheckFailed` instead of being edited (the guard would refuse it, and such a role
+  would grant permissions the matrix does not control).
+- **M2: `lab-admin` holds Administrator at baseline** (§5.7 updated): it is the `administrator` grant source and is
+  only ever assigned by a scenario; every other lab role has no permissions at baseline.
+
 ## Escalated rules
 
 Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria. None yet.
@@ -102,6 +183,18 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   the tokens. Checked in M0: `bun run <script>` does not pass `.env` to the scripts it starts, and
   `bun --no-env-file` keeps it out of the process (probed with a throwaway `.env` in `/tmp`, counting names
   only).
+
+- **Live commands** (minisforum only, one at a time; each takes the live lock through `Credentials`):
+  `bun run harness:reset` prints `writes: N`; `bun run harness:smoke` runs the identity checks, reset,
+  provision and the oracle reads; `bun --no-env-file harness/main.ts inventory` lists the lab guild read-only.
+  The lab's object IDs are in `.lab-state.json` (git-ignored). Deleting it makes the next reset delete every
+  `lab-*` object and the next provision recreate them.
+- **Reset self-test.** `.scratch/m2/dirty-lab.ts` (git-ignored scratch, not part of the build) dirties the lab the
+  way scenarios will (a target message and a pin, an archived scenario thread, a subject role and member
+  overwrite, slowmode, `@everyone` and `lab-grant` permissions, REQUIRE_TAG, an archived and locked
+  provisioned thread, the subject in the private thread, a target nickname, a leftover role the target holds)
+  through the guarded identities. In M2 the reset after it made 12 writes and the one after that 0, both times
+  it was run.
 
 ## Milestones
 
@@ -169,3 +262,52 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   each made `bun run test:types` exit 1 in the fixture meant to catch it.
 - Compile cost of `src/` alone (`--checkers 1`, two identical runs): 27,933 types, 112,607 instantiations,
   about 0.1 s check time (design measurement for the error module: 25,994 and 106,218).
+
+### M2 Harness foundation, identities and oracle
+
+- `src/config/Credentials.ts`: the `Credentials` service. `layer` takes the live lock first, then reads `.env`
+  (resolved from the module, not the working directory) through `ConfigProvider.fromDotEnv`; tokens are only
+  `Config.Redacted`, IDs decode through the branded schemas. Tests use fake credentials and take no lock.
+- `harness/Lock.ts`: `/tmp/effect-discord-perms-live.lock`, created with `wx`; a dead pid on this host is taken
+  over by renaming a temporary file over it and reading it back; another host's or an unreadable lock is never
+  taken; released by its owner only.
+- `harness/Pacing.ts`: one spacing bucket (5 per second, at most), the request and per-route write counters, and
+  the 1,500 invalid-response abort.
+- `harness/Identities.ts`: `SharedHttpClient` (guard, then pacing, then status counting) outside every
+  `Layer.fresh`; `HarnessRest`, `TargetRest` and `SubjectRaw` as fresh REST stacks; `compose(base, credentials,
+  pacing)` is the one wiring and `live` passes Bun's client and the real credentials.
+  `test/unit/identities.test.ts` builds `compose` with a recording client and fake tokens and sees
+  `Bot fake-harness-token`, `Bot fake-target-token`, `Bot fake-subject-token`, three distinct clients and one
+  shared counter (3 requests). Mutations (each reverted): removing `Layer.fresh` failed it (one shared
+  instance), and building pacing inside a fresh layer failed it (`expected +0 to be 3`).
+- `harness/Lab.ts`: the guard (see "Design deviations"), `LabRequestFailed`, `LabCheckFailed`, `labStep`.
+  `test/unit/lab-guard.test.ts` covers every refusal class, including kick, ban, member edits of a human, DMs,
+  leaving the guild, global commands, protected channels and foreign roles.
+- `src/bot/Startup.ts` (`StartupFailed`, `restChecks`), `src/bot/Internals.ts` (`SubjectRaw`), `src/rest/ErrorMap.ts`
+  (`classify`, `flattenFieldErrors`), `harness/IdentityCheck.ts`. `test/unit/startup.test.ts` drives the real
+  dfx client over a scripted fake: success, 401, missing intent flags, 404 member, 502, transport, the 30 s
+  deadline under `TestClock` (a `NoResponse` with reason `deadline`), and an unexpected answer as a defect; and
+  `classify` on a 50035 body (`e.data.code`, field paths, numeric inner codes as strings), 5xx, a Cloudflare HTML
+  403, transport, and a malformed body (defect).
+- `src/rest/Oracle.ts` (`memberPermissions`): `Permissions`, `Unavailable` (404 code 0, 405) or `OracleFailed`;
+  `test/unit/oracle.test.ts` also covers the lab-state file and the credentials recipe.
+- `harness/LabIds.ts` (spec and `.lab-state.json`), `harness/Wire.ts`, `harness/Reset.ts`, `harness/Provision.ts`,
+  `harness/Smoke.ts`, `harness/main.ts` (`reset`, `smoke`, `inventory`; `run` prints "not built yet (M3)" and
+  exits 1). Pure decisions are in `test/unit/reset-plan.test.ts` (channel and thread patches, member roles,
+  delete plans with the undeletable types and the 14-day split, leftovers, role order with ties, the sticker
+  PNG, write deltas).
+- Live record for `LOG.md`'s M2 items: the oracle is **available**; `mfaLevel` is **0**; both managed roles'
+  positions: **neither bot has a managed role** (`Perms Harness` 11, then `lab-high` 10 ... `lab-unmentionable`
+  1, `@everyone` 0); the harness **has** the Message Content flag.
+- The lab as provisioned: category `lab` with `lab-text`, `lab-announcement`, `lab-voice`, `lab-stage`,
+  `lab-forum` (tag `lab-tag`), `lab-bots-only`; threads `lab-public-thread`, `lab-private-thread`,
+  `lab-announcement-thread`, `lab-forum-post`; ten roles; sticker `lab-sticker`; `lab-media` unavailable.
+- Provisioning from scratch was run twice (once with the first lab, once after forgetting every stored ID to
+  check the final code): the second created 21 objects and made 31 writes, including the one role-position
+  PATCH and the closing reset. That run found a bug, fixed in the same milestone: the first attempt failed with
+  `404 10011 Unknown Role` because reset deleted a leftover role and then tried to remove it from the target;
+  reset now drops deleted leftovers from its view (`withoutLeftovers`, unit-tested).
+- Exit evidence (final code): `bun run harness:smoke` exited 0 twice in a row (each `reset: writes 0`,
+  `provision: created 0; writes 0`, 75 requests, 0 invalid), then `bun run harness:reset` reported `writes: 0`
+  twice; `bun run verify:offline` is green.
+

@@ -3,3 +3,5 @@ node_modules/
 .reference/
 *.tsbuildinfo
 .scratch/
+.lab-state.json
+.lab-state.json.tmp
