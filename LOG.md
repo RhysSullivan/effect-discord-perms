@@ -47,6 +47,27 @@ the same commit.
 - **M0: the native compiler is resolved per platform** (`@typescript/typescript-<platform>-<arch>`, as
   `typescript/lib/getExePath.js` does) instead of the hard-coded `typescript-linux-x64` path in §5.3, so the
   offline checks also run on the MacBook. On minisforum it is the same binary.
+- **M1: the ID-mixing fail fixture moves to M6, with `R-ids-distinct`.** §6 M1 listed "fail fixtures for ID
+  mixing", but the rule that must claim the directive, `R-ids-distinct`, has a live pair (§5.5), and a `pair`
+  rule fails rules-check closed until M6 adds the live-pair checks. Evidence, with a temporary
+  `test/types/fail/ids.ts` copied from `[sd:src/fail/ids.ts]` (removed after): its diagnostic passes the gate
+  (`Argument of type 'string & Brand<"UserId">' is not assignable to parameter of type 'string &
+  Brand<"ChannelId">'.`, 4 lines, 386 gated characters), but `bun run rules` exits 1 with
+  `directive mention "ChannelId" is not claimed by any rule`, and with the rule registered as its §5.5 pair it
+  exits 1 with `has a live pair, which this rules-check cannot verify yet`. Either way `verify:offline` would be
+  red for M1-M5. Weakening the fail-closed staging, or listing the rule as pure-typing, would loosen a gate, so
+  the fixture moves to M6, whose scope already has "type fixtures ... for §2.1" and "the registry entries". M1
+  keeps the type-level proof as a pass fixture: `test/types/pass/ids.ts` asserts that no brand is assignable to
+  any other (all 90 ordered pairs), that a plain `string` is none of them, and that `make` returns the brand.
+- **M1: the transient classes type their cause as one member of `ErrorCause`.** `RequestTimedOut` and
+  `NetworkError` take `NoResponse`, `DiscordUnavailable` and `RateLimited` take `DiscordResponse`, as §2.2 and
+  §3.1 describe them, instead of the prototype's `ErrorCause`. Nothing else can produce them, so a transient
+  error with a preflight cause is no longer representable.
+- **M1: `ErrorCategories` covers the classes `errorFor` can build** (the 52 generated classes and the 2 D5
+  variants, keyed by class name). §2.2 said "every class"; the generator knows only the permission flags and
+  the variants, and duplicating the hand-written classes' categories in it would add a second source.
+  `test/types/pass/error-categories.ts` checks each entry against `Categories<>` of its class, and
+  `test/unit/d6-invariant.test.ts` reads every other class's marker. §2.2 is clarified.
 
 ## Escalated rules
 

@@ -1,0 +1,11 @@
+L12:62 TS2345
+Argument of type '"payload"' is not assignable to parameter of type '"access" | "permission" | "state" | readonly ["access" | "permission" | "state", ...("access" | "permission" | "state")[]]'.
+
+L15:65 TS2345
+Argument of type '["state", "transient"]' is not assignable to parameter of type '"access" | "permission" | "state" | readonly ["access" | "permission" | "state", ...("access" | "permission" | "state")[]]'.
+  Type '["state", "transient"]' is not assignable to type 'readonly ["access" | "permission" | "state", ...("access" | "permission" | "state")[]]'.
+    Type at position 1 in source is not compatible with type at position 1 in target.
+      Type '"transient"' is not assignable to type '"access" | "permission" | "state"'.
+
+L18:61 TS2345
+Argument of type '"payload"' is not assignable to parameter of type '"access" | "permission" | "state" | readonly ["access" | "permission" | "state", ...("access" | "permission" | "state")[]]'.

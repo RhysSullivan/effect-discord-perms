@@ -1,0 +1,157 @@
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, Exit, Schema } from "effect"
+import {
+  catchCategory,
+  CategoryTypeId,
+  DiscordResponse,
+  hasCategory,
+  MissingEmbedLinks,
+  MissingReadMessageHistory,
+  MissingReadMessageHistoryForReaction,
+  MissingReadMessageHistoryForReply,
+  NoResponse,
+  PreflightDecision,
+  RequestTimedOut,
+  ThreadLocked,
+  withCategory
+} from "../../src/errors/index.ts"
+import { categoriesOf, markerOf, markerOwner } from "../support/categories.ts"
+
+/**
+ * The category marker at run time (DESIGN §2.2, M1): it lives on the prototype, is frozen, is never encoded, and
+ * is inherited without mutating the base class's marker.
+ */
+
+const route = "POST /channels/{channel_id}/messages"
+const response = new DiscordResponse({
+  status: 403,
+  code: 50013,
+  message: "Missing Permissions",
+  method: "POST",
+  route,
+  fieldErrors: [],
+  attributedBy: "recompute"
+})
+const preflight = new PreflightDecision({ route, basis: "gateway-state" })
+
+describe("the category marker", () => {
+  it("is on the prototype, not an own property of the instance", () => {
+    const error = new MissingEmbedLinks({ cause: preflight })
+    expect(Object.hasOwn(error, CategoryTypeId)).toBe(false)
+    expect(Object.getOwnPropertySymbols(error)).not.toContain(CategoryTypeId)
+    expect(CategoryTypeId in error).toBe(true)
+    expect(categoriesOf(error)).toEqual(["payload", "permission"])
+    const owner = markerOwner(error)
+    expect(owner).not.toBeNull()
+    if (owner !== null) {
+      const descriptor = Object.getOwnPropertyDescriptor(owner, CategoryTypeId)
+      expect(descriptor?.enumerable).toBe(false)
+      expect(descriptor?.writable).toBe(false)
+      expect(descriptor?.configurable).toBe(false)
+    }
+  })
+
+  it("is frozen and fixed, so no category can be added, removed or replaced at run time", () => {
+    const error = new ThreadLocked({ cause: preflight })
+    const marker = markerOf(error)
+    expect(Object.isFrozen(marker)).toBe(true)
+    if (marker !== undefined) {
+      expect(Reflect.set(marker, "transient", true)).toBe(false)
+      expect(Reflect.deleteProperty(marker, "state")).toBe(false)
+    }
+    const owner = markerOwner(error)
+    expect(owner).not.toBeNull()
+    if (owner !== null) {
+      expect(Reflect.defineProperty(owner, CategoryTypeId, { value: {} })).toBe(false)
+      expect(Reflect.deleteProperty(owner, CategoryTypeId)).toBe(false)
+    }
+    expect(categoriesOf(new ThreadLocked({ cause: preflight }))).toEqual(["state"])
+  })
+
+  it("is not encoded and not serialised", () => {
+    const error = new MissingEmbedLinks({ cause: preflight })
+    const encoded = Schema.encodeSync(MissingEmbedLinks)(error)
+    expect(encoded).toEqual({ _tag: "MissingEmbedLinks", cause: { _tag: "PreflightDecision", route, basis: "gateway-state" } })
+    expect(JSON.stringify(encoded)).not.toContain("permission")
+    const decoded = Schema.decodeUnknownSync(MissingEmbedLinks)(JSON.parse(JSON.stringify(encoded)))
+    expect(decoded).toBeInstanceOf(MissingEmbedLinks)
+    expect(categoriesOf(decoded)).toEqual(["payload", "permission"])
+  })
+
+  it("is inherited by the D5 variants, which add a category without changing the base class", () => {
+    const base = new MissingReadMessageHistory({ cause: preflight })
+    const reply = new MissingReadMessageHistoryForReply({ cause: preflight })
+    const reaction = new MissingReadMessageHistoryForReaction({ cause: preflight })
+    expect(categoriesOf(base)).toEqual(["permission"])
+    expect(categoriesOf(reply)).toEqual(["payload", "permission"])
+    expect(categoriesOf(reaction)).toEqual(["access", "permission"])
+    expect([base._tag, reply._tag, reaction._tag]).toEqual(["MissingReadMessageHistory", "MissingReadMessageHistory", "MissingReadMessageHistory"])
+    expect(reply).toBeInstanceOf(MissingReadMessageHistory)
+    expect(reaction).toBeInstanceOf(MissingReadMessageHistory)
+    expect(reply).not.toBeInstanceOf(MissingReadMessageHistoryForReaction)
+    expect([reply.flag, reaction.flag]).toEqual(["ReadMessageHistory", "ReadMessageHistory"])
+    // Each class owns a distinct frozen object; the base's marker was copied, not mutated.
+    expect(markerOf(reply)).not.toBe(markerOf(base))
+  })
+
+  it("gives a fresh class per application, so piping the same base twice never shares a marker", () => {
+    class Base extends Schema.TaggedError<Base>()("Base", {}).pipe(withCategory("state")) {}
+    class A extends Base.pipe(withCategory("payload")) {}
+    class B extends Base.pipe(withCategory("access")) {}
+    expect(categoriesOf(new A())).toEqual(["payload", "state"])
+    expect(categoriesOf(new B())).toEqual(["access", "state"])
+    expect(categoriesOf(new Base())).toEqual(["state"])
+  })
+})
+
+describe("generated permission errors", () => {
+  it("carry their tag, flag, message and either kind of cause", () => {
+    const fromDiscord = new MissingEmbedLinks({ cause: response })
+    const fromPreflight = new MissingEmbedLinks({ cause: preflight })
+    expect(fromDiscord._tag).toBe("MissingEmbedLinks")
+    expect(fromDiscord.flag).toBe("EmbedLinks")
+    expect(fromDiscord.message).toBe(`Missing permission EmbedLinks (${route})`)
+    expect([fromDiscord.cause._tag, fromPreflight.cause._tag]).toEqual(["DiscordResponse", "PreflightDecision"])
+    expect(fromDiscord).toBeInstanceOf(Error)
+  })
+
+  it("transient errors carry a NoResponse when Discord never answered", () => {
+    const timedOut = new RequestTimedOut({ cause: new NoResponse({ route, method: "POST", reason: "deadline", afterMs: 30_000 }) })
+    expect(timedOut.cause._tag).toBe("NoResponse")
+    expect(categoriesOf(timedOut)).toEqual(["transient"])
+  })
+})
+
+describe("hasCategory and catchCategory at run time", () => {
+  it("hasCategory is any-of and false for uncategorised values", () => {
+    const reply = new MissingReadMessageHistoryForReply({ cause: preflight })
+    expect(hasCategory("payload")(reply)).toBe(true)
+    expect(hasCategory(["access", "state"])(reply)).toBe(false)
+    expect(hasCategory(["access", "permission"])(reply)).toBe(true)
+    expect(hasCategory("payload")(new Error("plain"))).toBe(false)
+    expect(hasCategory("payload")("MissingEmbedLinks")).toBe(false)
+  })
+
+  it.effect("catchCategory catches by category and lets the others through, data-last and data-first", () =>
+    Effect.gen(function* () {
+      const reply = new MissingReadMessageHistoryForReply({ cause: preflight })
+      const reaction = new MissingReadMessageHistoryForReaction({ cause: preflight })
+      const locked = new ThreadLocked({ cause: preflight })
+      /** Fails with `error`, typed with all three classes so every category below is present in the type. */
+      const failWith = (
+        error: MissingReadMessageHistoryForReply | MissingReadMessageHistoryForReaction | ThreadLocked
+      ): Effect.Effect<string, MissingReadMessageHistoryForReply | MissingReadMessageHistoryForReaction | ThreadLocked> => Effect.fail(error)
+
+      const caughtReply = yield* failWith(reply).pipe(catchCategory("payload", (error) => Effect.succeed(error.flag)), Effect.exit)
+      expect(caughtReply).toEqual(Exit.succeed("ReadMessageHistory"))
+      const passedReaction = yield* failWith(reaction).pipe(catchCategory("payload", () => Effect.succeed("caught")), Effect.exit)
+      expect(passedReaction).toEqual(Exit.fail(reaction))
+      const dataFirst = yield* catchCategory(failWith(reaction), ["payload", "access"], (error) => Effect.succeed(error._tag)).pipe(Effect.exit)
+      expect(dataFirst).toEqual(Exit.succeed("MissingReadMessageHistory"))
+      const stateCaught = yield* failWith(locked).pipe(catchCategory("state", (error) => Effect.succeed(error._tag)), Effect.exit)
+      expect(stateCaught).toEqual(Exit.succeed("ThreadLocked"))
+      const lockedPassed = yield* failWith(locked).pipe(catchCategory(["access", "payload"], () => Effect.succeed("caught")), Effect.exit)
+      expect(lockedPassed).toEqual(Exit.fail(locked))
+    })
+  )
+})

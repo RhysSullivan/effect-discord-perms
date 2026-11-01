@@ -50,5 +50,14 @@ export const rules: ReadonlyArray<Rule> = [
     fail: "test/types/fail/catch-tag-exact.ts",
     claims: ["Beta"],
     live: { kind: "not-live", reason: "pure-typing" }
+  },
+  {
+    id: "R-catch-category-exact",
+    statement:
+      "catchCategory removes exactly the members of the categories it names; catching a category the effect cannot fail with does not compile",
+    pass: "test/types/pass/catch-category-exact.ts",
+    fail: "test/types/fail/catch-category-exact.ts",
+    claims: ["payload", "transient"],
+    live: { kind: "not-live", reason: "pure-typing" }
   }
 ]

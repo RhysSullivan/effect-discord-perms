@@ -111,7 +111,8 @@ src/
                                  CategoryMarker, ExtractCategory, ExcludeCategory (from [cc:src/category.ts])
     Cause.ts *                   DiscordResponse, PreflightDecision, NoResponse, FieldError, ErrorCause union
     Missing.generated.ts *       GENERATED: 52 Missing<Flag> classes, PermissionFlags, PermissionErrors, `missing`,
-                                 and ErrorCategories (runtime tag -> categories mirror, incl. the D5 variants)
+                                 MissingClasses, and ErrorCategories (class name -> sorted categories mirror, incl. the
+                                 D5 variants)
     Variants.ts *                same-tag subclasses: MissingReadMessageHistoryForReply / ...ForReaction (D5)
     Permission.ts *              PermissionDeniedUnattributed, PermissionRevokedSinceCheck
     State.ts *                   CommunicationDisabled, ThreadLocked, ThreadArchived, SlowmodeActive,
@@ -122,7 +123,8 @@ src/
                                  NicknameTooLong, TimeoutTooLong, PollTooLarge, MessagesTooOld, TooManyMessagesToDelete,
                                  CustomIdTooLong
     Transient.ts *               DiscordUnavailable, NetworkError, RequestTimedOut, RateLimited (all carry `cause`)
-    index.ts                     re-exports; `AllErrors` union used by the D6 invariant test
+    index.ts                     re-exports; `ErrorClasses` (every class by name, from each module's `*Classes`
+                                 record), `PermissionErrorClasses`, and the `AllErrors` union used by the D6 test
   permissions/
     Flags.ts                     PermissionSet (bigint wrapper): fromBits, has, toSortedNames; the 2FA-starred set
     Resolver.ts                  pure resolver: base -> overwrites -> masks (obfuscated, private-thread, implicit, timeout)
@@ -219,6 +221,7 @@ harness/
 test/
   rules.ts *                     the rule registry (G10): rule -> pass fixture, fail fixture, live pair or allowed reason
   unit/**.test.ts                vitest + @effect/vitest unit tests (incl. op-errors.test.ts, §4.7)
+  support/                       helpers shared by unit tests (reading category markers)
   replay/truth-table.test.ts     offline replay of fixtures/truth-table.json (§5.13)
   types/tsconfig.json            extends root, include src + pass + fail, exclude []
   types/pass/*.ts                expectTypeOf / Equals assertions; must compile (incl. op-errors.ts, one per operation)
@@ -233,7 +236,8 @@ scripts/
   rules-check.ts                 registry completeness (§5.5)
   verify-offline.ts              runs the offline steps in order (§5.1)
   lib/                           the scripts' modules: tsc (pinned binary), typeTests (the §5.2 gate),
-                                 hover + lsp (§5.3), budget (§5.4), rules (§5.5); unit-tested in test/unit
+                                 hover + lsp (§5.3), budget (§5.4), rules (§5.5), genErrors (§2.2); unit-tested in
+                                 test/unit
 examples/
   reference-bot/main.ts          the reference bot: no orDie or die on library errors (D-done criteria)
   reference-bot/tsconfig.json    budget project
@@ -297,6 +301,8 @@ export const ErrorCause = Schema.Union([DiscordResponse, PreflightDecision, NoRe
 The transient tags carry a cause too: `DiscordUnavailable` keeps the 5xx or
 non-JSON response, `RateLimited` the coded-429 body, and `RequestTimedOut` and
 `NetworkError` a `NoResponse` (`[sd:errors-runtime.txt]`, `transientCause`).
+Their `cause` fields are typed as exactly that member of `ErrorCause`
+(`DiscordResponse` or `NoResponse`), since nothing else can produce them (M1).
 
 **Generated permission errors.** `scripts/gen-errors.ts` reads the flag names
 from discord-api-types `PermissionFlagsBits`, drops the deprecated alias
@@ -321,8 +327,11 @@ The category table lives in the generator:
 - Every flag is `permission`.
 
 The generator also writes `ErrorCategories`, a runtime record from every
-class (including the D5 variants) to its sorted categories. Tests use it to
-compare what the runtime builds with what the types promise (§4.7).
+generated class and every D5 variant (the classes `errorFor` can build), keyed
+by class name, to its sorted categories. Tests use it to compare what the
+runtime builds with what the types promise (§4.7), and a pass fixture checks
+that each entry equals `Categories<>` of its class. The other classes'
+categories are read from their markers by the D6 test over `AllErrors`.
 
 **Library code never calls `missing[flag]` directly.** It builds permission
 errors through `errorFor(op, flag, cause)` from the operation table (§4.7),
@@ -2398,8 +2407,13 @@ Live milestones run serially, under the lock.
     against `ErrorCategories`;
   - D6 invariant;
   - generator `--check`;
-  - pass fixtures for catchTag/catchCategory exactness and for `OpErrors` rows;
-  - fail fixtures for ID mixing and for catching an absent category.
+  - pass fixtures for catchTag/catchCategory exactness, for `OpErrors` rows and
+    for ID distinctness (no brand assignable to another);
+  - a fail fixture for catching an absent category. The ID-mixing fail
+    fixture moves to M6 with its rule: `R-ids-distinct` has a live pair, every
+    fail directive must be claimed by a registry rule, and a `pair` rule fails
+    rules-check closed until M6 adds the live-pair checks (§5.5), so in M1 it
+    would make `verify:offline` red for M1-M5.
 - Exit: `bun run gen:errors -- --check && bun run verify:offline`.
 
 **M2 Harness foundation, identities and oracle** (live)
@@ -2490,7 +2504,9 @@ Live milestones run serially, under the lock.
   - rules-check's live-pair checks (catalog scenario IDs, truth-table rows and
     observations, identical setups) and its flag-coverage check (§5.5);
   - type fixtures and hover markers for §2.1-§2.6, `op-errors.ts`, and the
-    registry entries.
+    registry entries, including the ID-mixing fail fixture
+    (`test/types/fail/ids.ts`, from `[sd:src/fail/ids.ts]`) with
+    `R-ids-distinct`, moved here from M1.
 - Exit:
   - `bun run verify:live` exits 0 with zero `preflight-wiring` and
     `recompute-vs-preflight` rows, then a fresh `--compare` run exits 0;
