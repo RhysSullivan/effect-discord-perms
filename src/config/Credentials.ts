@@ -1,7 +1,8 @@
 /**
  * Perms Lab credentials (DESIGN §4.3, §5.6; G3, D14).
  *
- * The only way any code in this repository reads a Perms Lab token. `layer`:
+ * The only way any code in this repository reads a Perms Lab token. `layer` (the repository's `.env` and the
+ * host's live lock) and `layerFrom` (the same, with the paths given, for tests):
  *
  * 1. takes the single-driver live lock (`harness/Lock.ts`) for the lifetime of the layer, so no two processes
  *    drive Perms Lab at once, whatever the entry point (harness, examples, dev runs);
@@ -52,34 +53,48 @@ const identity = (name: "HARNESS" | "SUBJECT" | "TARGET"): Config.Config<Identit
     applicationId: Config.schema(ApplicationId, `DISCORD_${name}_APP_ID`)
   })
 
-/** The configuration recipe for the lab's credentials, independent of where the values come from. */
-export const config: Config.Config<LabCredentials> = Config.all({
+const config: Config.Config<LabCredentials> = Config.all({
   guildId: Config.schema(GuildId, "DISCORD_TEST_GUILD_ID"),
   harness: identity("HARNESS"),
   subject: identity("SUBJECT"),
   target: identity("TARGET")
 })
 
-/** The repository's `.env`, resolved from this module so the working directory does not matter. */
-export const dotEnvPath = new URL("../../.env", import.meta.url).pathname
+/** Where the credentials and the live lock are. */
+export interface Sources {
+  /** The `.env` file holding the tokens and IDs. */
+  readonly dotEnvPath: string
+  /** The live lock taken before `.env` is read. */
+  readonly lockPath: string
+}
 
 /**
- * Takes the live lock, then reads the credentials from the repository's `.env`. The lock is released when the
- * layer's scope closes.
+ * Takes the live lock at `sources.lockPath`, then reads the credentials from `sources.dotEnvPath`. The lock is
+ * released when the layer's scope closes. Nothing is read from `.env` unless the lock was taken.
  *
  * Fails with `LockHeld` if another live process holds the lock, `Config.ConfigError` if a value is missing or
  * malformed, and `PlatformError` if `.env` or the lock file cannot be read or written.
  */
-export const layer: Layer.Layer<Credentials, Lock.LockHeld | Config.ConfigError | PlatformError> = Layer.effect(
-  Credentials,
-  Effect.gen(function* () {
-    yield* Lock.acquire({
-      path: Lock.livePath,
-      owner: { hostname: hostname(), pid: process.pid, command: process.argv.slice(1).join(" ") },
-      isAlive: Lock.isAlive
+export const layerFrom = (sources: Sources): Layer.Layer<Credentials, Lock.LockHeld | Config.ConfigError | PlatformError> =>
+  Layer.effect(
+    Credentials,
+    Effect.gen(function* () {
+      yield* Lock.acquire({
+        path: sources.lockPath,
+        owner: { hostname: hostname(), pid: process.pid, command: process.argv.slice(1).join(" ") },
+        isAlive: Lock.isAlive
+      })
+      const provider = yield* ConfigProvider.fromDotEnv({ path: sources.dotEnvPath })
+      const values = yield* config.pipe(Effect.provide(ConfigProvider.layer(provider)))
+      return Credentials.of(values)
     })
-    const provider = yield* ConfigProvider.fromDotEnv({ path: dotEnvPath })
-    const values = yield* config.pipe(Effect.provide(ConfigProvider.layer(provider)))
-    return Credentials.of(values)
-  })
-).pipe(Layer.provide(BunFileSystem.layer))
+  ).pipe(Layer.provide(BunFileSystem.layer))
+
+/**
+ * The Perms Lab credentials: the repository's `.env` (resolved from this module, so the working directory does
+ * not matter) behind the host's live lock (`/tmp/effect-discord-perms-live.lock`). See {@link layerFrom}.
+ */
+export const layer: Layer.Layer<Credentials, Lock.LockHeld | Config.ConfigError | PlatformError> = layerFrom({
+  dotEnvPath: new URL("../../.env", import.meta.url).pathname,
+  lockPath: Lock.livePath
+})

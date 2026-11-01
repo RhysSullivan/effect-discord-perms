@@ -19,10 +19,10 @@
  *    archived) under lab channels; delete scenario threads; unarchive and unlock the provisioned threads,
  *    restore their names and auto-archive (10080 minutes); the subject is a member of none of them and the
  *    target of all of them (so it can post fixtures in the private thread).
- * 7. Pins and messages: unpin messages not written by the three bots, and delete every message the harness,
- *    the subject or the target wrote in a lab channel (bulk delete below 14 days, single deletes above), so
- *    untracked messages from a timed-out request go too. A forum post's starter message is kept, and system
- *    messages Discord does not allow deleting (a thread's "added to the thread" notices) are left.
+ * 7. Pins and messages: delete every message the harness, the subject or the target wrote in a lab channel
+ *    (bulk delete below 14 days, single deletes above), so untracked messages from a timed-out request go too.
+ *    A forum post's starter message is kept, and system messages Discord does not allow deleting (a thread's
+ *    "added to the thread" notices) are left. Every pinned message that is not deleted is unpinned first.
  * 8. The subject's guild commands to an empty list.
  * 9. AutoMod rules named `lab-*` deleted.
  *
@@ -35,7 +35,7 @@ import { SubjectRaw } from "../src/bot/Internals.ts"
 import type { ApplicationId, ChannelId, GuildId, MessageId, RoleId, UserId } from "../src/Snowflake.ts"
 import { HarnessRest } from "./Identities.ts"
 import type { IdentityReport } from "./IdentityCheck.ts"
-import { isLabChannelName, isLabRoleName, LabCheckFailed, LabGuard, type LabRequestFailed, labStep } from "./Lab.ts"
+import { isLabChannelName, isLabRoleName, isLabRuleName, LabCheckFailed, LabGuard, type LabRequestFailed, labStep } from "./Lab.ts"
 import * as LabIds from "./LabIds.ts"
 import { Pacing } from "./Pacing.ts"
 import * as Wire from "./Wire.ts"
@@ -182,6 +182,15 @@ export const planDeletes = (messages: ReadonlyArray<Wire.Message>, authors: Read
   const bulk = chunks.filter((chunk) => chunk.length >= 2)
   const leftover = chunks.filter((chunk) => chunk.length < 2).flat()
   return { bulk, single: [...leftover, ...old] }
+}
+
+/**
+ * The pins to remove before deleting: every pinned message the plan does not delete (a human's message, a
+ * forum post's starter, an undeletable system message). Deleting a message removes its pin with it.
+ */
+export const planUnpins = (pinned: ReadonlyArray<MessageId>, plan: DeletePlan): ReadonlyArray<MessageId> => {
+  const deleted = new Set<string>([...plan.bulk.flat(), ...plan.single])
+  return pinned.filter((id) => !deleted.has(id))
 }
 
 // ---- reading the lab ----------------------------------------------------------------------------------
@@ -472,9 +481,6 @@ const cleanMessages = (context: Context, view: View) =>
             return { items: page.items, next: page.has_more && last !== undefined ? Option.some(last) : Option.none<string>() }
           })
         )
-      for (const pin of yield* pages(pinPage(undefined), pinPage)) {
-        if (!bots.has(pin.message.author.id)) yield* rest.deletePin(channel.id, pin.message.id).pipe(labStep(`reset: unpin a message in ${channel.name}`))
-      }
       const messagePage = (before: string | undefined) =>
         rest.listMessages(channel.id, { limit: 100, ...(before === undefined ? {} : { before }) }).pipe(
           labStep(`reset: list messages in ${channel.name}`),
@@ -486,6 +492,8 @@ const cleanMessages = (context: Context, view: View) =>
         )
       const messages = yield* pages(messagePage(undefined), messagePage)
       const plan = planDeletes(messages, bots, new Set([channel.id]), yield* Clock.currentTimeMillis)
+      const pins = yield* pages(pinPage(undefined), pinPage)
+      for (const id of planUnpins(pins.map((pin) => pin.message.id), plan)) yield* rest.deletePin(channel.id, id).pipe(labStep(`reset: unpin a message in ${channel.name}`))
       for (const chunk of plan.bulk) yield* rest.bulkDeleteMessages(channel.id, { messages: chunk }).pipe(labStep(`reset: bulk delete ${chunk.length} messages in ${channel.name}`))
       for (const id of plan.single) yield* rest.deleteMessage(channel.id, id).pipe(labStep(`reset: delete a message in ${channel.name}`))
     }
@@ -502,7 +510,9 @@ const cleanCommandsAndAutoMod = (context: Context) =>
     }
     const rest = yield* HarnessRest
     const rules = yield* rest.listAutoModerationRules(context.guildId).pipe(labStep("reset: list AutoMod rules"), Effect.flatMap(decodeArray(Wire.AutoModRule, "listAutoModerationRules")))
-    for (const rule of rules.filter((candidate) => candidate.name.startsWith("lab-"))) {
+    const guard = yield* LabGuard
+    for (const rule of rules.filter((candidate) => isLabRuleName(candidate.name))) {
+      yield* guard.admitAutoModRule(rule)
       yield* rest.deleteAutoModerationRule(context.guildId, rule.id).pipe(labStep(`reset: delete AutoMod rule ${rule.name}`))
     }
   })

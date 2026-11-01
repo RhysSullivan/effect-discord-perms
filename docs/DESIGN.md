@@ -1302,11 +1302,15 @@ when they are built, so their methods have `R = never`.
 - `config/Credentials.ts` provides
   `ConfigProvider.layer(ConfigProvider.fromDotEnv({ path: ".env" }))` over
   `BunFileSystem.layer`, and takes the live lock (§5.6) whenever a Perms Lab
-  token is read, for any identity and any entry point.
+  token is read, for any identity and any entry point. It exports only the
+  layers (`layer`, and `layerFrom` with the `.env` and lock paths for tests);
+  the config recipe and the `.env` path stay private, so nothing reads the
+  tokens without taking the lock first (M2).
 - Tokens are read only as `Config.Redacted("DISCORD_<ID>_TOKEN")`. They are
   never logged, printed, put in spans or errors, or written to the truth table.
 - `vitest.config.ts` sets `envDir: "test/env"`, an empty directory, so vitest
-  never reads `.env`.
+  never reads `.env`, and refuses to run under the Bun runtime, whose
+  workers would load `.env` themselves (unit tests run under Node, M2).
 - `DISCORD_TEST_GUILD_ID` is a `Config.String` decoded to `GuildId`, and
   `DISCORD_<ID>_APP_ID` decode to `ApplicationId`.
 
@@ -1992,7 +1996,16 @@ The registry (`test/rules.ts`). IDs use the `R-` prefix; "raw" means through
     after the harness read or created it and checked its `lab`/`lab-*` name)
     and is never `#rules` or `#mod-updates`; the harness's own top role may
     appear only in a role-position PATCH (§5.7);
-  - member edits target only the subject or the target bot;
+  - a new channel or role has a `lab`/`lab-*` name, and a new channel's
+    parent is a lab channel; the guild's channel-list PATCH (positions and
+    parents of any channel) is refused;
+  - member edits target only the subject or the target bot, and change only
+    `nick` and `communication_disabled_until` (roles change through the
+    per-role routes, with lab roles only; `channel_id`, `mute`, `deaf` and
+    `flags` are never sent);
+  - thread membership changes only for `@me`, the subject and the target
+    (adding a human posts a notice that can ping them);
+  - AutoMod writes only delete `lab-*` rules the harness listed;
   - **kick and ban** run only when the docs model predicts failure from
     **harness-side reads taken just before the call**: the subject lacks the
     flag (harness's own computation from the role and overwrite reads), or the
@@ -2050,7 +2063,8 @@ writes, and that is M2's exit check.
    subject's membership of every provisioned thread to its baseline (not a
    member), and the target's (a member of all four, so it can post fixtures in
    `lab-private-thread`).
-6. Remove pins, and bulk-delete messages younger than 14 days in lab channels,
+6. Remove pins (every pinned message this step does not delete is unpinned),
+   and bulk-delete messages younger than 14 days in lab channels,
    listed by author (harness, subject, target), so untracked messages from a
    timed-out request are removed too; older ones are deleted singly. A forum
    post's starter message is kept, and system messages Discord never lets
@@ -2066,10 +2080,11 @@ Reset never touches `#rules`, `#mod-updates`, or anything not in the lab set.
 - Category: `lab`.
 - Channels: `lab-text`, `lab-announcement`, `lab-voice`, `lab-stage`,
   `lab-forum`, `lab-media`, and `lab-bots-only` (for content-intent tests).
-  A channel Discord refuses to create because its kind is not available in the
-  guild (400 50024) is recorded in `.lab-state.json` as `unavailable` and not
-  retried; its scenarios record `setup-unsupported: kind-not-available`
-  (§5.10). In Perms Lab that is `lab-media` (M2).
+  A channel of a kind the guild may not offer (GuildMedia only) that Discord
+  refuses to create (400 50024) is recorded in `.lab-state.json` as
+  `unavailable` and not retried; its scenarios record `setup-unsupported:
+  kind-not-available` (§5.10). In Perms Lab that is `lab-media` (M2). The
+  same answer for any other kind fails provisioning.
 - Threads: `lab-public-thread` and `lab-private-thread` under `lab-text`,
   `lab-announcement-thread`, and `lab-forum-post`, all with auto-archive 10080.
 - Roles, top to bottom: harness-managed, `lab-high`, `lab-mid`, `lab-low`,
@@ -2485,7 +2500,10 @@ Live milestones run serially, under the lock.
   - `rest/Oracle.ts`;
   - `harness/main.ts` with `reset` and `smoke`;
   - `smoke` runs the identity checks, reset, provision and one oracle read per
-    lab channel, and prints counts.
+    lab channel, plus a positive control (the target in `lab-text`, which must
+    read exactly `lab-target`'s allow), and prints counts. An unavailable
+    oracle is recorded; an available one fails smoke if the control differs,
+    the subject holds any flag at baseline, or only some reads answer.
 - `LOG.md`:
   - the oracle's availability;
   - `mfaLevel`;

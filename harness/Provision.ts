@@ -133,6 +133,14 @@ export const orderHolds = (roles: ReadonlyArray<Wire.Role>, guildId: string, des
 /** "Cannot execute action on this channel type": the guild cannot have a channel of this kind (GuildMedia, M2). */
 export const kindNotAvailableCode = 50024
 
+/**
+ * Whether a failed channel create means "this guild does not offer the kind", which provisioning records as
+ * unavailable instead of failing. Only for the kinds a guild may lack (`LabIds.optionalChannelTypes`): a 50024
+ * on any other kind is a real failure.
+ */
+export const kindNotAvailable = (type: number, failure: { readonly status: number; readonly code: number }): boolean =>
+  LabIds.optionalChannelTypes.has(type) && failure.status === 400 && failure.code === kindNotAvailableCode
+
 interface Provisioning {
   readonly context: Reset.Context
   /** The persisted IDs so far; written to `.lab-state.json` after every creation. */
@@ -197,7 +205,7 @@ const ensureChannels = (run: Provisioning, view: Reset.View) =>
       const response = yield* Wire.raw(rest, step, "POST", `/guilds/${run.context.guildId}/channels`, { body })
       const refused = yield* Wire.ensureOk(step, response).pipe(
         Effect.as(Option.none<LabRequestFailed>()),
-        Effect.catchIf((error) => error.code === kindNotAvailableCode, (error) => Effect.succeedSome(error))
+        Effect.catchIf((error) => kindNotAvailable(spec.type, error), (error) => Effect.succeedSome(error))
       )
       if (Option.isSome(refused)) {
         const failure = refused.value

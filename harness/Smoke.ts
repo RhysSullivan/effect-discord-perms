@@ -1,5 +1,6 @@
 /**
- * The smoke command's reads (DESIGN §6 M2): one oracle read per lab channel and thread, and a read-only
+ * The smoke command's reads (DESIGN §6 M2): one oracle read per lab channel and thread plus a positive
+ * control, the judgment that fails smoke when an available oracle disagrees with the baseline, and a read-only
  * inventory of the lab guild for inspection by hand.
  */
 import { BunFileSystem } from "@effect/platform-bun"
@@ -20,10 +21,10 @@ export const flagNames = (bits: bigint): ReadonlyArray<string> =>
     .filter(([, bit]) => (bits & bit) !== 0n)
     .map(([name]) => name)
 
-/** One oracle read: the subject's flags in a lab channel, or `undefined` when the route is unavailable. */
+/** One oracle read: the subject's permissions in a lab channel, or `undefined` when the route is unavailable. */
 export interface OracleReadout {
   readonly channel: string
-  readonly flags: ReadonlyArray<string> | undefined
+  readonly permissions: bigint | undefined
 }
 
 /** The oracle's availability over a set of reads. */
@@ -35,39 +36,83 @@ export type Availability = "available" | "unavailable" | "mixed"
  * describe (H-240), it returns exactly that allow.
  */
 export interface Control {
-  readonly flags: ReadonlyArray<string> | undefined
-  readonly expected: ReadonlyArray<string>
+  readonly permissions: bigint | undefined
+  readonly expected: bigint
+}
+
+/** Smoke's oracle reads: one per lab channel and thread, and the control. */
+export interface OracleResult {
+  /** Over the subject's reads and the control together. */
+  readonly availability: Availability
+  readonly reads: ReadonlyArray<OracleReadout>
+  readonly control: Control
+}
+
+/** The availability of a set of reads: all answered, none answered, or some of each. */
+export const availabilityOf = (answers: ReadonlyArray<bigint | undefined>): Availability => {
+  const unavailable = answers.filter((answer) => answer === undefined).length
+  return unavailable === 0 ? "available" : unavailable === answers.length ? "unavailable" : "mixed"
+}
+
+/**
+ * What is wrong with smoke's oracle result, if anything (§5.10, H-240). An unavailable oracle is a recorded
+ * outcome, not a problem. An available one must answer every read, return exactly `lab-target`'s allow for
+ * the control, and give the subject no permission anywhere at baseline (an empty `@everyone` and no roles).
+ */
+export const oracleProblems = (result: OracleResult): ReadonlyArray<string> => {
+  switch (result.availability) {
+    case "unavailable":
+      return []
+    case "mixed":
+      return [
+        `the oracle answered some reads and not others: unavailable in ${[
+          ...result.reads.filter((read) => read.permissions === undefined).map((read) => read.channel),
+          ...(result.control.permissions === undefined ? ["the control"] : [])
+        ].join(", ")}`
+      ]
+    case "available": {
+      const control = result.control.permissions
+      return [
+        ...(control !== undefined && control !== result.control.expected
+          ? [`the control (the target in lab-text) is ${flagNames(control).join(", ") || "no flags"}, not lab-target's allow (${flagNames(result.control.expected).join(", ")})`]
+          : []),
+        ...result.reads.flatMap((read) =>
+          read.permissions !== undefined && read.permissions !== 0n ? [`the subject has ${flagNames(read.permissions).join(", ")} in ${read.channel} at baseline`] : []
+        )
+      ]
+    }
+  }
+}
+
+/** Fails with `LabCheckFailed` when {@link oracleProblems} finds anything. */
+export const checkOracle = (result: OracleResult): Effect.Effect<void, LabCheckFailed> => {
+  const problems = oracleProblems(result)
+  return problems.length === 0 ? Effect.void : Effect.fail(new LabCheckFailed({ check: "oracle", detail: problems.join("; ") }))
 }
 
 /**
  * Reads the subject's permissions in every provisioned lab channel and thread through the oracle
- * (`implicit=false`), as the harness. Reads only.
+ * (`implicit=false`), and the control, as the harness. Reads only; {@link checkOracle} judges the result.
  */
-export const oracleReads = (
-  context: Reset.Context
-): Effect.Effect<
-  { readonly availability: Availability; readonly reads: ReadonlyArray<OracleReadout>; readonly control: Control },
-  Oracle.OracleFailed | LabCheckFailed | PlatformError,
-  HarnessRest
-> =>
+export const oracleReads = (context: Reset.Context): Effect.Effect<OracleResult, Oracle.OracleFailed | LabCheckFailed | PlatformError, HarnessRest> =>
   Effect.gen(function* () {
     const rest = yield* HarnessRest
     const state = yield* LabIds.load(context.guildId).pipe(Effect.provide(BunFileSystem.layer))
     const names = [...LabIds.channelSpecs.filter((spec) => spec.type !== 4).map((spec) => spec.name), ...LabIds.threadSpecs.map((spec) => spec.name)]
+    const permissionsOf = (read: Oracle.OracleRead): bigint | undefined => (read._tag === "Permissions" ? read.permissions : undefined)
     const reads: Array<OracleReadout> = []
     for (const name of names) {
       const id = state.channels[name]
       if (id === undefined) continue
-      const read = yield* Oracle.memberPermissions(rest, id, context.subjectUserId, requestDeadline)
-      reads.push({ channel: name, flags: read._tag === "Permissions" ? flagNames(read.permissions) : undefined })
+      reads.push({ channel: name, permissions: permissionsOf(yield* Oracle.memberPermissions(rest, id, context.subjectUserId, requestDeadline)) })
     }
-    const unavailable = reads.filter((read) => read.flags === undefined).length
-    const availability: Availability = unavailable === 0 ? "available" : unavailable === reads.length ? "unavailable" : "mixed"
     const text = state.channels["lab-text"]
-    const expected = flagNames(LabIds.targetOverwriteAllow)
     if (text === undefined) return yield* new LabCheckFailed({ check: "oracle control", detail: "lab-text is not provisioned" })
-    const read = yield* Oracle.memberPermissions(rest, text, context.targetUserId, requestDeadline)
-    return { availability, reads, control: { flags: read._tag === "Permissions" ? flagNames(read.permissions) : undefined, expected } }
+    const control: Control = {
+      permissions: permissionsOf(yield* Oracle.memberPermissions(rest, text, context.targetUserId, requestDeadline)),
+      expected: LabIds.targetOverwriteAllow
+    }
+    return { availability: availabilityOf([...reads.map((read) => read.permissions), control.permissions]), reads, control }
   })
 
 const typeNames: Readonly<Record<number, string>> = { 0: "text", 2: "voice", 4: "category", 5: "announcement", 13: "stage", 15: "forum", 16: "media" }

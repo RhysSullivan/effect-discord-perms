@@ -1,26 +1,35 @@
 import { BunFileSystem } from "@effect/platform-bun"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Duration, Effect, Exit, Redacted } from "effect"
+import { Duration, Effect, Exit } from "effect"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { DiscordREST } from "dfx/DiscordREST"
+import { LabCheckFailed } from "../../harness/Lab.ts"
 import * as LabIds from "../../harness/LabIds.ts"
-import { config } from "../../src/config/Credentials.ts"
 import { DiscordResponse } from "../../src/errors/Cause.ts"
+import { availabilityOf, checkOracle, type OracleResult, oracleProblems } from "../../harness/Smoke.ts"
 import { memberPermissions, OracleFailed, route } from "../../src/rest/Oracle.ts"
 import { ChannelId, GuildId, UserId } from "../../src/Snowflake.ts"
 import { json, type Scripted, scriptedRest } from "../support/fakeDiscord.ts"
 
-/** The permission oracle (DESIGN §5.10 step 8), the lab-state file (§5.7) and the credentials recipe (§4.3). */
+/** The permission oracle (DESIGN §5.10 step 8) and the lab-state file (§5.7). */
 const channel = ChannelId.make("300000000000000001")
 const user = UserId.make("200000000000000001")
 
+/** Answers only the oracle route with `implicit=false` (H-240); anything else is a 500 the oracle reports. */
 const read = (answer: Scripted) =>
   Effect.gen(function* () {
     const rest = yield* DiscordREST
     return yield* memberPermissions(rest, channel, user, Duration.seconds(30))
-  }).pipe(Effect.provide(scriptedRest((_, requestPath) => (requestPath === `/channels/${channel}/permissions/member/${user}` ? answer : json(500, {})))), Effect.exit)
+  }).pipe(
+    Effect.provide(
+      scriptedRest((method, requestPath, query) =>
+        method === "GET" && requestPath === `/channels/${channel}/permissions/member/${user}` && query.getAll("implicit").join() === "false" ? answer : json(500, {})
+      )
+    ),
+    Effect.exit
+  )
 
 describe("the permission oracle", () => {
   it.effect("reads the stringified bitfield", () =>
@@ -70,31 +79,38 @@ describe("the lab state file", () => {
   )
 })
 
-describe("the credentials recipe", () => {
-  const values = {
-    DISCORD_TEST_GUILD_ID: "100000000000000000",
-    DISCORD_HARNESS_TOKEN: "fake-h",
-    DISCORD_HARNESS_APP_ID: "100000000000000001",
-    DISCORD_SUBJECT_TOKEN: "fake-s",
-    DISCORD_SUBJECT_APP_ID: "100000000000000002",
-    DISCORD_TARGET_TOKEN: "fake-t",
-    DISCORD_TARGET_APP_ID: "100000000000000003"
-  }
+describe("smoke's judgment of the oracle", () => {
+  const allow = LabIds.targetOverwriteAllow
+  const result = (reads: ReadonlyArray<bigint | undefined>, control: bigint | undefined): OracleResult => ({
+    availability: availabilityOf([...reads, control]),
+    reads: reads.map((permissions, index) => ({ channel: `lab-${index}`, permissions })),
+    control: { permissions: control, expected: allow }
+  })
 
-  it.effect("reads tokens as Redacted and decodes the branded IDs", () =>
+  it("counts availability over every read and the control", () => {
+    expect(availabilityOf([0n, 1024n])).toBe("available")
+    expect(availabilityOf([undefined, undefined])).toBe("unavailable")
+    expect(availabilityOf([0n, undefined])).toBe("mixed")
+  })
+
+  it.effect("passes an available oracle at baseline, and records an unavailable one without failing", () =>
     Effect.gen(function* () {
-      const credentials = yield* config.pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(values))))
-      expect(credentials.guildId).toBe(GuildId.make("100000000000000000"))
-      expect(String(credentials.subject.token)).not.toContain("fake-s")
-      expect(Redacted.value(credentials.subject.token)).toBe("fake-s")
-      expect(credentials.target.applicationId).toBe("100000000000000003")
+      expect(oracleProblems(result([0n, 0n], allow))).toEqual([])
+      expect(oracleProblems(result([undefined, undefined], undefined))).toEqual([])
+      yield* checkOracle(result([0n, 0n], allow))
     })
   )
 
-  it.effect("fails on a malformed ID", () =>
+  it.effect("fails when the control differs, the subject holds a flag at baseline, or availability is mixed", () =>
     Effect.gen(function* () {
-      const exit = yield* Effect.exit(config.pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ ...values, DISCORD_TEST_GUILD_ID: "Perms Lab" })))))
-      expect(Exit.isFailure(exit)).toBe(true)
+      expect(oracleProblems(result([0n], allow | 8192n))).toHaveLength(1)
+      expect(oracleProblems(result([0n], 0n))).toHaveLength(1)
+      expect(oracleProblems(result([0n, 1024n], allow))).toEqual(["the subject has ViewChannel in lab-1 at baseline"])
+      expect(oracleProblems(result([0n, undefined], allow))).toEqual(["the oracle answered some reads and not others: unavailable in lab-1"])
+      expect(oracleProblems(result([0n], undefined))).toEqual(["the oracle answered some reads and not others: unavailable in the control"])
+      const exit = yield* Effect.exit(checkOracle(result([0n], 0n)))
+      expect(Exit.isFailure(exit) && Exit.hasFails(exit)).toBe(true)
+      expect(exit).toEqual(Exit.fail(new LabCheckFailed({ check: "oracle", detail: oracleProblems(result([0n], 0n)).join("; ") })))
     })
   )
 })

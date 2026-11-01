@@ -10,6 +10,7 @@ import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientError from "effect/http/HttpClientError"
 import type * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
+import * as UrlParams from "effect/http/UrlParams"
 import { Credentials } from "../../src/config/Credentials.ts"
 import { ApplicationId, GuildId } from "../../src/Snowflake.ts"
 
@@ -76,11 +77,15 @@ export const json = (status: number, body: unknown): Scripted => ({ _tag: "Json"
 
 /**
  * A dfx REST client (the real `DiscordRESTMemoryLive`, fake token) over a fake base client that answers each
- * request with `script(method, path)`. Paths are relative to the API base, without the query.
+ * request with `script(method, path, query)`. Paths are relative to the API base, without the query; `query`
+ * holds the request's URL parameters (`urlParams` and any already in the URL).
  */
-export const scriptedRest = (script: (method: string, path: string) => Scripted): Layer.Layer<DiscordREST> => {
+export const scriptedRest = (script: (method: string, path: string, query: URLSearchParams) => Scripted): Layer.Layer<DiscordREST> => {
   const client = HttpClient.make((request) => {
-    const answer = script(request.method, new URL(request.url).pathname.replace(/^\/api\/v\d+/, ""))
+    const url = new URL(request.url)
+    const query = new URLSearchParams(url.search)
+    for (const [key, value] of new URLSearchParams(UrlParams.toString(request.urlParams))) query.append(key, value)
+    const answer = script(request.method, url.pathname.replace(/^\/api\/v\d+/, ""), query)
     switch (answer._tag) {
       case "Json":
         return Effect.succeed(

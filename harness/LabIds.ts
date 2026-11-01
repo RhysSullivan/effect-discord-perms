@@ -26,6 +26,12 @@ export const channelSpecs = [
   { name: "lab-bots-only", type: 0 }
 ] as const satisfies ReadonlyArray<{ readonly name: string; readonly type: number }>
 
+/**
+ * Channel kinds a guild may not offer. Creating one there answers 400 50024; provisioning records the channel
+ * as unavailable instead of failing (GuildMedia in Perms Lab, M2). Every other kind must be created.
+ */
+export const optionalChannelTypes: ReadonlySet<number> = new Set([16])
+
 /** A lab channel name. */
 export type ChannelName = (typeof channelSpecs)[number]["name"]
 

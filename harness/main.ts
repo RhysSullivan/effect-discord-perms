@@ -2,7 +2,8 @@
  * The live harness CLI (DESIGN §5.1, §5.6). Run through the package scripts, which use `bun --no-env-file`:
  *
  *   bun run harness:reset    identity checks, then reset; prints `writes: N`
- *   bun run harness:smoke    identity checks, reset, provision, one oracle read per lab channel; prints counts
+ *   bun run harness:smoke    identity checks, reset, provision, one oracle read per lab channel and a control;
+ *                            prints counts, and fails if an available oracle disagrees with the baseline
  *   bun run verify:live      the matrix (`run`), built in M3
  *
  * `inventory` (no package script) runs the identity checks and lists the lab guild's channels and roles,
@@ -53,12 +54,19 @@ const command = (name: string) =>
         const provision = yield* Provision.run(Reset.contextFrom(report))
         console.log(`provision: ${Provision.summary(provision)}`)
         const oracle = yield* Smoke.oracleReads(Reset.contextFrom(report))
-        console.log(`oracle: ${oracle.availability}, ${oracle.reads.length} reads`)
-        for (const read of oracle.reads) console.log(`  subject in ${read.channel}: ${read.flags === undefined ? "unavailable" : `${read.flags.length} flags${read.flags.length > 0 ? ` (${read.flags.join(", ")})` : ""}`}`)
-        const control = oracle.control.flags === undefined ? "unavailable" : oracle.control.flags.join(", ") === oracle.control.expected.join(", ") ? "matches lab-target's allow" : `DIFFERS: ${oracle.control.flags.join(", ")}`
-        console.log(`  control, target in lab-text: ${control} (expected ${oracle.control.expected.join(", ")})`)
+        const flags = (bits: bigint | undefined) => {
+          if (bits === undefined) return "unavailable"
+          const names = Smoke.flagNames(bits)
+          return names.length === 0 ? "no flags" : names.join(", ")
+        }
+        console.log(`oracle: ${oracle.availability}, ${oracle.reads.length} reads and the control`)
+        for (const read of oracle.reads) console.log(`  subject in ${read.channel}: ${flags(read.permissions)}`)
+        const control =
+          oracle.control.permissions === undefined ? "unavailable" : oracle.control.permissions === oracle.control.expected ? "matches lab-target's allow" : `DIFFERS: ${flags(oracle.control.permissions)}`
+        console.log(`  control, target in lab-text: ${control} (expected ${flags(oracle.control.expected)})`)
         const stats = yield* (yield* Pacing).stats
         console.log(`requests: ${stats.requests}, writes: ${stats.writes}, invalid (401/403/429): ${stats.invalid}`)
+        yield* Smoke.checkOracle(oracle)
         return
       }
       case "inventory": {

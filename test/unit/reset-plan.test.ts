@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest"
 import * as LabIds from "../../harness/LabIds.ts"
-import { byRank, desiredRoleOrder, orderHolds, solidPng } from "../../harness/Provision.ts"
+import { byRank, desiredRoleOrder, kindNotAvailable, orderHolds, solidPng } from "../../harness/Provision.ts"
 import {
   baselineOverwrites,
   bulkDeleteMaxAgeMs,
   channelPatch,
   memberRoleDiff,
   planDeletes,
+  planUnpins,
   snowflakeTime,
   threadPatch,
   type View,
@@ -59,6 +60,15 @@ describe("channel restoration", () => {
       rate_limit_per_user: 0,
       permission_overwrites: [{ id: labTarget, type: 0, allow: Number(LabIds.targetOverwriteAllow), deny: 0 }]
     })
+  })
+
+  it("restores an overwrite whose allow matches but whose deny does not", () => {
+    const denied = text({ permission_overwrites: [{ id: labTarget, type: 0, allow, deny: "2048" }] })
+    expect(channelPatch(denied, "lab-text", category, overwrites)).toEqual({
+      permission_overwrites: [{ id: labTarget, type: 0, allow: Number(LabIds.targetOverwriteAllow), deny: 0 }]
+    })
+    const asMember = text({ permission_overwrites: [{ id: labTarget, type: 1, allow, deny: "0" }] })
+    expect(channelPatch(asMember, "lab-text", category, overwrites)).toBeDefined()
   })
 
   it("restores a forum's REQUIRE_TAG flag and tags, keeping its other flags", () => {
@@ -120,6 +130,14 @@ describe("message deletion", () => {
     expect(planDeletes([message(recent[0] ?? old, bot)], new Set([bot]), new Set(), now)).toEqual({ bulk: [], single: [recent[0]] })
   })
 
+  it("unpins every pinned message the plan does not delete", () => {
+    const [kept, doomed, human, starter] = [1, 2, 3, 4].map((n) => idAt(now - 1000 * n, n))
+    if (kept === undefined || doomed === undefined || human === undefined || starter === undefined) throw new Error("fixture")
+    const plan = { bulk: [[doomed, idAt(now - 9000, 9)]], single: [kept] }
+    expect(planUnpins([kept, doomed, human, starter], plan)).toEqual([human, starter])
+    expect(planUnpins([], plan)).toEqual([])
+  })
+
   it("splits more than 100 recent messages into chunks of at most 100, never a chunk of one", () => {
     const ids = Array.from({ length: 201 }, (_, n) => idAt(now - 1000 - n, n))
     const plan = planDeletes(ids.map((id) => message(id, bot)), new Set([bot]), new Set(), now)
@@ -159,6 +177,20 @@ describe("role positions", () => {
     expect(orderHolds([everyone, role("400000000000000099", "Perms Harness", 1, "200000000000000000"), ...tied], guild, desired)).toBe(false)
     const harnessBelow = role("400000000000000099", "Perms Harness", 3, "200000000000000000")
     expect(orderHolds([everyone, harnessBelow, ...placed], guild, desired)).toBe(false)
+    // the harness strictly above, and only two lab roles tied: still not held
+    const twoTied = desired.map((id, index) => role(id, LabIds.roleSpecs[index]?.name ?? "", index === 1 ? n : n - index))
+    expect(twoTied[0]?.position).toBe(twoTied[1]?.position)
+    expect(orderHolds([everyone, harness, ...twoTied], guild, desired)).toBe(false)
+  })
+})
+
+describe("channel kinds a guild may not offer", () => {
+  it("records only GuildMedia's 400 50024 as unavailable; the same answer for any other kind fails provisioning", () => {
+    expect(kindNotAvailable(16, { status: 400, code: 50024 })).toBe(true)
+    expect(kindNotAvailable(0, { status: 400, code: 50024 })).toBe(false)
+    expect(kindNotAvailable(15, { status: 400, code: 50024 })).toBe(false)
+    expect(kindNotAvailable(16, { status: 400, code: 50035 })).toBe(false)
+    expect(kindNotAvailable(16, { status: 0, code: 0 })).toBe(false)
   })
 })
 

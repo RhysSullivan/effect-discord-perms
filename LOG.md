@@ -47,6 +47,14 @@ Where live Discord differed from the docs, each citing its H-id.
   1-5 and 21 as not deletable; reset now leaves exactly those.
 - **M2: `@everyone` had Discord's default permissions** (CreateInstantInvite, AddReactions, View, Send, ...) before the
   first reset, as the brief said; the first reset's only write set them to none.
+- **M2 (observation for H-022 and H-241, recorded properly by the M3/M4 timeout rows): a bot member can be given a
+  timeout.** The harness's `PATCH /guilds/{g}/members/{target}` with `communication_disabled_until` about ten
+  minutes ahead was accepted (in the M2 verifier's reset self-test and again in the one below), the verifier's
+  member read-back showed it, and reset cleared it. Not checked yet: that the timed-out bot's own sends fail (the H-022 test
+  in discord-semantics.md), and whether the oracle masks a timed-out member (H-241). `Observed.botsCanBeTimedOut`
+  stays `true`.
+- **M2: a forum post's starter message can be pinned**, and reset unpins it (it keeps the message), as
+  §5.7 step 6 requires.
 
 ## dfx deviations
 
@@ -171,12 +179,46 @@ the same commit.
   would grant permissions the matrix does not control).
 - **M2: `lab-admin` holds Administrator at baseline** (§5.7 updated): it is the `administrator` grant source and is
   only ever assigned by a scenario; every other lab role has no permissions at baseline.
+- **M2 (verifier fixes): the Lab guard checks request bodies where a route alone admits writes outside the lab**
+  (§5.6 updated). The M2 verifier probed `verdict` with an armed state and got `Allow` for
+  `PATCH /guilds/{g}/channels` with `[{id: rules, position: 0, parent_id: lab}]`, for
+  `PUT /channels/{lab}/thread-members/{rhys}`, and for `PATCH /guilds/{g}/members/{target}` with
+  `{roles: [foreign role]}`. Now the channel-list PATCH is refused outright (nothing needs it); a channel create
+  needs a `lab`/`lab-*` name and a lab parent; thread membership changes only for `@me`, the subject and the
+  target; member edits may carry only `nick` and `communication_disabled_until` (roles go through the per-role
+  routes, which check each role); a role create needs a `lab-*` name; AutoMod deletes need a rule named `lab-*`
+  that reset listed and admitted. A body these routes cannot read is refused. Each case is in
+  `test/unit/lab-guard.test.ts`, including one through real `HttpClientRequest.bodyJson` requests, and each
+  check was mutated away once to see its test fail.
+- **M2 (verifier fixes): smoke fails on a bad oracle result** (§6 M2 updated). It used to print `DIFFERS` and exit
+  0. Now an available oracle fails smoke with `LabCheckFailed` when the control is not exactly `lab-target`'s
+  allow, when the subject holds any flag at baseline, or when only some reads (the control included) answer.
+  An unavailable oracle is still a recorded, non-failing outcome (§5.10).
+- **M2 (verifier fixes): `Credentials` exports only layers** (§4.3 updated). `config` and `dotEnvPath` were
+  exported, so code could read `.env` through `fromDotEnv` without the lock. Now `layer` (the repository's
+  `.env`, the host's lock) and `layerFrom({dotEnvPath, lockPath})` are the only ways in, and
+  `test/unit/credentials.test.ts` builds `layerFrom` with temporary files: a held lock gives `LockHeld` both
+  with a valid `.env` and with none at all (where a free lock gets a `PlatformError` from reading it), so the
+  lock is taken first.
+- **M2 (verifier fixes): only GuildMedia's 400 50024 is recorded as unavailable** (§5.7 updated).
+  `LabIds.optionalChannelTypes` holds the kinds a guild may lack (16); a 50024 on any other kind fails
+  provisioning with `LabRequestFailed`.
+- **M2 (verifier fixes): reset unpins every pinned message it does not delete** (§5.7 step 6 clarified), not only
+  messages by humans, so a pinned forum-post starter or undeletable system message is unpinned too
+  (`planUnpins`).
+- **M2 (verifier fixes): vitest refuses to run under the Bun runtime** (§4.3 updated). The verifier found that
+  `bun --no-env-file node_modules/.bin/vitest run` starts Bun workers without `--no-env-file`, which load `.env`
+  (`env-isolation.test.ts` failed there). `vitest.config.ts` now throws under Bun before any worker starts;
+  `bun run test` runs vitest under Node, as before.
 
 ## Escalated rules
 
 Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria. None yet.
 
 ## Notes for every milestone
+
+- Run the unit tests only with `bun run test` (or `bun run verify:offline`), which runs vitest under Node.
+  `vitest.config.ts` refuses the Bun runtime, whose workers would load `.env`.
 
 - Run `bun --no-env-file install`, not `bun install`: plain `bun install` loads `.env` into its own process
   (it printed `[0.26ms] ".env"` when M0 re-locked TypeScript), where dependency lifecycle scripts could read
@@ -194,7 +236,9 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   overwrite, slowmode, `@everyone` and `lab-grant` permissions, REQUIRE_TAG, an archived and locked
   provisioned thread, the subject in the private thread, a target nickname, a leftover role the target holds)
   through the guarded identities. In M2 the reset after it made 12 writes and the one after that 0, both times
-  it was run.
+  it was run. After the verifier fixes it also pins the forum post's starter message and times the target out;
+  the reset after it made 14 writes (one unpin and one member PATCH clearing the nickname and timeout among
+  them) and the next one 0.
 
 ## Milestones
 
@@ -282,7 +326,8 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   instance), and building pacing inside a fresh layer failed it (`expected +0 to be 3`).
 - `harness/Lab.ts`: the guard (see "Design deviations"), `LabRequestFailed`, `LabCheckFailed`, `labStep`.
   `test/unit/lab-guard.test.ts` covers every refusal class, including kick, ban, member edits of a human, DMs,
-  leaving the guild, global commands, protected channels and foreign roles.
+  leaving the guild, global commands, protected channels and foreign roles, and (after the verifier fixes) the
+  channel-list PATCH, channel and role creation, thread membership of a human, member edit bodies and AutoMod.
 - `src/bot/Startup.ts` (`StartupFailed`, `restChecks`), `src/bot/Internals.ts` (`SubjectRaw`), `src/rest/ErrorMap.ts`
   (`classify`, `flattenFieldErrors`), `harness/IdentityCheck.ts`. `test/unit/startup.test.ts` drives the real
   dfx client over a scripted fake: success, 401, missing intent flags, 404 member, 502, transport, the 30 s
@@ -290,12 +335,14 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   `classify` on a 50035 body (`e.data.code`, field paths, numeric inner codes as strings), 5xx, a Cloudflare HTML
   403, transport, and a malformed body (defect).
 - `src/rest/Oracle.ts` (`memberPermissions`): `Permissions`, `Unavailable` (404 code 0, 405) or `OracleFailed`;
-  `test/unit/oracle.test.ts` also covers the lab-state file and the credentials recipe.
+  `test/unit/oracle.test.ts` (the request must carry `implicit=false`) also covers the lab-state file and smoke's
+  judgment of the oracle; `test/unit/credentials.test.ts` covers the credentials layer and its lock.
 - `harness/LabIds.ts` (spec and `.lab-state.json`), `harness/Wire.ts`, `harness/Reset.ts`, `harness/Provision.ts`,
   `harness/Smoke.ts`, `harness/main.ts` (`reset`, `smoke`, `inventory`; `run` prints "not built yet (M3)" and
   exits 1). Pure decisions are in `test/unit/reset-plan.test.ts` (channel and thread patches, member roles,
-  delete plans with the undeletable types and the 14-day split, leftovers, role order with ties, the sticker
-  PNG, write deltas).
+  delete plans with the undeletable types and the 14-day split, unpins, leftovers, role order with ties (a tie
+  alone, with the harness above, fails), overwrites that differ only in `deny`, GuildMedia-only
+  `kindNotAvailable`, the sticker PNG, write deltas).
 - Live record for `LOG.md`'s M2 items: the oracle is **available**; `mfaLevel` is **0**; both managed roles'
   positions: **neither bot has a managed role** (`Perms Harness` 11, then `lab-high` 10 ... `lab-unmentionable`
   1, `@everyone` 0); the harness **has** the Message Content flag.
@@ -310,4 +357,11 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
 - Exit evidence (final code): `bun run harness:smoke` exited 0 twice in a row (each `reset: writes 0`,
   `provision: created 0; writes 0`, 75 requests, 0 invalid), then `bun run harness:reset` reported `writes: 0`
   twice; `bun run verify:offline` is green.
+- Verifier fixes (see "Design deviations"): the guard's body checks, smoke's oracle judgment, the credentials
+  layer's exports, GuildMedia-only `kindNotAvailable`, unpinning every kept pin, vitest refusing Bun. Mutation
+  checks (each reverted, each failed its test): dropping `implicit=false`, `orderHolds` accepting ties,
+  `overwritesMatch` ignoring `deny`, and each new guard, smoke, credentials, unpin and kind check. Exit evidence
+  after the fixes: the reset self-test (14 writes, then 0), two `harness:smoke` runs exiting 0 (`oracle:
+  available, 10 reads and the control`, the control matching, 75 requests, 0 writes, 0 invalid), two
+  `harness:reset` runs with `writes: 0`, and `bun run verify:offline` green with 253 unit tests.
 

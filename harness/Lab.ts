@@ -12,11 +12,18 @@
  * - the host is discord.com, and every guild route (read or write) names `DISCORD_TEST_GUILD_ID`;
  * - nothing is written before `arm` (the identity checks have run and found the lab's protected channels);
  * - a channel write targets an admitted lab channel: named `lab` or `lab-*`, in the lab guild, and never
- *   `#rules`, `#mod-updates` or the guild's rules or public-updates channel;
+ *   `#rules`, `#mod-updates` or the guild's rules or public-updates channel; a new channel has a lab name and
+ *   no parent outside the lab; the guild's channel-list PATCH (positions and parents of any channel) is
+ *   refused;
+ * - thread membership changes only for `@me`, the subject and the target (adding a human posts a notice that
+ *   can ping them);
  * - a role write targets an admitted lab role (`lab-*`), the subject's or target's managed role, or (PATCH
- *   only) `@everyone`; a role-position PATCH may name only those roles and the harness's own top role, which
- *   Discord requires in the same request when lab roles move above its numeric position;
- * - member edits target only the subject or the target bot;
+ *   only) `@everyone`; a new role has a lab name; a role-position PATCH may name only those roles and the
+ *   harness's own top role, which Discord requires in the same request when lab roles move above its numeric
+ *   position;
+ * - member edits target only the subject or the target bot (or `@me`), and change only `nick` and
+ *   `communication_disabled_until`; roles change only through the per-role routes, with lab roles;
+ * - AutoMod writes only delete rules named `lab-*` that the harness listed;
  * - **kick and ban are refused outright.** §5.6 allows them only where harness-side reads taken just before
  *   the call predict failure; that predicate arrives with the members family (M4). Until then no kick or ban
  *   route is allowed at all;
@@ -52,6 +59,8 @@ export interface GuardState {
    * harness's role above them (M2 live finding).
    */
   readonly positionRoles: ReadonlySet<string>
+  /** AutoMod rules named `lab-*` that the harness listed: the only rules it may delete. */
+  readonly autoModRules: ReadonlySet<string>
 }
 
 /** The guard's decision on one request. */
@@ -64,19 +73,52 @@ const refuse = (reason: string): Verdict => ({ _tag: "Refuse", reason })
 export const isLabChannelName = (name: string): boolean => name === "lab" || name.startsWith("lab-")
 /** A role name the lab owns. */
 export const isLabRoleName = (name: string): boolean => name.startsWith("lab-")
+/** An AutoMod rule name the lab owns. */
+export const isLabRuleName = (name: string): boolean => name.startsWith("lab-")
 
 const RolePositions = Schema.fromJsonString(Schema.Array(Schema.Struct({ id: Schema.String })))
 const decodeRolePositions = Schema.decodeUnknownOption(RolePositions)
+const NewChannel = Schema.fromJsonString(Schema.Struct({ name: Schema.String, parent_id: Schema.optionalKey(Schema.NullOr(Schema.String)) }))
+const decodeNewChannel = Schema.decodeUnknownOption(NewChannel)
+const NewRole = Schema.fromJsonString(Schema.Struct({ name: Schema.String }))
+const decodeNewRole = Schema.decodeUnknownOption(NewRole)
+const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
+const decodeJsonObject = Schema.decodeUnknownOption(JsonObject)
+
+/**
+ * The member fields the lab edits: a nickname and a timeout (reset, and the library's `member.setNickname` and
+ * `member.timeout`). Roles change only through the per-role routes, which check each role; `channel_id`
+ * (moving a member between voice channels), `mute`, `deaf` and `flags` are never needed.
+ */
+const memberFields: ReadonlySet<string> = new Set(["nick", "communication_disabled_until"])
 
 const guildWrite = (state: GuardState, armed: Armed, method: string, route: string, rest: ReadonlyArray<string>, bodyText: Option.Option<string>): Verdict => {
   const [area, target, sub, subTarget] = rest
   const isBot = (user: string | undefined): boolean => user === armed.subjectUserId || user === armed.targetUserId
   const isLabRole = (role: string | undefined): boolean => role !== undefined && state.roles.has(role)
+  const memberEdit = (): Verdict => {
+    const fields = Option.map(Option.flatMap(bodyText, decodeJsonObject), Object.keys)
+    if (Option.isNone(fields)) return refuse(`${route}: member edit body could not be read`)
+    const outside = fields.value.filter((field) => !memberFields.has(field))
+    return outside.length === 0 ? allow : refuse(`${route}: member edits change only the nickname and timeout, not ${outside.join(", ")}`)
+  }
   switch (area) {
-    case "channels":
-      return rest.length === 1 && (method === "POST" || method === "PATCH") ? allow : refuse(`${route}: not a lab channel-list write`)
+    case "channels": {
+      // Only channel creation. `PATCH /guilds/{g}/channels` reorders and re-parents any channel, `#rules` included.
+      if (rest.length !== 1 || method !== "POST") return refuse(`${route}: not a lab channel creation`)
+      const created = Option.flatMap(bodyText, decodeNewChannel)
+      if (Option.isNone(created)) return refuse(`${route}: channel body could not be read`)
+      if (!isLabChannelName(created.value.name)) return refuse(`${route}: a new channel must have a lab name, not "${created.value.name}"`)
+      const parent = created.value.parent_id
+      return parent === undefined || parent === null || (state.channels.has(parent) && !armed.protectedChannels.has(parent))
+        ? allow
+        : refuse(`${route}: a new channel's parent must be a lab channel`)
+    }
     case "roles": {
-      if (rest.length === 1 && method === "POST") return allow
+      if (rest.length === 1 && method === "POST") {
+        const created = Option.flatMap(bodyText, decodeNewRole)
+        return Option.isSome(created) && isLabRoleName(created.value.name) ? allow : refuse(`${route}: a new role must have a lab name`)
+      }
       if (rest.length === 1 && method === "PATCH") {
         const ids = Option.flatMap(bodyText, (text) => decodeRolePositions(text))
         if (Option.isNone(ids)) return refuse(`${route}: role-position body could not be read`)
@@ -88,9 +130,8 @@ const guildWrite = (state: GuardState, armed: Armed, method: string, route: stri
       return refuse(`${route}: role write not allowed`)
     }
     case "members": {
-      if (rest.length === 2 && target === "@me" && method === "PATCH") return allow
       if (rest.length === 2 && method === "DELETE") return refuse(`${route}: kick is refused (no harness-side failure prediction yet)`)
-      if (rest.length === 2 && method === "PATCH") return isBot(target) ? allow : refuse(`${route}: member edits target only the subject or the target`)
+      if (rest.length === 2 && method === "PATCH") return target === "@me" || isBot(target) ? memberEdit() : refuse(`${route}: member edits target only the subject or the target`)
       if (rest.length === 4 && sub === "roles" && (method === "PUT" || method === "DELETE")) {
         return isBot(target) && isLabRole(subTarget) ? allow : refuse(`${route}: role changes only on the subject or target, with lab roles`)
       }
@@ -102,7 +143,9 @@ const guildWrite = (state: GuardState, armed: Armed, method: string, route: stri
     case "stickers":
       return rest.length === 1 && method === "POST" ? allow : refuse(`${route}: sticker write not allowed`)
     case "auto-moderation":
-      return rest.length === 3 && target === "rules" && method === "DELETE" ? allow : refuse(`${route}: AutoMod write not allowed`)
+      return rest.length === 3 && target === "rules" && method === "DELETE" && sub !== undefined && state.autoModRules.has(sub)
+        ? allow
+        : refuse(`${route}: AutoMod writes only delete admitted lab rules`)
     default:
       return refuse(`${route}: guild write not allowed`)
   }
@@ -117,12 +160,18 @@ const channelWrite = (state: GuardState, armed: Armed, route: string, channel: s
     const allowed = target !== undefined && (state.roles.has(target) || target === state.guildId || target === armed.subjectUserId || target === armed.targetUserId)
     return rest.length === 2 && allowed ? allow : refuse(`${route}: overwrite target outside the lab`)
   }
+  if (area === "thread-members") {
+    // Adding a human posts a RECIPIENT_ADD notice that can ping them; only the bots join or leave threads.
+    const allowed = target === "@me" || target === armed.subjectUserId || target === armed.targetUserId
+    return rest.length === 2 && allowed ? allow : refuse(`${route}: thread membership changes only for the bots`)
+  }
   return allow
 }
 
 /**
  * The guard's decision for a request, as a pure function of the state, the method, the full URL and the JSON
- * body text (read only for a role-position PATCH).
+ * body text. The body is read for channel and role creation, role-position PATCHes and member edits; a body
+ * those routes cannot read is refused.
  */
 export const verdict = (state: GuardState, method: string, url: string, bodyText: Option.Option<string>): Verdict => {
   const parsed = URL.canParse(url) ? new URL(url) : undefined
@@ -160,6 +209,8 @@ export interface Interface {
   readonly admitRole: (role: { readonly id: RoleId; readonly name: string; readonly botId: UserId | undefined }) => Effect.Effect<void>
   /** Admits the harness's own managed role to role-position PATCHes only. Dies for any other role. */
   readonly admitHarnessRoleForPositions: (role: { readonly id: RoleId; readonly botId: UserId | undefined }) => Effect.Effect<void>
+  /** Admits an AutoMod rule the harness listed, so reset may delete it. Dies if it is not named `lab-*`. */
+  readonly admitAutoModRule: (rule: { readonly id: string; readonly name: string }) => Effect.Effect<void>
 }
 
 /** The process-wide Perms Lab guard. */
@@ -171,7 +222,7 @@ const bodyText = (request: HttpClientRequest.HttpClientRequest): Option.Option<s
 /** Builds the guard for the lab guild. It starts unarmed: only reads are allowed. */
 export const make = (guildId: GuildId): Effect.Effect<Interface> =>
   Effect.gen(function* () {
-    const state = yield* Ref.make<GuardState>({ guildId, armed: Option.none(), channels: new Set(), roles: new Set(), positionRoles: new Set() })
+    const state = yield* Ref.make<GuardState>({ guildId, armed: Option.none(), channels: new Set(), roles: new Set(), positionRoles: new Set(), autoModRules: new Set() })
 
     /** `@everyone`'s role ID is the guild ID. */
     const isEveryone = (role: string): boolean => role === guildId
@@ -214,6 +265,12 @@ export const make = (guildId: GuildId): Effect.Effect<Interface> =>
             return yield* Effect.die(new Error(`lab guard: role ${role.id} is not the harness's managed role`))
           }
           yield* Ref.update(state, (current) => ({ ...current, positionRoles: new Set([...current.positionRoles, role.id]) }))
+        }),
+      admitAutoModRule: (rule) =>
+        Effect.gen(function* () {
+          yield* armedState
+          if (!isLabRuleName(rule.name)) return yield* Effect.die(new Error(`lab guard: AutoMod rule ${rule.id} (${rule.name}) is not a lab rule`))
+          yield* Ref.update(state, (current) => ({ ...current, autoModRules: new Set([...current.autoModRules, rule.id]) }))
         })
     })
   })
