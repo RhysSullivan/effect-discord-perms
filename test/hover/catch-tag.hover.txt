@@ -1,0 +1,2 @@
+export const withoutAlpha = failsTwoWays.pipe(Effect.catchTag("Alpha", () => Effect.succeed(0)))
+const withoutAlpha: Effect.Effect<string | number, Beta, never>

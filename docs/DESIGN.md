@@ -232,6 +232,8 @@ scripts/
   budget.ts                      compile budget (§5.4)
   rules-check.ts                 registry completeness (§5.5)
   verify-offline.ts              runs the offline steps in order (§5.1)
+  lib/                           the scripts' modules: tsc (pinned binary), typeTests (the §5.2 gate),
+                                 hover + lsp (§5.3), budget (§5.4), rules (§5.5); unit-tested in test/unit
 examples/
   reference-bot/main.ts          the reference bot: no orDie or die on library errors (D-done criteria)
   reference-bot/tsconfig.json    budget project
@@ -1705,6 +1707,10 @@ Milestone 0 adds these scripts to `package.json`. All `bun` scripts use
 6. `rules`
 7. `budget`
 
+A step whose script a later milestone writes (only `gen:errors`, before M1) is
+printed as "not built yet" by name in the summary; every other step must run
+and pass.
+
 `verify:live`:
 
 1. acquires the lock;
@@ -1776,7 +1782,9 @@ On the design fixtures: 64 diagnostics, all pass; the largest gated size is
 ### 5.3 Hover snapshots (D31)
 
 - `scripts/hover.ts` generalises `[cc:lsp-hover.ts]`. It spawns
-  `node_modules/@typescript/typescript-linux-x64/lib/tsc --lsp --stdio`, opens
+  `node_modules/@typescript/typescript-<platform>-<arch>/lib/tsc --lsp --stdio`
+  (`typescript-linux-x64` on minisforum; resolved as `typescript/lib/getExePath.js`
+  does), opens
   each `test/hover/*.ts`, and sends `textDocument/hover` at every `//  ^?`
   marker.
 - It writes `<file>.hover.txt`: one block per marker, holding the source line
@@ -1814,6 +1822,13 @@ const ch: MessageChannel
   25-option command with a handler, measured as the difference between two
   fixed probe projects (20 such commands and none). A regression of more than
   2% fails, so the reference bot's headroom cannot hide superlinear growth.
+  The probes are `examples/command-probe/tsconfig.none.json` and
+  `examples/command-probe/tsconfig.commands.json` (written in M8 with the
+  command API); the baseline stores their difference as totals.
+- The baseline is `examples/reference-bot/budget.json`, with one optional entry
+  per row. A row whose projects exist without a baseline entry, or the reverse,
+  fails. Before either row exists (M0-M7) the script prints "nothing to measure
+  yet" and passes.
 - The baseline must name TypeScript 7.0.2.
 - Design measurements (`[sd:budget.txt]`, identical across runs):
 
@@ -1845,6 +1860,7 @@ type NotLive =
   | { readonly kind: "escalated"; readonly question: `Q-${number}` }
 export interface Rule { readonly id: `R-${string}`; readonly statement: string
   readonly pass: `test/types/pass/${string}.ts`; readonly fail: `test/types/fail/${string}.ts`
+  readonly claims: readonly [string, ...Array<string>]       // directive mentions in `fail` this rule claims (M0)
   readonly live: LivePair | NotLive; readonly remainder?: NotLive }
 // Observation = Rejected{status, code, inner: [{path, code}]} | Ignored{field} | Applied{field} | Writes{count}
 //             | EventAbsent{event, canary} | EventDelivered{event} | Succeeded
@@ -1858,9 +1874,12 @@ byte-identical Setup, which rules-check asserts.
 
 `scripts/rules-check.ts` fails if any of these does not hold:
 
-- a rule's pass or fail file is missing, or the fail file has no directive
-  whose mention appears in the rule's snapshot;
-- **a fail-fixture directive is not claimed by any rule**, so every type
+- a rule's pass or fail file is missing, or one of its `claims` is not the
+  mention of a directive in its fail file, or does not appear in that file's
+  snapshot;
+- **a fail-fixture directive is not claimed by any rule** (a rule claims a
+  directive when the directive is in the rule's `fail` file and its mention is
+  in the rule's `claims`; several rules share one fixture file), so every type
   restriction (operation absence, announcement threads public only, bulk delete
   needs 2) needs a registry entry;
 - a `pair` scenario ID is missing from `harness/scenario/catalog/rules.ts`;
@@ -1883,6 +1902,11 @@ byte-identical Setup, which rules-check asserts.
   `forbidden-action`;
 - **events**: every event in `EventIntents` has a live intent pair;
 - a non-`pure-typing` rule lacks a `LOG.md` line.
+
+Staging: M0's rules-check implements every check whose inputs exist. A `pair`
+rule fails closed ("cannot verify yet") until the catalog and truth-table
+checks are added (M6 adds them, with the flag-coverage check); M7 adds the
+events check. Until then rules-check prints those checks as "not checked yet".
 
 The registry (`test/rules.ts`). IDs use the `R-` prefix; "raw" means through
 `SubjectRaw` with dfx's loose types.
@@ -2350,8 +2374,12 @@ Live milestones run serially, under the lock.
     `scripts/rules-check.ts` (empty registry allowed),
     `scripts/verify-offline.ts`;
   - a `LOG.md` skeleton with a "Waiting for Rhys" section.
+- The trivial fixtures are `R-catch-tag-exact`'s (pure-typing), because every
+  fail directive must be claimed by a registry rule (§5.5); this needs
+  `test/rules.ts` and the `Observation` schema in `harness/scenario/Dsl.ts`.
 - Files: `package.json`, `tsconfig.json`, `vitest.config.ts`, `scripts/*`,
-  `test/types/**`, `test/hover/`, `test/env/.gitkeep`, `LOG.md`.
+  `test/types/**`, `test/hover/`, `test/env/.gitkeep`, `test/unit/*`,
+  `test/rules.ts`, `harness/scenario/Dsl.ts`, `LOG.md`.
 - Exit:
   - `bun run verify:offline` exits 0 with one trivial pass fixture, one fail
     fixture with its `@valid` twin, and one hover marker;
@@ -2459,6 +2487,8 @@ Live milestones run serially, under the lock.
   - matrix step (b) switched to the real operation over `DryRun`, and step (d)
     enabled;
   - `catalog/rules.ts` for every phase-1 rule;
+  - rules-check's live-pair checks (catalog scenario IDs, truth-table rows and
+    observations, identical setups) and its flag-coverage check (§5.5);
   - type fixtures and hover markers for §2.1-§2.6, `op-errors.ts`, and the
     registry entries.
 - Exit:
@@ -2480,6 +2510,7 @@ Live milestones run serially, under the lock.
   - the message-content exceptions (mention, ping-on reply, own); the DM
     exception is escalated (Q-17);
   - the obfuscation check;
+  - rules-check's events check (§5.5);
   - fail fixtures for intents and the boundary.
 - Exit:
   - `bun run verify:live` exits 0 including intent rows, then a fresh
