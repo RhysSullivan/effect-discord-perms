@@ -4,7 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc -p . --pretty false",
+    "test": "vitest run",
+    "test:types": "bun --no-env-file scripts/type-tests.ts",
+    "hover": "bun --no-env-file scripts/hover.ts",
+    "budget": "bun --no-env-file scripts/budget.ts",
+    "rules": "bun --no-env-file scripts/rules-check.ts",
+    "gen:errors": "bun --no-env-file scripts/gen-errors.ts",
+    "verify:offline": "bun --no-env-file scripts/verify-offline.ts",
+    "harness:reset": "bun --no-env-file harness/main.ts reset",
+    "harness:smoke": "bun --no-env-file harness/main.ts smoke",
+    "verify:live": "bun --no-env-file harness/main.ts run --write --compare"
   },
   "dependencies": {
     "@effect/platform-bun": "^4.1.1",
@@ -15,7 +25,7 @@
   "devDependencies": {
     "@effect/vitest": "^4.1.1",
     "@types/bun": "^1.4.4",
-    "typescript": "^7.0.2",
+    "typescript": "7.0.2",
     "vitest": "^5"
   }
 }

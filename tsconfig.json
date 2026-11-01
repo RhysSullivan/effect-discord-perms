@@ -15,5 +15,6 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "test", "harness", "examples", "scripts"]
+  "include": ["src", "test", "harness", "examples", "scripts", "vitest.config.ts"],
+  "exclude": ["test/types/fail"]
 }
