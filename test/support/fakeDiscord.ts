@@ -21,10 +21,11 @@ export interface Recorded {
   readonly authorization: string | undefined
 }
 
-/** A canned answer. */
+/** A canned answer, with extra response headers (for example `retry-after` on a 429). */
 export interface Answer {
   readonly status: number
   readonly body: unknown
+  readonly headers?: Readonly<Record<string, string>>
 }
 
 /** A recording client and its log. */
@@ -44,7 +45,7 @@ export const makeRecordingClient = (respond: (request: HttpClientRequest.HttpCli
         const answer = respond(request)
         return HttpClientResponse.fromWeb(
           request,
-          new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "content-type": "application/json" } })
+          new Response(JSON.stringify(answer.body), { status: answer.status, headers: { ...answer.headers, "content-type": "application/json" } })
         )
       })
     )

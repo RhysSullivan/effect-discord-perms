@@ -55,6 +55,16 @@ Where live Discord differed from the docs, each citing its H-id.
   stays `true`.
 - **M2: a forum post's starter message can be pinned**, and reset unpins it (it keeps the message), as
   §5.7 step 6 requires.
+- **M2 (for M4's pins catalog, H-050/H-052): a message in a stage channel's chat cannot be pinned.** In the M2
+  verifier's dirt run, the harness (Administrator) pinning its own message in `lab-stage`
+  (`PUT /channels/{lab-stage}/pins/{msg}`, same channel) got 400 50019 "This message cannot be pinned in this
+  channel". discord-semantics.md H-052 expects 50019 only for a message from another channel. Not re-run in
+  M2 (the reset self-test leaves stage pins out because of it). M4 decides whether stage pin rows expect 50019
+  or stage leaves the pins channel dimension, with the reason here (DESIGN §5.9 notes it).
+- **M2: a thread's slowmode can be set, and restored in the same PATCH that unarchives and unlocks it.** The
+  reset self-test set `rate_limit_per_user: 5` on `lab-public-thread` before archiving and locking it; reset's
+  single `PATCH /channels/{thread}` with `rate_limit_per_user: 0, archived: false, locked: false` was accepted,
+  and the read-back showed slowmode 0, unarchived and unlocked.
 
 ## dfx deviations
 
@@ -211,6 +221,40 @@ the same commit.
   (`env-isolation.test.ts` failed there). `vitest.config.ts` now throws under Bun before any worker starts;
   `bun run test` runs vitest under Node, as before.
 
+- **M2 (verifier fixes, round 2): reset restores thread slowmode** (§5.7 step 4 clarified). The M2 verifier set
+  `rate_limit_per_user: 5` on `lab-public-thread`; reset left it, and the next reset reported `writes: 0` with
+  the lab off baseline, because `threadPatch` covered only name, archived, locked and auto-archive. Now
+  `threadPatch` also sets slowmode 0 (`test/unit/reset-plan.test.ts`). Of the §5.8 `channelSettings` fields, a
+  thread has `nameVariant` (restored) and `slowmode` (now restored); `requireTag` is the parent forum's flag,
+  which `channelPatch` restores. Threads have no overwrites or parent to restore.
+- **M2 (verifier fixes, round 2): the reset self-test is a committed command and part of M2's exit**
+  (§5.1, §5.7, §6 M2 updated). `bun run harness:selftest` (`harness/SelfTest.ts`) replaces the git-ignored
+  `.scratch/m2/dirty-lab.ts` (deleted). It resets, reads the lab back (must be at baseline), applies 13 dirt
+  steps through the guarded identities, reads back (each step's expected problem must be reported, so a blind
+  read-back fails), resets, reads back (no problem may remain) and resets again (zero writes). The read-back
+  (`baselineProblems`) judges from the spec in `LabIds.ts`, not from reset's patch functions; it is unit-tested
+  in `test/unit/selftest.test.ts`. Live evidence in the M2 milestone notes below: with the slowmode fix
+  removed, the self-test failed with exactly `lab-public-thread slowmode (5)`.
+- **M2 (verifier fixes, round 2): the guard reads thread and sticker bodies** (§5.6 updated). A thread create
+  (`POST /channels/{lab}/threads`, `POST /channels/{lab}/messages/{id}/threads`) needs a `lab`/`lab-*` name, so
+  reset can always tell a scenario thread; a sticker create needs a `lab-*` name, read from its multipart form,
+  and sticker edits and deletes are refused. `verdict` now takes a `RequestBody` (`None`, `Text`, or a form's
+  string fields) instead of the JSON text; a thread create sent as a form (a forum post with files) is refused,
+  since its JSON is in a `payload_json` blob the guard cannot read synchronously. New verdict cases cover these,
+  the overwrite sub-route (`/permissions/{id}/x`) and a real `bodyFormData` request.
+- **M2 (verifier fixes, round 2): smoke fails when it would skip a lab channel** (§6 M2). `oracleTargets` fails
+  with `LabCheckFailed` when a channel or thread in the spec has no stored ID and is not recorded as
+  unavailable; `oracleReads` takes the loaded state, so `test/unit/oracle.test.ts` checks that it reads every
+  channel and thread but the category and `lab-media`, the subject in each, and the target in `lab-text` for the
+  control.
+- **M2 (verifier fixes, round 2): `IdentityCheck.run` and the invalid-response count have offline tests.**
+  `test/unit/identity-check.test.ts` runs the real wiring (`compose`) over a fake that answers per token: the
+  success case (protected channels include the guild's rules channel even when it has a lab name, so it cannot
+  be admitted) and six failures (another application's token, two tokens of one bot, another guild name, no
+  `#rules`, no `#mod-updates`, a role above the harness's), each a `LabCheckFailed` that leaves the guard
+  unarmed, so the next write is refused unsent. `test/unit/identities.test.ts` answers a 403 and a 429 (which
+  dfx retries) through `compose` and sees `invalid: 2`.
+
 ## Escalated rules
 
 Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria. None yet.
@@ -228,17 +272,21 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
 
 - **Live commands** (minisforum only, one at a time; each takes the live lock through `Credentials`):
   `bun run harness:reset` prints `writes: N`; `bun run harness:smoke` runs the identity checks, reset,
-  provision and the oracle reads; `bun --no-env-file harness/main.ts inventory` lists the lab guild read-only.
+  provision and the oracle reads; `bun run harness:selftest` is the reset self-test (below);
+  `bun --no-env-file harness/main.ts inventory` lists the lab guild read-only.
   The lab's object IDs are in `.lab-state.json` (git-ignored). Deleting it makes the next reset delete every
   `lab-*` object and the next provision recreate them.
-- **Reset self-test.** `.scratch/m2/dirty-lab.ts` (git-ignored scratch, not part of the build) dirties the lab the
-  way scenarios will (a target message and a pin, an archived scenario thread, a subject role and member
-  overwrite, slowmode, `@everyone` and `lab-grant` permissions, REQUIRE_TAG, an archived and locked
-  provisioned thread, the subject in the private thread, a target nickname, a leftover role the target holds)
-  through the guarded identities. In M2 the reset after it made 12 writes and the one after that 0, both times
-  it was run. After the verifier fixes it also pins the forum post's starter message and times the target out;
-  the reset after it made 14 writes (one unpin and one member PATCH clearing the nickname and timeout among
-  them) and the next one 0.
+- **Reset self-test: re-run `bun run harness:selftest` whenever `Reset.ts` (or `LabIds.ts`'s baseline) changes.**
+  The smoke and reset exit checks run on a clean lab, where a reset that wrote nothing would pass too. The
+  self-test dirties the lab (role permissions and mentionability, a leftover role the target holds and the
+  target without `lab-unmentionable`, the subject with lab roles, a nickname and a timeout, a leftover channel,
+  bot messages in text, a thread, voice, stage and announcement, pins including the forum post's starter,
+  `lab-text` slowmode and four kinds of overwrite, `lab-bots-only` out of the category, forum REQUIRE_TAG and
+  tags, thread slowmode, archive, lock and auto-archive, the subject in the private thread and the target out
+  of the forum post, archived public and private scenario threads, a subject guild command, and the target's
+  nickname and timeout), checks the read-back sees all of it, resets, checks the lab is at baseline, and resets
+  again expecting zero writes. When adding a field to reset, add its dirt step and its read-back check. It takes
+  about 80 s and some 300 requests.
 
 ## Milestones
 
@@ -338,8 +386,8 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   `test/unit/oracle.test.ts` (the request must carry `implicit=false`) also covers the lab-state file and smoke's
   judgment of the oracle; `test/unit/credentials.test.ts` covers the credentials layer and its lock.
 - `harness/LabIds.ts` (spec and `.lab-state.json`), `harness/Wire.ts`, `harness/Reset.ts`, `harness/Provision.ts`,
-  `harness/Smoke.ts`, `harness/main.ts` (`reset`, `smoke`, `inventory`; `run` prints "not built yet (M3)" and
-  exits 1). Pure decisions are in `test/unit/reset-plan.test.ts` (channel and thread patches, member roles,
+  `harness/Smoke.ts`, `harness/main.ts` (`reset`, `smoke`, `inventory`, and from the second verifier round
+  `selftest` with `harness/SelfTest.ts`; `run` prints "not built yet (M3)" and exits 1). Pure decisions are in `test/unit/reset-plan.test.ts` (channel and thread patches, member roles,
   delete plans with the undeletable types and the 14-day split, unpins, leftovers, role order with ties (a tie
   alone, with the harness above, fails), overwrites that differ only in `deny`, GuildMedia-only
   `kindNotAvailable`, the sticker PNG, write deltas).
@@ -364,4 +412,25 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   after the fixes: the reset self-test (14 writes, then 0), two `harness:smoke` runs exiting 0 (`oracle:
   available, 10 reads and the control`, the control matching, 75 requests, 0 writes, 0 invalid), two
   `harness:reset` runs with `writes: 0`, and `bun run verify:offline` green with 253 unit tests.
+- Verifier fixes, round 2 (see "Design deviations"): reset restores thread slowmode; `harness:selftest` is
+  committed and part of the exit; the guard checks thread and sticker names; smoke fails on a lab channel it
+  would skip; offline tests for `IdentityCheck.run` and the invalid-response count. Live runs, in order, each
+  alone under the lock:
+  - `harness:selftest` with the final code: initial reset 0 writes; 13 dirt steps, 37 writes; the read-back saw
+    34 problems, every step's among them; reset 28 writes (including 3 channel deletes, 1 unpin, 1 bulk delete,
+    5 channel PATCHes, 2 member PATCHes); read-back at baseline; second reset 0 writes; 299 requests, 0 invalid.
+  - The same with the thread-slowmode restore removed (reverted after): `selftest FAILED: LabCheckFailed
+    ... reset (28 writes) left the lab off baseline: lab-public-thread slowmode (5)`. The reset after it, with the
+    fix back, made 1 write (`PATCH /channels/{id}`).
+  - The same with reset's `@everyone` step and timeout clearing removed (reverted after): `reset (27 writes) left
+    the lab off baseline: @everyone permissions (1024, not 0); subject timeout (...); target timeout (...)`. The
+    reset after it made 3 writes (one role PATCH, two member PATCHes). These two mutations still pass
+    `bun run test`; they are effectful reset steps, and the self-test is their check.
+  - Offline mutation checks (each reverted, each failed `bun run test`): every `IdentityCheck` check removed in
+    turn (application ID, distinct bots, guild name, `#rules`, top role), an empty or name-only protected set,
+    arming before the checks; no status counting in `SharedHttpClient`; smoke skipping a missing ID, dropping
+    the thread reads, the control reading the subject; sticker writes allowed, sticker names ignored, form
+    fields not read; the overwrite sub-route length check; thread names ignored, thread-from-message creates
+    unchecked, the thread-create method check; the thread slowmode restore; and the read-back ignoring thread
+    slowmode, `@everyone`, timeouts or system message types, and `unseen` going blind.
 

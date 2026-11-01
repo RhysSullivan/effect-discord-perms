@@ -17,8 +17,8 @@
  *    to `lab-tag`.
  * 6. Threads: enumerate active and archived threads (public archived, private archived, joined private
  *    archived) under lab channels; delete scenario threads; unarchive and unlock the provisioned threads,
- *    restore their names and auto-archive (10080 minutes); the subject is a member of none of them and the
- *    target of all of them (so it can post fixtures in the private thread).
+ *    restore their names, slowmode 0 and auto-archive (10080 minutes); the subject is a member of none of them
+ *    and the target of all of them (so it can post fixtures in the private thread).
  * 7. Pins and messages: delete every message the harness, the subject or the target wrote in a lab channel
  *    (bulk delete below 14 days, single deletes above), so untracked messages from a timed-out request go too.
  *    A forum post's starter message is kept, and system messages Discord does not allow deleting (a thread's
@@ -115,9 +115,13 @@ export const channelPatch = (current: Wire.Channel, name: string, parent: Channe
   return Object.keys(patch).length === 0 ? undefined : patch
 }
 
-/** The fields of a thread PATCH. */
+/**
+ * The fields of a thread PATCH. Of the scenario channel settings (§5.8 `channelSettings`), a thread has a name
+ * and a slowmode; `requireTag` belongs to the parent forum. Threads have no overwrites and no parent to move.
+ */
 export interface ThreadPatch {
   readonly name?: string
+  readonly rate_limit_per_user?: 0
   readonly archived?: false
   readonly locked?: false
   readonly auto_archive_duration?: 10080
@@ -128,6 +132,7 @@ export const threadPatch = (current: Wire.Channel, name: string): ThreadPatch | 
   const metadata = current.thread_metadata
   const patch: ThreadPatch = {
     ...(current.name !== name ? { name } : {}),
+    ...(current.rate_limit_per_user !== undefined && current.rate_limit_per_user !== 0 ? { rate_limit_per_user: 0 } : {}),
     ...(metadata?.archived === true ? { archived: false } : {}),
     ...(metadata?.locked === true ? { locked: false } : {}),
     ...(metadata !== undefined && metadata.auto_archive_duration !== LabIds.threadAutoArchiveMinutes ? { auto_archive_duration: 10080 } : {})

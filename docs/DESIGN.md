@@ -190,7 +190,7 @@ src/
   config/
     Credentials.ts *             ConfigProvider.fromDotEnv layer; Config.Redacted readers; takes the live lock (§5.6)
 harness/
-  main.ts                        CLI: reset | smoke | inventory | run [--repeat N] [--only glob] [--write] [--compare]
+  main.ts                        CLI: reset | smoke | selftest | inventory | run [--repeat N] [--only glob] [--write] [--compare]
   Identities.ts *                SharedHttpClient (paced, counted) outside every fresh; HarnessRest, TargetRest; subject
   IdentityCheck.ts               app IDs, distinct users, READY user, sent intents, the guild is Perms Lab (§4.4)
   Lab.ts                         Perms Lab guard on EVERY identity's writes, incl. SubjectRaw and library member ops
@@ -208,6 +208,8 @@ harness/
   Wire.ts                        schemas for the Discord objects the harness reads (dfx casts 2xx bodies); raw
                                  requests through rest.httpClient for routes dfx lacks (GuildMedia create)
   Smoke.ts                       harness:smoke's oracle reads (with a target positive control) and `inventory`
+  SelfTest.ts                    harness:selftest: dirt, a spec-based read-back that must see it, reset, read-back,
+                                 a second reset with zero writes (§5.7)
   TruthTable.ts *                schema + canonicalJson; write / compare
   scenario/
     Dsl.ts *                     Setup, Operation, Observation, Scenario
@@ -1726,6 +1728,7 @@ Milestone 0 adds these scripts to `package.json`. All `bun` scripts use
 | `verify:offline` | `bun --no-env-file scripts/verify-offline.ts` | no |
 | `harness:reset` | `bun --no-env-file harness/main.ts reset` | yes |
 | `harness:smoke` | `bun --no-env-file harness/main.ts smoke` | yes |
+| `harness:selftest` | `bun --no-env-file harness/main.ts selftest` (the reset self-test, §5.7) | yes |
 | `verify:live` | `bun --no-env-file harness/main.ts run --write --compare` | yes |
 
 `verify:offline` runs, in order, failing on the first failure and never passing
@@ -1996,9 +1999,11 @@ The registry (`test/rules.ts`). IDs use the `R-` prefix; "raw" means through
     after the harness read or created it and checked its `lab`/`lab-*` name)
     and is never `#rules` or `#mod-updates`; the harness's own top role may
     appear only in a role-position PATCH (§5.7);
-  - a new channel or role has a `lab`/`lab-*` name, and a new channel's
-    parent is a lab channel; the guild's channel-list PATCH (positions and
-    parents of any channel) is refused;
+  - a new channel, thread (forum posts included) or role has a
+    `lab`/`lab-*` name, and a new channel's parent is a lab channel; a new
+    guild sticker has a `lab-*` name (read from its multipart form), and
+    stickers are never edited or deleted; the guild's channel-list PATCH
+    (positions and parents of any channel) is refused;
   - member edits target only the subject or the target bot, and change only
     `nick` and `communication_disabled_until` (roles change through the
     per-role routes, with lab roles only; `channel_id`, `mute`, `deaf` and
@@ -2039,7 +2044,8 @@ The registry (`test/rules.ts`). IDs use the `R-` prefix; "raw" means through
 
 **Lab IDs** are persisted per run in `.lab-state.json` (git-ignored), written
 by Provision and read by Reset. Objects are tracked by ID, so a rename never
-orphans or duplicates them. Every scenario-created thread is named `lab-*`.
+orphans or duplicates them. Every scenario-created thread is named `lab-*`
+(the guard refuses any other name, §5.6).
 
 **Reset** (`harness:reset`) is idempotent. A second reset must make **zero**
 writes, and that is M2's exit check.
@@ -2055,8 +2061,11 @@ writes, and that is M2's exit check.
    Lab roles get their spec's permissions and mentionability back.
 4. Restore channel settings: name variant `a`, parent `lab`, slowmode 0,
    overwrites exactly `lab-target`'s allow (which clears every scenario's role
-   and member overwrites), forum `REQUIRE_TAG` off and tags reset to `lab-tag`,
-   thread auto-archive 10080 minutes.
+   and member overwrites), forum `REQUIRE_TAG` off and tags reset to `lab-tag`.
+   On the provisioned threads, the settings a thread has: name, slowmode 0
+   (the §5.8 `channelSettings.slowmode` can target a thread) and auto-archive
+   10080 minutes; threads have no overwrites or parent to restore, and
+   `requireTag` belongs to the parent forum.
 5. Threads: enumerate active **and** archived threads (public archived, private
    archived and joined private archived, threads.mdx) in lab channels; delete
    scenario threads; unarchive and unlock the provisioned threads; restore the
@@ -2074,6 +2083,20 @@ writes, and that is M2's exit check.
 8. Delete AutoMod rules named `lab-*`.
 
 Reset never touches `#rules`, `#mod-updates`, or anything not in the lab set.
+
+**Reset self-test** (`harness:selftest`, `harness/SelfTest.ts`). The smoke and
+reset exit checks run on a lab that is already clean, where a reset that wrote
+nothing would pass too, so reset's write paths have their own live check, to
+re-run whenever `Reset.ts` changes: reset, then a read-back that must find the
+lab at baseline; dirt of every kind reset restores, applied through the
+guarded identities; the read-back again, which must report each dirt step's
+expected problem (so a blind read-back fails); reset; the read-back, which must
+find nothing; and a second reset with zero writes. The read-back judges the
+lab from the spec in `LabIds.ts`, not from reset's patch functions, so a field
+reset forgets shows up (M2: thread slowmode). It leaves out renames (H-162:
+two per channel per ten minutes), AutoMod rules (the guard refuses to create
+them), messages older than 14 days, managed-role permissions (no bot has a
+managed role in Perms Lab) and stage pins (400 50019, M2).
 
 **Provisioning** is idempotent by stored ID.
 
@@ -2182,7 +2205,11 @@ Validity predicates (in `[sd:pairwise.ts]`):
   `missing=none` means `removal=absent`; `connect` only for voice and stage.
   MentionEveryone is never granted in an @everyone row (Safety).
 - **react, pins, channelEdit**: `missing=none` means `removal=absent`;
-  `connect` only for voice (and stage). The react row
+  `connect` only for voice (and stage). Open for M4: in M2 the harness
+  (Administrator) pinning its own message in `lab-stage`'s chat got 400 50019
+  "This message cannot be pinned in this channel", so stage pin rows either
+  expect 50019 or leave the pins channel dimension, with the reason in
+  `LOG.md`. The react row
   `unicode-existing × add-reactions missing` is kept: it tests the conditional
   AddReactions rule and is expected to succeed.
 - **createThread**: private only under text; private under announcement is a
@@ -2498,7 +2525,8 @@ Live milestones run serially, under the lock.
   - `Lab.ts` (guard on every identity), `Lock.ts`, `LabIds.ts`, `Provision.ts`,
     `Reset.ts`, `Pacing.ts`;
   - `rest/Oracle.ts`;
-  - `harness/main.ts` with `reset` and `smoke`;
+  - `harness/main.ts` with `reset`, `smoke` and `selftest` (the reset
+    self-test, §5.7);
   - `smoke` runs the identity checks, reset, provision and one oracle read per
     lab channel, plus a positive control (the target in `lab-text`, which must
     read exactly `lab-target`'s allow), and prints counts. An unavailable
@@ -2509,8 +2537,9 @@ Live milestones run serially, under the lock.
   - `mfaLevel`;
   - both managed roles' positions;
   - whether the harness has the Message Content flag.
-- Exit: `bun run harness:smoke` exits 0 twice in a row, and the second
-  `bun run harness:reset` reports `writes: 0`. Then `bun run verify:offline`.
+- Exit: `bun run harness:selftest` exits 0; `bun run harness:smoke` exits 0
+  twice in a row, and the second `bun run harness:reset` reports `writes: 0`.
+  Then `bun run verify:offline`.
 
 **M3 State store, resolver, preflight, matrix runner** (live)
 

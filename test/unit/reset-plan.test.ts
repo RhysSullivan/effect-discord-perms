@@ -80,14 +80,31 @@ describe("channel restoration", () => {
 })
 
 describe("thread restoration", () => {
-  const thread = (metadata: NonNullable<Wire.Channel["thread_metadata"]>): Wire.Channel => ({ id: ChannelId.make("300000000000000010"), type: 11, name: "lab-public-thread", thread_metadata: metadata })
+  const thread = (metadata: NonNullable<Wire.Channel["thread_metadata"]>, overrides: Partial<Wire.Channel> = {}): Wire.Channel => ({
+    id: ChannelId.make("300000000000000010"),
+    type: 11,
+    name: "lab-public-thread",
+    rate_limit_per_user: 0,
+    thread_metadata: metadata,
+    ...overrides
+  })
+  const baseline = { archived: false, locked: false, auto_archive_duration: 10080 }
 
   it("unarchives, unlocks and restores auto-archive, and writes nothing at baseline", () => {
-    expect(threadPatch(thread({ archived: false, locked: false, auto_archive_duration: 10080 }), "lab-public-thread")).toBeUndefined()
+    expect(threadPatch(thread(baseline), "lab-public-thread")).toBeUndefined()
     expect(threadPatch(thread({ archived: true, locked: true, auto_archive_duration: 60 }), "lab-public-thread")).toEqual({
       archived: false,
       locked: false,
       auto_archive_duration: 10080
+    })
+  })
+
+  it("restores the name and slowmode, the channel settings a thread has", () => {
+    expect(threadPatch(thread(baseline, { rate_limit_per_user: 5 }), "lab-public-thread")).toEqual({ rate_limit_per_user: 0 })
+    expect(threadPatch(thread(baseline, { name: "lab-public-thread-b" }), "lab-public-thread")).toEqual({ name: "lab-public-thread" })
+    expect(threadPatch(thread({ archived: true, locked: false, auto_archive_duration: 10080 }, { rate_limit_per_user: 21600 }), "lab-public-thread")).toEqual({
+      rate_limit_per_user: 0,
+      archived: false
     })
   })
 })

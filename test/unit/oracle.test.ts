@@ -1,16 +1,18 @@
 import { BunFileSystem } from "@effect/platform-bun"
 import { describe, expect, it } from "@effect/vitest"
-import { Duration, Effect, Exit } from "effect"
+import { Duration, Effect, Exit, Layer } from "effect"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { DiscordREST } from "dfx/DiscordREST"
+import { HarnessRest } from "../../harness/Identities.ts"
 import { LabCheckFailed } from "../../harness/Lab.ts"
 import * as LabIds from "../../harness/LabIds.ts"
 import { DiscordResponse } from "../../src/errors/Cause.ts"
-import { availabilityOf, checkOracle, type OracleResult, oracleProblems } from "../../harness/Smoke.ts"
+import { availabilityOf, checkOracle, type OracleResult, oracleProblems, oracleReads, oracleTargets } from "../../harness/Smoke.ts"
 import { memberPermissions, OracleFailed, route } from "../../src/rest/Oracle.ts"
-import { ChannelId, GuildId, UserId } from "../../src/Snowflake.ts"
+import type * as Reset from "../../harness/Reset.ts"
+import { ApplicationId, ChannelId, GuildId, UserId } from "../../src/Snowflake.ts"
 import { json, type Scripted, scriptedRest } from "../support/fakeDiscord.ts"
 
 /** The permission oracle (DESIGN §5.10 step 8) and the lab-state file (§5.7). */
@@ -111,6 +113,64 @@ describe("smoke's judgment of the oracle", () => {
       const exit = yield* Effect.exit(checkOracle(result([0n], 0n)))
       expect(Exit.isFailure(exit) && Exit.hasFails(exit)).toBe(true)
       expect(exit).toEqual(Exit.fail(new LabCheckFailed({ check: "oracle", detail: oracleProblems(result([0n], 0n)).join("; ") })))
+    })
+  )
+})
+
+describe("smoke's oracle reads", () => {
+  const guildId = GuildId.make("100000000000000000")
+  const subject = UserId.make("200000000000000001")
+  const target = UserId.make("200000000000000002")
+  const names = [...LabIds.channelSpecs.map((spec) => spec.name), ...LabIds.threadSpecs.map((spec) => spec.name)]
+  const ids = Object.fromEntries(names.map((name, index) => [name, ChannelId.make(`3000000000000000${String(index).padStart(2, "0")}`)]))
+  const { "lab-media": _media, ...withoutMedia } = ids
+  const provisioned: LabIds.LabState = { ...LabIds.empty(guildId), channels: withoutMedia, unavailable: { "lab-media": { status: 400, code: 50024 } } }
+  const context: Reset.Context = { guildId, harnessUserId: UserId.make("200000000000000000"), subjectUserId: subject, targetUserId: target, subjectApplicationId: ApplicationId.make("100000000000000002") }
+
+  it.effect("read every lab channel and thread but the category and an unavailable kind", () =>
+    Effect.gen(function* () {
+      const { targets, control } = yield* oracleTargets(provisioned)
+      expect(targets.map((entry) => entry.name)).toEqual(names.filter((name) => name !== "lab" && name !== "lab-media"))
+      expect(control).toBe(ids["lab-text"])
+    })
+  )
+
+  it.effect("fail when a channel or thread that is not unavailable has no stored ID", () =>
+    Effect.gen(function* () {
+      const { "lab-private-thread": _thread, ...withoutThread } = withoutMedia
+      expect(yield* Effect.exit(oracleTargets({ ...provisioned, channels: withoutThread }))).toEqual(
+        Exit.fail(new LabCheckFailed({ check: "oracle", detail: "not provisioned, so smoke cannot read them: lab-private-thread" }))
+      )
+      const { unavailable: _unavailable, ...mediaForgotten } = provisioned
+      expect(yield* Effect.exit(oracleTargets(mediaForgotten))).toEqual(
+        Exit.fail(new LabCheckFailed({ check: "oracle", detail: "not provisioned, so smoke cannot read them: lab-media" }))
+      )
+      expect(Exit.isFailure(yield* Effect.exit(oracleTargets(LabIds.empty(guildId))))).toBe(true)
+      const { "lab-text": _text, ...withoutText } = withoutMedia
+      expect(yield* Effect.exit(oracleTargets({ ...provisioned, channels: withoutText, unavailable: { ...provisioned.unavailable, "lab-text": { status: 400, code: 50024 } } }))).toEqual(
+        Exit.fail(new LabCheckFailed({ check: "oracle", detail: "not provisioned, so smoke cannot read them: lab-text (the control)" }))
+      )
+    })
+  )
+
+  it.effect("read the subject in each, and the target in lab-text for the control", () =>
+    Effect.gen(function* () {
+      const asked: Array<string> = []
+      const rest = scriptedRest((method, requestPath, query) => {
+        const match = /^\/channels\/(\d+)\/permissions\/member\/(\d+)$/.exec(requestPath)
+        if (method !== "GET" || match === null || query.get("implicit") !== "false") return json(500, {})
+        asked.push(`${match[1]}:${match[2]}`)
+        return json(200, { permissions: match[2] === target && match[1] === ids["lab-text"] ? LabIds.targetOverwriteAllow.toString() : "0" })
+      })
+      const harnessRest = Layer.effect(HarnessRest, Effect.map(Effect.service(DiscordREST), (client) => HarnessRest.of(client))).pipe(Layer.provide(rest))
+      const result = yield* oracleReads(context, provisioned).pipe(Effect.provide(harnessRest))
+      expect(result.reads).toHaveLength(10)
+      expect(result.reads.every((entry) => entry.permissions === 0n)).toBe(true)
+      expect(result.control).toEqual({ permissions: LabIds.targetOverwriteAllow, expected: LabIds.targetOverwriteAllow })
+      expect(result.availability).toBe("available")
+      expect(asked.at(-1)).toBe(`${ids["lab-text"]}:${target}`)
+      expect(asked.slice(0, -1).every((entry) => entry.endsWith(`:${subject}`))).toBe(true)
+      expect(oracleProblems(result)).toEqual([])
     })
   )
 })

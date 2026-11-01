@@ -12,9 +12,9 @@
  * - the host is discord.com, and every guild route (read or write) names `DISCORD_TEST_GUILD_ID`;
  * - nothing is written before `arm` (the identity checks have run and found the lab's protected channels);
  * - a channel write targets an admitted lab channel: named `lab` or `lab-*`, in the lab guild, and never
- *   `#rules`, `#mod-updates` or the guild's rules or public-updates channel; a new channel has a lab name and
- *   no parent outside the lab; the guild's channel-list PATCH (positions and parents of any channel) is
- *   refused;
+ *   `#rules`, `#mod-updates` or the guild's rules or public-updates channel; a new channel or thread has a lab
+ *   name, and a new channel no parent outside the lab; the guild's channel-list PATCH (positions and parents
+ *   of any channel) is refused;
  * - thread membership changes only for `@me`, the subject and the target (adding a human posts a notice that
  *   can ping them);
  * - a role write targets an admitted lab role (`lab-*`), the subject's or target's managed role, or (PATCH
@@ -23,7 +23,8 @@
  *   position;
  * - member edits target only the subject or the target bot (or `@me`), and change only `nick` and
  *   `communication_disabled_until`; roles change only through the per-role routes, with lab roles;
- * - AutoMod writes only delete rules named `lab-*` that the harness listed;
+ * - AutoMod writes only delete rules named `lab-*` that the harness listed; a new sticker has a `lab-*` name,
+ *   and stickers are never edited or deleted;
  * - **kick and ban are refused outright.** §5.6 allows them only where harness-side reads taken just before
  *   the call predict failure; that predicate arrives with the members family (M4). Until then no kick or ban
  *   route is allowed at all;
@@ -75,13 +76,33 @@ export const isLabChannelName = (name: string): boolean => name === "lab" || nam
 export const isLabRoleName = (name: string): boolean => name.startsWith("lab-")
 /** An AutoMod rule name the lab owns. */
 export const isLabRuleName = (name: string): boolean => name.startsWith("lab-")
+/** A guild sticker name the lab owns. */
+export const isLabStickerName = (name: string): boolean => name.startsWith("lab-")
+
+/**
+ * What the guard can read of a request body: JSON (or any bytes) as text, the string fields of a multipart
+ * form (dfx sends stickers, and messages with files, as `FormData`), or nothing readable.
+ */
+export type RequestBody =
+  | { readonly _tag: "None" }
+  | { readonly _tag: "Text"; readonly text: string }
+  | { readonly _tag: "Form"; readonly fields: ReadonlyMap<string, string> }
+
+/** A request without a readable body. */
+export const noBody: RequestBody = { _tag: "None" }
+/** A request whose body is `text` (JSON as dfx and the raw helper send it). */
+export const textBody = (text: string): RequestBody => ({ _tag: "Text", text })
+/** A multipart request with these string fields (file parts are not fields). */
+export const formBody = (fields: ReadonlyMap<string, string>): RequestBody => ({ _tag: "Form", fields })
+
+const textOf = (body: RequestBody): Option.Option<string> => (body._tag === "Text" ? Option.some(body.text) : Option.none())
 
 const RolePositions = Schema.fromJsonString(Schema.Array(Schema.Struct({ id: Schema.String })))
 const decodeRolePositions = Schema.decodeUnknownOption(RolePositions)
 const NewChannel = Schema.fromJsonString(Schema.Struct({ name: Schema.String, parent_id: Schema.optionalKey(Schema.NullOr(Schema.String)) }))
 const decodeNewChannel = Schema.decodeUnknownOption(NewChannel)
-const NewRole = Schema.fromJsonString(Schema.Struct({ name: Schema.String }))
-const decodeNewRole = Schema.decodeUnknownOption(NewRole)
+const Named = Schema.fromJsonString(Schema.Struct({ name: Schema.String }))
+const decodeNamed = Schema.decodeUnknownOption(Named)
 const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 const decodeJsonObject = Schema.decodeUnknownOption(JsonObject)
 
@@ -92,8 +113,9 @@ const decodeJsonObject = Schema.decodeUnknownOption(JsonObject)
  */
 const memberFields: ReadonlySet<string> = new Set(["nick", "communication_disabled_until"])
 
-const guildWrite = (state: GuardState, armed: Armed, method: string, route: string, rest: ReadonlyArray<string>, bodyText: Option.Option<string>): Verdict => {
+const guildWrite = (state: GuardState, armed: Armed, method: string, route: string, rest: ReadonlyArray<string>, body: RequestBody): Verdict => {
   const [area, target, sub, subTarget] = rest
+  const bodyText = textOf(body)
   const isBot = (user: string | undefined): boolean => user === armed.subjectUserId || user === armed.targetUserId
   const isLabRole = (role: string | undefined): boolean => role !== undefined && state.roles.has(role)
   const memberEdit = (): Verdict => {
@@ -116,7 +138,7 @@ const guildWrite = (state: GuardState, armed: Armed, method: string, route: stri
     }
     case "roles": {
       if (rest.length === 1 && method === "POST") {
-        const created = Option.flatMap(bodyText, decodeNewRole)
+        const created = Option.flatMap(bodyText, decodeNamed)
         return Option.isSome(created) && isLabRoleName(created.value.name) ? allow : refuse(`${route}: a new role must have a lab name`)
       }
       if (rest.length === 1 && method === "PATCH") {
@@ -140,8 +162,11 @@ const guildWrite = (state: GuardState, armed: Armed, method: string, route: stri
     case "bans":
     case "bulk-ban":
       return refuse(`${route}: ban is refused (no harness-side failure prediction yet)`)
-    case "stickers":
-      return rest.length === 1 && method === "POST" ? allow : refuse(`${route}: sticker write not allowed`)
+    case "stickers": {
+      if (rest.length !== 1 || method !== "POST") return refuse(`${route}: sticker write not allowed`)
+      const name = body._tag === "Form" ? Option.fromUndefinedOr(body.fields.get("name")) : Option.none()
+      return Option.isSome(name) && isLabStickerName(name.value) ? allow : refuse(`${route}: a new sticker must have a lab name`)
+    }
     case "auto-moderation":
       return rest.length === 3 && target === "rules" && method === "DELETE" && sub !== undefined && state.autoModRules.has(sub)
         ? allow
@@ -151,11 +176,20 @@ const guildWrite = (state: GuardState, armed: Armed, method: string, route: stri
   }
 }
 
-const channelWrite = (state: GuardState, armed: Armed, route: string, channel: string | undefined, rest: ReadonlyArray<string>): Verdict => {
+const channelWrite = (state: GuardState, armed: Armed, method: string, route: string, channel: string | undefined, rest: ReadonlyArray<string>, body: RequestBody): Verdict => {
   if (channel === undefined || !state.channels.has(channel)) return refuse(`${route}: not a lab channel`)
   if (armed.protectedChannels.has(channel)) return refuse(`${route}: a protected channel`)
-  const [area, target] = rest
+  const [area, target, sub] = rest
   if (area === "webhooks" || area === "invites" || area === "followers" || area === "recipients") return refuse(`${route}: not allowed in the lab`)
+  // A thread (or forum post) is created by `POST threads` or `POST messages/{id}/threads`; it must have a lab
+  // name, so reset can tell scenario threads from anything else (§5.7).
+  const threadCreate = (rest.length === 1 && area === "threads") || (rest.length === 3 && area === "messages" && sub === "threads")
+  if (threadCreate) {
+    if (method !== "POST") return refuse(`${route}: thread write not allowed`)
+    const created = Option.flatMap(textOf(body), decodeNamed)
+    if (Option.isNone(created)) return refuse(`${route}: thread body could not be read`)
+    return isLabChannelName(created.value.name) ? allow : refuse(`${route}: a new thread must have a lab name, not "${created.value.name}"`)
+  }
   if (area === "permissions") {
     const allowed = target !== undefined && (state.roles.has(target) || target === state.guildId || target === armed.subjectUserId || target === armed.targetUserId)
     return rest.length === 2 && allowed ? allow : refuse(`${route}: overwrite target outside the lab`)
@@ -169,11 +203,11 @@ const channelWrite = (state: GuardState, armed: Armed, route: string, channel: s
 }
 
 /**
- * The guard's decision for a request, as a pure function of the state, the method, the full URL and the JSON
- * body text. The body is read for channel and role creation, role-position PATCHes and member edits; a body
- * those routes cannot read is refused.
+ * The guard's decision for a request, as a pure function of the state, the method, the full URL and the body.
+ * The body is read for channel, thread, role and sticker creation, role-position PATCHes and member edits; a
+ * body those routes cannot read is refused.
  */
-export const verdict = (state: GuardState, method: string, url: string, bodyText: Option.Option<string>): Verdict => {
+export const verdict = (state: GuardState, method: string, url: string, body: RequestBody): Verdict => {
   const parsed = URL.canParse(url) ? new URL(url) : undefined
   if (parsed === undefined || parsed.hostname !== "discord.com") return refuse(`not a Discord API URL: ${method} ${url}`)
   const segments = parsed.pathname.replace(/^\/api\/v\d+/, "").split("/").filter((segment) => segment.length > 0)
@@ -187,9 +221,9 @@ export const verdict = (state: GuardState, method: string, url: string, bodyText
   const armed = state.armed.value
   switch (head) {
     case "guilds":
-      return guildWrite(state, armed, upper, route, rest, bodyText)
+      return guildWrite(state, armed, upper, route, rest, body)
     case "channels":
-      return channelWrite(state, armed, route, id, rest)
+      return channelWrite(state, armed, upper, route, id, rest, body)
     case "applications":
       return rest[0] === "guilds" ? allow : refuse(`${route}: only guild commands in the lab guild`)
     default:
@@ -216,8 +250,22 @@ export interface Interface {
 /** The process-wide Perms Lab guard. */
 export class LabGuard extends Context.Service<LabGuard, Interface>()("harness/LabGuard") {}
 
-const bodyText = (request: HttpClientRequest.HttpClientRequest): Option.Option<string> =>
-  request.body._tag === "Uint8Array" ? Option.some(new TextDecoder().decode(request.body.body)) : Option.none()
+/** What the guard reads of an outgoing request's body (see {@link RequestBody}). */
+export const requestBody = (request: HttpClientRequest.HttpClientRequest): RequestBody => {
+  switch (request.body._tag) {
+    case "Uint8Array":
+      return textBody(new TextDecoder().decode(request.body.body))
+    case "FormData": {
+      const fields = new Map<string, string>()
+      for (const [key, value] of request.body.formData.entries()) if (typeof value === "string") fields.set(key, value)
+      return formBody(fields)
+    }
+    case "Empty":
+    case "Raw":
+    case "Stream":
+      return noBody
+  }
+}
 
 /** Builds the guard for the lab guild. It starts unarmed: only reads are allowed. */
 export const make = (guildId: GuildId): Effect.Effect<Interface> =>
@@ -236,7 +284,7 @@ export const make = (guildId: GuildId): Effect.Effect<Interface> =>
       check: (request) =>
         Ref.get(state).pipe(
           Effect.flatMap((current) => {
-            const decision = verdict(current, request.method, request.url, bodyText(request))
+            const decision = verdict(current, request.method, request.url, requestBody(request))
             return decision._tag === "Allow" ? Effect.void : Effect.die(new Error(`lab guard refused ${decision.reason}`))
           })
         ),

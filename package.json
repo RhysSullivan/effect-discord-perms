@@ -14,6 +14,7 @@
     "verify:offline": "bun --no-env-file scripts/verify-offline.ts",
     "harness:reset": "bun --no-env-file harness/main.ts reset",
     "harness:smoke": "bun --no-env-file harness/main.ts smoke",
+    "harness:selftest": "bun --no-env-file harness/main.ts selftest",
     "verify:live": "bun --no-env-file harness/main.ts run --write --compare"
   },
   "dependencies": {

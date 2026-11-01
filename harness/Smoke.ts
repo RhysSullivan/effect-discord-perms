@@ -8,6 +8,7 @@ import { PermissionFlagsBits } from "discord-api-types/v10"
 import { Effect, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import * as Oracle from "../src/rest/Oracle.ts"
+import type { ChannelId } from "../src/Snowflake.ts"
 import { HarnessRest } from "./Identities.ts"
 import { requestDeadline } from "./IdentityCheck.ts"
 import { LabCheckFailed, type LabRequestFailed, labStep } from "./Lab.ts"
@@ -90,30 +91,63 @@ export const checkOracle = (result: OracleResult): Effect.Effect<void, LabCheckF
   return problems.length === 0 ? Effect.void : Effect.fail(new LabCheckFailed({ check: "oracle", detail: problems.join("; ") }))
 }
 
+/** The channels and threads smoke reads: every one in the spec but the category, by stored ID. */
+export interface OracleTargets {
+  readonly targets: ReadonlyArray<{ readonly name: string; readonly id: ChannelId }>
+  /** `lab-text`, where the control reads the target. */
+  readonly control: ChannelId
+}
+
 /**
- * Reads the subject's permissions in every provisioned lab channel and thread through the oracle
- * (`implicit=false`), and the control, as the harness. Reads only; {@link checkOracle} judges the result.
+ * The oracle's targets in `state`: every lab channel but the category, and every lab thread. A channel Discord
+ * would not create (`unavailable`, §5.7) is skipped; any other one without a stored ID fails with
+ * `LabCheckFailed`, because smoke would otherwise pass without reading it.
  */
-export const oracleReads = (context: Reset.Context): Effect.Effect<OracleResult, Oracle.OracleFailed | LabCheckFailed | PlatformError, HarnessRest> =>
+export const oracleTargets = (state: LabIds.LabState): Effect.Effect<OracleTargets, LabCheckFailed> => {
+  const names = [...LabIds.channelSpecs.filter((spec) => spec.type !== 4).map((spec) => spec.name), ...LabIds.threadSpecs.map((spec) => spec.name)]
+  const unavailable = state.unavailable ?? {}
+  const targets: Array<{ readonly name: string; readonly id: ChannelId }> = []
+  const missing: Array<string> = []
+  for (const name of names) {
+    const id = state.channels[name]
+    if (id !== undefined) targets.push({ name, id })
+    else if (unavailable[name] === undefined) missing.push(name)
+  }
+  const control = state.channels["lab-text"]
+  if (control === undefined && !missing.includes("lab-text")) missing.push("lab-text (the control)")
+  if (missing.length > 0 || control === undefined) {
+    return Effect.fail(new LabCheckFailed({ check: "oracle", detail: `not provisioned, so smoke cannot read them: ${missing.join(", ")}` }))
+  }
+  return Effect.succeed({ targets, control })
+}
+
+/**
+ * Reads the subject's permissions in every provisioned lab channel and thread of `state` through the oracle
+ * (`implicit=false`), and the control (the target in `lab-text`), as the harness. Reads only;
+ * {@link checkOracle} judges the result.
+ */
+export const oracleReads = (context: Reset.Context, state: LabIds.LabState): Effect.Effect<OracleResult, Oracle.OracleFailed | LabCheckFailed, HarnessRest> =>
   Effect.gen(function* () {
     const rest = yield* HarnessRest
-    const state = yield* LabIds.load(context.guildId).pipe(Effect.provide(BunFileSystem.layer))
-    const names = [...LabIds.channelSpecs.filter((spec) => spec.type !== 4).map((spec) => spec.name), ...LabIds.threadSpecs.map((spec) => spec.name)]
+    const { targets, control: text } = yield* oracleTargets(state)
     const permissionsOf = (read: Oracle.OracleRead): bigint | undefined => (read._tag === "Permissions" ? read.permissions : undefined)
     const reads: Array<OracleReadout> = []
-    for (const name of names) {
-      const id = state.channels[name]
-      if (id === undefined) continue
-      reads.push({ channel: name, permissions: permissionsOf(yield* Oracle.memberPermissions(rest, id, context.subjectUserId, requestDeadline)) })
+    for (const target of targets) {
+      reads.push({ channel: target.name, permissions: permissionsOf(yield* Oracle.memberPermissions(rest, target.id, context.subjectUserId, requestDeadline)) })
     }
-    const text = state.channels["lab-text"]
-    if (text === undefined) return yield* new LabCheckFailed({ check: "oracle control", detail: "lab-text is not provisioned" })
     const control: Control = {
       permissions: permissionsOf(yield* Oracle.memberPermissions(rest, text, context.targetUserId, requestDeadline)),
       expected: LabIds.targetOverwriteAllow
     }
     return { availability: availabilityOf([...reads.map((read) => read.permissions), control.permissions]), reads, control }
   })
+
+/** {@link oracleReads} over the stored `.lab-state.json`. */
+export const oracleReadsOfStoredLab = (context: Reset.Context): Effect.Effect<OracleResult, Oracle.OracleFailed | LabCheckFailed | PlatformError, HarnessRest> =>
+  LabIds.load(context.guildId).pipe(
+    Effect.provide(BunFileSystem.layer),
+    Effect.flatMap((state) => oracleReads(context, state))
+  )
 
 const typeNames: Readonly<Record<number, string>> = { 0: "text", 2: "voice", 4: "category", 5: "announcement", 13: "stage", 15: "forum", 16: "media" }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit, Option } from "effect"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
-import { type GuardState, make, verdict } from "../../harness/Lab.ts"
+import { formBody, type GuardState, make, noBody, type RequestBody, textBody, verdict } from "../../harness/Lab.ts"
 import { ChannelId, GuildId, RoleId, UserId } from "../../src/Snowflake.ts"
 
 /**
@@ -32,8 +32,9 @@ const armed: GuardState = {
   autoModRules: new Set([labRule])
 }
 const api = (path: string) => `https://discord.com/api/v10${path}`
-const decide = (method: string, path: string, body?: string, state: GuardState = armed) =>
-  verdict(state, method, api(path), body === undefined ? Option.none() : Option.some(body))._tag
+const decide = (method: string, path: string, body?: string | RequestBody, state: GuardState = armed) =>
+  verdict(state, method, api(path), body === undefined ? noBody : typeof body === "string" ? textBody(body) : body)._tag
+const form = (fields: Record<string, string>): RequestBody => formBody(new Map(Object.entries(fields)))
 const json = (value: unknown): string => JSON.stringify(value)
 
 describe("the guard's verdict", () => {
@@ -75,6 +76,18 @@ describe("the guard's verdict", () => {
     expect(decide("PATCH", `/guilds/${guild}/channels`, json({ name: "lab-text", type: 0 }))).toBe("Refuse")
   })
 
+  it("creates only lab-named threads and forum posts", () => {
+    expect(decide("POST", `/channels/${labChannel}/threads`, json({ name: "lab-scenario-thread", type: 11 }))).toBe("Allow")
+    expect(decide("POST", `/channels/${labChannel}/threads`, json({ name: "lab-post", message: { content: "x" } }))).toBe("Allow")
+    expect(decide("POST", `/channels/${labChannel}/messages/1/threads`, json({ name: "lab-from-message" }))).toBe("Allow")
+    expect(decide("POST", `/channels/${labChannel}/threads`, json({ name: "general-chat", type: 11 }))).toBe("Refuse")
+    expect(decide("POST", `/channels/${labChannel}/messages/1/threads`, json({ name: "Thread" }))).toBe("Refuse")
+    expect(decide("POST", `/channels/${labChannel}/threads`)).toBe("Refuse")
+    expect(decide("POST", `/channels/${labChannel}/threads`, form({ name: "lab-post" }))).toBe("Refuse")
+    expect(decide("PATCH", `/channels/${labChannel}/threads`, json({ name: "lab-post" }))).toBe("Refuse")
+    expect(decide("POST", `/channels/${elsewhere}/threads`, json({ name: "lab-post" }))).toBe("Refuse")
+  })
+
   it("changes thread membership only for the bots, never a human", () => {
     expect(decide("PUT", `/channels/${labChannel}/thread-members/@me`)).toBe("Allow")
     expect(decide("DELETE", `/channels/${labChannel}/thread-members/@me`)).toBe("Allow")
@@ -92,6 +105,8 @@ describe("the guard's verdict", () => {
     expect(decide("PUT", `/channels/${labChannel}/permissions/${subject}`)).toBe("Allow")
     expect(decide("PUT", `/channels/${labChannel}/permissions/${rhys}`)).toBe("Refuse")
     expect(decide("PUT", `/channels/${labChannel}/permissions/${foreignRole}`)).toBe("Refuse")
+    expect(decide("PUT", `/channels/${labChannel}/permissions/${labRole}/x`)).toBe("Refuse")
+    expect(decide("PUT", `/channels/${labChannel}/permissions`)).toBe("Refuse")
   })
 
   it("refuses kick and ban outright, and member edits of anyone but the two bots", () => {
@@ -146,6 +161,17 @@ describe("the guard's verdict", () => {
     expect(decide("PATCH", `/guilds/${guild}/auto-moderation/rules/${labRule}`, json({ enabled: false }))).toBe("Refuse")
   })
 
+  it("creates only lab-named stickers, as a form, and never edits or deletes one", () => {
+    expect(decide("POST", `/guilds/${guild}/stickers`, form({ name: "lab-sticker", tags: "lab" }))).toBe("Allow")
+    expect(decide("POST", `/guilds/${guild}/stickers`, form({ name: "wave", tags: "lab" }))).toBe("Refuse")
+    expect(decide("POST", `/guilds/${guild}/stickers`, form({ tags: "lab" }))).toBe("Refuse")
+    expect(decide("POST", `/guilds/${guild}/stickers`, json({ name: "lab-sticker" }))).toBe("Refuse")
+    expect(decide("POST", `/guilds/${guild}/stickers`)).toBe("Refuse")
+    expect(decide("PATCH", `/guilds/${guild}/stickers/1`, form({ name: "lab-sticker" }))).toBe("Refuse")
+    expect(decide("PATCH", `/guilds/${guild}/stickers/1`, json({ name: "lab-sticker" }))).toBe("Refuse")
+    expect(decide("DELETE", `/guilds/${guild}/stickers/1`)).toBe("Refuse")
+  })
+
   it("refuses guild edits, DMs, leaving the guild, global commands and other hosts", () => {
     expect(decide("PATCH", `/guilds/${guild}`)).toBe("Refuse")
     expect(decide("POST", `/guilds/${otherGuild}/channels`)).toBe("Refuse")
@@ -154,7 +180,7 @@ describe("the guard's verdict", () => {
     expect(decide("PUT", "/applications/1/commands")).toBe("Refuse")
     expect(decide("PUT", `/applications/1/guilds/${guild}/commands`)).toBe("Allow")
     expect(decide("POST", `/interactions/1/token/callback`)).toBe("Refuse")
-    expect(verdict(armed, "GET", "https://example.com/api/v10/users/@me", Option.none())._tag).toBe("Refuse")
+    expect(verdict(armed, "GET", "https://example.com/api/v10/users/@me", noBody)._tag).toBe("Refuse")
   })
 })
 
@@ -195,6 +221,15 @@ describe("the guard service", () => {
       const create = (body: unknown) => HttpClientRequest.bodyJson(HttpClientRequest.post(api(`/guilds/${guild}/channels`)), body).pipe(Effect.orDie)
       expect(Exit.isSuccess(yield* Effect.exit(guard.check(yield* create({ name: "lab-text", type: 0 }))))).toBe(true)
       expect(Exit.isFailure(yield* Effect.exit(guard.check(yield* create({ name: "general", type: 0 }))))).toBe(true)
+      const sticker = (name: string) => {
+        const formData = new FormData()
+        formData.set("name", name)
+        formData.set("tags", "lab")
+        formData.set("file", new File([new Uint8Array([1, 2, 3])], "lab.png", { type: "image/png" }))
+        return HttpClientRequest.bodyFormData(HttpClientRequest.post(api(`/guilds/${guild}/stickers`)), formData)
+      }
+      expect(Exit.isSuccess(yield* Effect.exit(guard.check(sticker("lab-sticker"))))).toBe(true)
+      expect(Exit.isFailure(yield* Effect.exit(guard.check(sticker("wave"))))).toBe(true)
     })
   )
 })

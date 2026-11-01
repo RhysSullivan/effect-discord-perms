@@ -4,6 +4,8 @@
  *   bun run harness:reset    identity checks, then reset; prints `writes: N`
  *   bun run harness:smoke    identity checks, reset, provision, one oracle read per lab channel and a control;
  *                            prints counts, and fails if an available oracle disagrees with the baseline
+ *   bun run harness:selftest identity checks, then the reset self-test (`SelfTest.ts`): reset, dirt, a read-back
+ *                            that must see it, reset, a read-back at baseline, and a second reset with 0 writes
  *   bun run verify:live      the matrix (`run`), built in M3
  *
  * `inventory` (no package script) runs the identity checks and lists the lab guild's channels and roles,
@@ -20,12 +22,13 @@ import * as IdentityCheck from "./IdentityCheck.ts"
 import { Pacing, defaults as pacingDefaults } from "./Pacing.ts"
 import * as Provision from "./Provision.ts"
 import * as Reset from "./Reset.ts"
+import * as SelfTest from "./SelfTest.ts"
 import * as Smoke from "./Smoke.ts"
 
 /** Every live command is an infrastructure abort after this long. */
 const commandDeadline = Duration.minutes(30)
 
-const usage = "usage: bun harness/main.ts reset | smoke | inventory | run [--repeat N] [--only glob] [--write] [--compare]"
+const usage = "usage: bun harness/main.ts reset | smoke | selftest | inventory | run [--repeat N] [--only glob] [--write] [--compare]"
 
 const printIdentities = (report: IdentityCheck.IdentityReport) => {
   console.log(`identities: harness ${report.harness.userId} (${report.harness.username}), subject ${report.subject.userId} (${report.subject.username}), target ${report.target.userId} (${report.target.username})`)
@@ -53,7 +56,7 @@ const command = (name: string) =>
         console.log(`reset: ${Reset.summary(reset)}`)
         const provision = yield* Provision.run(Reset.contextFrom(report))
         console.log(`provision: ${Provision.summary(provision)}`)
-        const oracle = yield* Smoke.oracleReads(Reset.contextFrom(report))
+        const oracle = yield* Smoke.oracleReadsOfStoredLab(Reset.contextFrom(report))
         const flags = (bits: bigint | undefined) => {
           if (bits === undefined) return "unavailable"
           const names = Smoke.flagNames(bits)
@@ -67,6 +70,19 @@ const command = (name: string) =>
         const stats = yield* (yield* Pacing).stats
         console.log(`requests: ${stats.requests}, writes: ${stats.writes}, invalid (401/403/429): ${stats.invalid}`)
         yield* Smoke.checkOracle(oracle)
+        return
+      }
+      case "selftest": {
+        const report = yield* IdentityCheck.run
+        printIdentities(report)
+        const result = yield* SelfTest.run(Reset.contextFrom(report))
+        console.log(`initial reset: ${Reset.summary(result.initialReset)}`)
+        console.log(`dirt: ${result.dirtSteps} steps, ${result.dirtWrites} writes; the read-back saw ${result.problemsSeen} problems, every step's among them`)
+        console.log(`reset: ${Reset.summary(result.reset)}`)
+        console.log("read-back after reset: at baseline")
+        console.log(`second reset: ${Reset.summary(result.secondReset)}`)
+        const stats = yield* (yield* Pacing).stats
+        console.log(`requests: ${stats.requests}, writes: ${stats.writes}, invalid (401/403/429): ${stats.invalid}`)
         return
       }
       case "inventory": {
