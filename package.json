@@ -1,0 +1,21 @@
+{
+  "name": "effect-discord-perms",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@effect/platform-bun": "^4.1.1",
+    "dfx": "^1.1.1",
+    "discord-api-types": "^0.38.57",
+    "effect": "^4.1.1"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^4.1.1",
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5"
+  }
+}
