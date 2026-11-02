@@ -1029,3 +1029,43 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
     invalid, no 429, **0 mismatches**, `compare: identical to the previous table`. The lock was gone afterwards.
     `bun run verify:offline` is green after it (gen:errors, typecheck, 799 tests with the replay, test:types,
     hover, rules, budget).
+
+#### After the M4 verifier
+
+The verifier passed the milestone's runs but found two major and five minor problems. Each is fixed or answered
+here (details under "Live findings" and "Design deviations"):
+
+- **The exit command could abort in cleanup** (major): the verifier's first `bun run verify:live` exited 1 on a
+  404 10008 from a message Discord's list still showed after the subject's bulk delete. Cleanup and reset share
+  `Reset.deletePlanned` now, which treats 10008 as done (`test/unit/cleanup.test.ts`).
+- **`Observed.slowmodeAppliesToBots` had no witness** (major): the `subject-prior-send` fixture and
+  `send/targeted/slowmode-second-send{,-bypass}` decide it (H-053 confirmed: `false`), and the replay requires a
+  witness. Flipping the constant to `true` fails the replay; on the previous table (no witness) it failed too.
+- **Ordering gaps** (minor): `send/targeted/order-locked-embed` covers tiers 5 and 6 and showed Discord's own order
+  (the payload flag first), so `ThreadLocked` moved after the payload flags; `member/targeted/timeout-admin-below`
+  isolates `TargetIsAdministrator`. Tier 7 (local limits) waits for M6's limit rows.
+- **Overwrite algebra** (minor): `send/targeted/overwrite-everyone-allow{,-role-deny}` (H-005, H-007 with an
+  `@everyone` overwrite allow); H-011's allow side is cited on `send/targeted/order-view-send`; H-004, H-009 and
+  H-010 stay offline, with the reason corrected in the list above.
+- **Own deletes under a timeout** (minor): `message/targeted/delete-own-timed-out{,-thread}` succeed, so the rows
+  keep omitting `CommunicationDisabled`.
+- **Stale counts and comments** (minor): DESIGN's row count (47), §5.9's counts, §4.7's pin rows, this log's flip
+  count, and the comments in `threads.ts`, `messages.ts` and `Order.ts`.
+- **The not-covered list** (minor): rewritten above, with every hypothesis the verifier named. Two of its claims did
+  not hold: H-107 has rows (the pins list rows cite it), and H-090 does not exist in discord-semantics.md.
+
+The catalog is now 363 scenarios: `send.ts` 89 pairwise and 25 targeted, `messages.ts` 22 and 12, `reactions.ts`
+25 and 4, `pins.ts` 18 and 4, `threads.ts` 32 and 20, `channelEdit.ts` 21 and 5, `members.ts` 22 and 2 (301
+family rows), and 62 flips. A full run makes 68 role edits and needs about 76 in the bucket.
+
+Live, in order (each alone under the lock):
+
+- the targeted subset (`run --only '*/targeted/**' --write`, 72 scenarios, 462 s, 1,572 requests, no 429): one
+  mismatch, `level-vs-raw` on `send/targeted/order-locked-embed` (the ordering finding); every other new row agreed;
+- after the reorder, `run --only '**/order-locked-embed' --write` (the row and its new flip control): 0 mismatches;
+- **exit run W** on commit `ca68b2f`: `bun --no-env-file harness/main.ts run --write` exited 0: role budget 79 left
+  (76 needed), 363 scenarios in 2,153 s, 7,515 requests, 1,676 writes, 225 invalid, no 429, oracle available,
+  **0 mismatches**. Raw classes: 144 success, 137 `50001`, 51 `50013`, 17 other (12 x 50083, 3 x 160002, 40067,
+  160005), 12 degraded, 2 `setup-unsupported` (`kind-not-available`, `admin-exempt`). The table
+  (`e835d554...6242f4`, 442,175 bytes) adds the nine new rows to the previous one and changes no other row; it is
+  committed. `bun run verify:offline` is green with it.
