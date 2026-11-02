@@ -81,12 +81,21 @@ export const json = (status: number, body: unknown): Scripted => ({ _tag: "Json"
  * request with `script(method, path, query)`. Paths are relative to the API base, without the query; `query`
  * holds the request's URL parameters (`urlParams` and any already in the URL).
  */
-export const scriptedRest = (script: (method: string, path: string, query: URLSearchParams) => Scripted): Layer.Layer<DiscordREST> => {
+export const scriptedRest = (script: (method: string, path: string, query: URLSearchParams) => Scripted): Layer.Layer<DiscordREST> =>
+  scriptedRestEffect((method, path, query) => Effect.succeed(script(method, path, query)))
+
+/** Like {@link scriptedRest}, but each answer is an effect, so a test can hold a response until it chooses. */
+export const scriptedRestEffect = (script: (method: string, path: string, query: URLSearchParams) => Effect.Effect<Scripted>): Layer.Layer<DiscordREST> => {
   const client = HttpClient.make((request) => {
     const url = new URL(request.url)
     const query = new URLSearchParams(url.search)
     for (const [key, value] of new URLSearchParams(UrlParams.toString(request.urlParams))) query.append(key, value)
-    const answer = script(request.method, url.pathname.replace(/^\/api\/v\d+/, ""), query)
+    return Effect.flatMap(script(request.method, url.pathname.replace(/^\/api\/v\d+/, ""), query), (answer) => answerWith(request, answer))
+  })
+  return DiscordRESTMemoryLive.pipe(Layer.provide(DiscordConfig.layer({ token: Redacted.make("fake-token") })), Layer.provide(Layer.succeed(HttpClient.HttpClient, client)))
+}
+
+const answerWith = (request: HttpClientRequest.HttpClientRequest, answer: Scripted) => {
     switch (answer._tag) {
       case "Json":
         return Effect.succeed(
@@ -99,6 +108,4 @@ export const scriptedRest = (script: (method: string, path: string, query: URLSe
       case "Never":
         return Effect.never
     }
-  })
-  return DiscordRESTMemoryLive.pipe(Layer.provide(DiscordConfig.layer({ token: Redacted.make("fake-token") })), Layer.provide(Layer.succeed(HttpClient.HttpClient, client)))
 }
