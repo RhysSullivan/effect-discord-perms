@@ -1074,3 +1074,10 @@ Live, in order (each alone under the lock):
   1,676 writes, 225 invalid, no 429, **0 mismatches**, `compare: identical to the previous table` (W's, committed);
   it wrote the same bytes (`e835d554...6242f4`). It passed the bulk delete in voice text chat where the verifier's
   first run had aborted (`flip/message/voice/bulk-delete/op-flag/normal`).
+- **exit run B**, after the bucket refilled again, same code (`eb05764`, only LOG.md changed since W): `bun
+  --no-env-file harness/main.ts run --compare` in a fresh process exited 0: role budget 78 left, 363 scenarios in
+  2,188 s, 7,520 requests, 1,676 writes, 226 invalid, **0 mismatches**, `compare: identical to the previous table`.
+  One 429 (`GET /channels/{id}/messages`, retry-after 5 s, which dfx waited out) came during a reset's message
+  listing, not during a scenario (no scenario line reports it), so no row could depend on it. The lock was gone
+  afterwards. `bun run verify:offline` is green after it: gen:errors, typecheck, 817 tests in 34 files (373 of
+  them the replay), test:types, hover, rules, budget.
