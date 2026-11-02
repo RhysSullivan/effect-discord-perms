@@ -5016,6 +5016,60 @@
         "removals": []
       }
     },
+    "flip/send/targeted/order-locked-embed": {
+      "agreement": "agree",
+      "operation": "send:embed",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": {
+        "categories": [
+          "state"
+        ],
+        "tag": "ThreadLocked"
+      },
+      "preflightSet": [
+        "ThreadLocked"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "action",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "EmbedLinks",
+          "SendMessagesInThreads",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "public-thread",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessagesInThreads",
+              "EmbedLinks"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": [],
+        "subjectThreadMember": true,
+        "threadState": "locked"
+      }
+    },
     "flip/send/targeted/order-send-reply-history": {
       "agreement": "agree",
       "operation": "send:reply",
@@ -6398,6 +6452,54 @@
         "targetRank": "below"
       }
     },
+    "member/targeted/timeout-admin-below": {
+      "agreement": "agree",
+      "operation": "member:timeout",
+      "oracle": "not-applicable",
+      "preflight": {
+        "categories": [
+          "state"
+        ],
+        "tag": "TargetIsAdministrator"
+      },
+      "preflightSet": [
+        "TargetIsAdministrator"
+      ],
+      "raw": {
+        "class": "50013",
+        "code": 50013,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "action",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "ModerateMembers"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ModerateMembers"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": [],
+        "targetAdmin": true,
+        "targetRank": "below"
+      }
+    },
     "member/timeout/above/no-role/none/target-plain/normal": {
       "agreement": "agree",
       "operation": "member:timeout",
@@ -7469,6 +7571,97 @@
         "memberState": "normal",
         "removals": [],
         "threadState": "archived"
+      }
+    },
+    "message/targeted/delete-own-timed-out": {
+      "agreement": "agree",
+      "operation": "message:delete-own",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "implicit-send",
+          "timeout"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "timed-out",
+        "removals": []
+      }
+    },
+    "message/targeted/delete-own-timed-out-thread": {
+      "agreement": "agree",
+      "operation": "message:delete-own",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "timeout"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "public-thread",
+        "fixtures": [
+          "subject-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "timed-out",
+        "removals": []
       }
     },
     "message/targeted/edit-own-archived-thread": {
@@ -15477,6 +15670,67 @@
         "threadState": "locked"
       }
     },
+    "send/targeted/order-locked-embed": {
+      "agreement": "agree",
+      "operation": "send:embed",
+      "oracle": {
+        "missing": [
+          "EmbedLinks"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "payload",
+          "permission"
+        ],
+        "tag": "MissingEmbedLinks"
+      },
+      "preflightSet": [
+        "MissingEmbedLinks",
+        "ThreadLocked"
+      ],
+      "raw": {
+        "class": "50013",
+        "code": 50013,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "action",
+        "masks": [],
+        "missing": [
+          "EmbedLinks"
+        ],
+        "missingBeforeMasks": [
+          "EmbedLinks"
+        ],
+        "required": [
+          "EmbedLinks",
+          "SendMessagesInThreads",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "public-thread",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessagesInThreads"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": [],
+        "subjectThreadMember": true,
+        "threadState": "locked"
+      }
+    },
     "send/targeted/order-send-reply-history": {
       "agreement": "agree",
       "operation": "send:reply",
@@ -15772,6 +16026,115 @@
         "removals": []
       }
     },
+    "send/targeted/overwrite-everyone-allow": {
+      "agreement": "agree",
+      "operation": "send:plain",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "SendMessages",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "everyone-overwrite-allow"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "send/targeted/overwrite-everyone-allow-role-deny": {
+      "agreement": "agree",
+      "operation": "send:plain",
+      "oracle": {
+        "missing": [
+          "SendMessages"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingSendMessages"
+      },
+      "preflightSet": [
+        "MissingSendMessages"
+      ],
+      "raw": {
+        "class": "50013",
+        "code": 50013,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "action",
+        "masks": [
+          "implicit-send"
+        ],
+        "missing": [
+          "SendMessages"
+        ],
+        "missingBeforeMasks": [
+          "SendMessages"
+        ],
+        "required": [
+          "SendMessages",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "everyone-overwrite-allow"
+          }
+        ],
+        "memberState": "normal",
+        "removals": [
+          {
+            "flags": [
+              "SendMessages"
+            ],
+            "via": "role-overwrite-deny"
+          }
+        ]
+      }
+    },
     "send/targeted/poll-without-send-polls": {
       "agreement": "agree",
       "operation": "send:poll",
@@ -15984,6 +16347,107 @@
             "flags": [
               "ViewChannel",
               "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "send/targeted/slowmode-second-send": {
+      "agreement": "agree",
+      "operation": "send:plain",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "SendMessages",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "channelSettings": {
+          "nameVariant": "a",
+          "requireTag": false,
+          "slowmode": 60
+        },
+        "fixtures": [
+          "subject-prior-send"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "send/targeted/slowmode-second-send-bypass": {
+      "agreement": "agree",
+      "operation": "send:plain",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "SendMessages",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "channelSettings": {
+          "nameVariant": "a",
+          "requireTag": false,
+          "slowmode": 60
+        },
+        "fixtures": [
+          "subject-prior-send"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "BypassSlowmode"
             ],
             "via": "role"
           }
