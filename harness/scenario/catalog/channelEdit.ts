@@ -65,6 +65,13 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     memberState: "normal"
   }),
   targeted("topic-forum", ["H-162"], "topic", { channel: "forum", grants: [{ flags: ["ViewChannel", "ManageChannels"], via: "role" }], removals: [], memberState: "normal" }),
+  // M4 live: a thread's slowmode, like every thread edit, needs SendMessagesInThreads besides ManageThreads
+  {
+    id: "channelEdit/targeted/thread-slowmode-without-smit",
+    hypotheses: ["H-045"],
+    setup: new Setup({ channel: "public-thread", grants: [{ flags: ["ViewChannel", "ManageThreads"], via: "role" }], removals: [], memberState: "normal", fixtures: [] }),
+    operation: { _tag: "channelEdit", field: "slowmode" }
+  },
   // H-015: without Connect the implicit rule masks ManageChannels in voice: the rename must fail (and so does not count)
   targeted("rename-voice-without-connect", ["H-015", "H-162"], "name", {
     channel: "voice",

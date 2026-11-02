@@ -79,5 +79,16 @@ export const fromCombination = (row: Combination): Scenario => {
   }
 }
 
+/** Hypotheses the pairwise dimensions cannot express. */
+export const targetedRows: ReadonlyArray<Scenario> = [
+  // M4 live: a role assignment without ManageRoles answers 50001; the same for a removal, on its own
+  {
+    id: "member/targeted/remove-role-without-manage",
+    hypotheses: ["H-060"],
+    setup: new Setup({ channel: "text", grants: [], removals: [], memberState: "normal", targetRank: "below", roleRank: "below", targetAdmin: false, fixtures: ["target-role"] }),
+    operation: { _tag: "member", action: "remove-role" }
+  }
+]
+
 /** The members catalog, sorted by ID. */
-export const scenarios: ReadonlyArray<Scenario> = byId(pairwise(families.members).map(fromCombination))
+export const scenarios: ReadonlyArray<Scenario> = byId([...pairwise(families.members).map(fromCombination), ...targetedRows])

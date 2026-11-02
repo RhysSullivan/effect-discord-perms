@@ -185,6 +185,21 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     { channel: "public-thread", subjectThreadMember: true, grants: [{ flags: ["ViewChannel", "SendMessagesInThreads"], via: "role" }], removals: [], memberState: "normal" },
     ["subject-thread"]
   ),
+  // M4 live: every thread edit needs SendMessagesInThreads, ManageThreads or not (50001 without it)
+  threadTargeted("archive-without-smit", ["H-045"], { _tag: "thread", action: "archive" }, {
+    channel: "public-thread",
+    subjectThreadMember: true,
+    grants: [{ flags: ["ViewChannel", "ManageThreads"], via: "role" }],
+    removals: [],
+    memberState: "normal"
+  }),
+  threadTargeted("lock-without-smit", ["H-045"], { _tag: "thread", action: "lock" }, {
+    channel: "public-thread",
+    subjectThreadMember: true,
+    grants: [{ flags: ["ViewChannel", "ManageThreads"], via: "role" }],
+    removals: [],
+    memberState: "normal"
+  }),
   threadTargeted("lock-without-manage", ["H-045"], { _tag: "thread", action: "lock" }, {
     channel: "public-thread",
     subjectThreadMember: true,
