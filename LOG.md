@@ -929,3 +929,20 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
     H-086, H-088, H-092, H-101, H-120..H-131 limits, H-143), which are M6's rule rows, and a voice message's
     missing `pin`, now a type rule too; H-104 and external stickers need a second guild;
   - H-160, H-161 (obfuscation): M7, with the codec.
+- Live, in order (each alone under the lock), after the M3 verifier's fixes:
+  - a trial of the 48 targeted rows (it found the cleanup order bug and the first findings), then one run per
+    family (`member/**`, `message/**`, `react/**`, `pins/**`, `createThread/**`, `thread/**`, `channelEdit/**`),
+    then a full development run (352 scenarios, 16 mismatches, each a finding above; its table is the
+    "development run" these notes cite). The fixes were checked offline before the next run: re-judging the
+    development run's raw answers with the new code agreed on every row whose setup had not changed;
+  - run A (346 scenarios, 1,911 s, 7,172 requests, zero mismatches); its replay showed four `viewCodeFailures`
+    entries no committed row witnessed, so the targeted rows that witness them were added (354 scenarios);
+  - an exit attempt that stalled in its 53rd scenario, and a second that aborted after 18 (the role bucket,
+    "Design deviations"); the run order changed to need 67 role edits, the runner now checks the bucket first,
+    and the next run waited about 110 minutes for the bucket to refill;
+  - **exit run 1** on commit `24b745c`: `bun --no-env-file harness/main.ts run --write` exited 0: role budget 76
+    left (75 needed), 354 scenarios in 1,974 s, 7,322 requests, 1,629 writes, 221 invalid (the raw 403s), no 429,
+    oracle available, **0 mismatches**; the table (`b726e638...d26480`, 432,050 bytes) is committed. Raw classes:
+    139 success, 136 `50001`, 48 `50013`, 17 other (12 x 50083, 3 x 160002, 40067, 160005), 12 degraded,
+    2 `setup-unsupported` (`kind-not-available` for the media post, `admin-exempt`). `bun run verify:offline` is
+    green with the replay: 799 tests in 32 files, 363 of them the replay.
