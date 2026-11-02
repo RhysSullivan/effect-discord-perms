@@ -320,14 +320,17 @@ export const restoreThread = (state: Desired, ids: Ids): Effect.Effect<void, Lab
     }
   })
 
-/** Deletes every deletable bot message in `channel` (a forum post's starter is kept), catching untracked ones too. */
+/**
+ * Deletes every deletable bot message in `channel` (a forum post's starter is kept), catching untracked ones too.
+ * A message the listing still shows but that is already gone (the subject's own delete a moment before) is
+ * skipped (`Reset.deletePlanned`).
+ */
 export const cleanMessages = (channel: { readonly id: string; readonly name: string }, authors: ReadonlySet<string>): Effect.Effect<void, LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {
     const rest = yield* HarnessRest
     const messages = yield* rest.listMessages(channel.id, { limit: 100 }).pipe(labStep(`cleanup: list messages in ${channel.name}`), Effect.flatMap(decodeArray(Wire.Message, "listMessages")))
     const plan = Reset.planDeletes(messages, authors, new Set([channel.id]), yield* Clock.currentTimeMillis)
-    for (const chunk of plan.bulk) yield* rest.bulkDeleteMessages(channel.id, { messages: chunk }).pipe(labStep(`cleanup: bulk delete in ${channel.name}`))
-    for (const id of plan.single) yield* rest.deleteMessage(channel.id, id).pipe(labStep(`cleanup: delete in ${channel.name}`))
+    yield* Reset.deletePlanned(channel, plan, "cleanup")
   })
 
 /** Posts the harness's plain fixture message (no mentions) in `channel`; its ID. */

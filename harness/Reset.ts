@@ -35,7 +35,7 @@ import { SubjectRaw } from "../src/bot/Internals.ts"
 import type { ApplicationId, ChannelId, GuildId, MessageId, RoleId, UserId } from "../src/Snowflake.ts"
 import { HarnessRest } from "./Identities.ts"
 import type { IdentityReport } from "./IdentityCheck.ts"
-import { isLabChannelName, isLabRoleName, isLabRuleName, LabCheckFailed, LabGuard, type LabRequestFailed, labStep } from "./Lab.ts"
+import { isLabChannelName, isLabRoleName, isLabRuleName, LabCheckFailed, LabGuard, type LabRequestFailed, labStep, labStepUnless } from "./Lab.ts"
 import * as LabIds from "./LabIds.ts"
 import { Pacing } from "./Pacing.ts"
 import * as Wire from "./Wire.ts"
@@ -188,6 +188,29 @@ export const planDeletes = (messages: ReadonlyArray<Wire.Message>, authors: Read
   const leftover = chunks.filter((chunk) => chunk.length < 2).flat()
   return { bulk, single: [...leftover, ...old] }
 }
+
+/** Discord's code for a message that does not exist (404). */
+export const unknownMessageCode = 10008
+
+/**
+ * Carries out `plan` in `channel`, idempotently: a message that is already gone (404 10008 Unknown Message) is
+ * what the delete wants, so it is skipped, and a bulk delete Discord refuses with 10008 falls back to single
+ * deletes of its chunk. Any other refusal fails the step. `step` names the caller (`reset`, `cleanup`).
+ *
+ * M4 live (the M4 verifier's first exit run): right after the subject's bulk delete in `lab-voice`, the
+ * harness's message listing still returned one of the deleted messages, its single delete answered 404 10008,
+ * and the run aborted in cleanup.
+ */
+export const deletePlanned = (channel: { readonly id: string; readonly name: string }, plan: DeletePlan, step: string): Effect.Effect<void, LabRequestFailed, HarnessRest> =>
+  Effect.gen(function* () {
+    const rest = yield* HarnessRest
+    const single = (id: MessageId) => rest.deleteMessage(channel.id, id).pipe(labStepUnless(`${step}: delete a message in ${channel.name}`, [unknownMessageCode]))
+    for (const chunk of plan.bulk) {
+      const deleted = yield* rest.bulkDeleteMessages(channel.id, { messages: chunk }).pipe(labStepUnless(`${step}: bulk delete ${chunk.length} messages in ${channel.name}`, [unknownMessageCode]))
+      if (Option.isNone(deleted)) for (const id of chunk) yield* single(id)
+    }
+    for (const id of plan.single) yield* single(id)
+  })
 
 /**
  * The pins to remove before deleting: every pinned message the plan does not delete (a human's message, a
@@ -499,8 +522,7 @@ const cleanMessages = (context: Context, view: View) =>
       const plan = planDeletes(messages, bots, new Set([channel.id]), yield* Clock.currentTimeMillis)
       const pins = yield* pages(pinPage(undefined), pinPage)
       for (const id of planUnpins(pins.map((pin) => pin.message.id), plan)) yield* rest.deletePin(channel.id, id).pipe(labStep(`reset: unpin a message in ${channel.name}`))
-      for (const chunk of plan.bulk) yield* rest.bulkDeleteMessages(channel.id, { messages: chunk }).pipe(labStep(`reset: bulk delete ${chunk.length} messages in ${channel.name}`))
-      for (const id of plan.single) yield* rest.deleteMessage(channel.id, id).pipe(labStep(`reset: delete a message in ${channel.name}`))
+      yield* deletePlanned(channel, plan, "reset")
     }
   })
 
