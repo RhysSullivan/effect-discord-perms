@@ -272,6 +272,18 @@ describe("the guard service", () => {
       expect(kickBanPredictedToFail("ban", succeeds)).toBe(true)
       const admin = roles.map((role) => (role.id === "400000000000000010" ? { ...role, permissions: "8" } : role))
       expect(kickBanPredictedToFail("ban", { ...succeeds, roles: admin })).toBe(false)
+      // equal positions break on the ID: the lower ID ranks higher (P role object)
+      const tied = [...roles, { id: "400000000000000012", permissions: "0", position: 9 }]
+      expect(kickBanPredictedToFail("kick", { ...succeeds, roles: tied, target: { roles: ["400000000000000012"] } })).toBe(false)
+      expect(kickBanPredictedToFail("kick", { ...succeeds, roles: [...roles, { id: "400000000000000009", permissions: "0", position: 9 }], target: { roles: ["400000000000000009"] } })).toBe(true)
+      // a member's highest role among equal positions is the lower ID, whatever the order it lists them in
+      const three = [
+        { id: guild, permissions: "0", position: 0 },
+        { id: "400000000000000010", permissions: String(1n << 1n), position: 9 },
+        { id: "400000000000000011", permissions: "0", position: 9 },
+        { id: "400000000000000012", permissions: "0", position: 9 }
+      ]
+      expect(kickBanPredictedToFail("kick", { guildId: guild, roles: three, subject: { roles: ["400000000000000012", "400000000000000010"] }, target: { roles: ["400000000000000011"] } })).toBe(false)
       // equal rank fails; @everyone counts for a member with no roles
       expect(kickBanPredictedToFail("kick", { ...succeeds, target: { roles: ["400000000000000010"] } })).toBe(true)
       expect(kickBanPredictedToFail("kick", { ...succeeds, subject: { roles: [] }, roles: [{ id: guild, permissions: String(1n << 1n), position: 0 }] })).toBe(true)

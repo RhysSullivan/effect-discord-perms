@@ -280,6 +280,10 @@ describe("the resolver record (step a)", () => {
     const guildScope = resolution({ _tag: "Guild" }, set("KickMembers"))
     expect(levelOf("member.kick", guildScope, { payload: [], target: { below: false, administrator: false } })).toBe("action")
     expect(levelOf("member.kick", guildScope, { payload: [], target: { below: true, administrator: false } })).toBe("none")
+    // a row's viewLevel flag is View-level (M4 live: pinning without ReadMessageHistory answers 50001)
+    const pin = resolution(known(channel("text")), set("ViewChannel", "PinMessages"))
+    expect(levelOf("message.pin.channel", pin)).toBe("view")
+    expect(levelOf("message.pin.channel", resolution(known(channel("text")), set("ViewChannel", "PinMessages", "ReadMessageHistory")))).toBe("none")
     // a missing degrade-mode flag fails nothing
     expect(levelOf("channel.send", resolution(known(channel("text")), set("ViewChannel", "SendMessages")), { payload: ["mentionsEveryone"] })).toBe("none")
   })

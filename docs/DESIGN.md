@@ -2583,7 +2583,8 @@ The replay also asserts:
   with the matching reason: `botsCanBeTimedOut` against
   `setup-unsupported: bot-not-timeoutable`, never `admin-exempt`;
 - `PayloadRules.mode` against the degraded rows;
-- the `Limits` values against the limit rows;
+- the `Limits` values against the limit rows (from M6, when the limit probes
+  arrive as rule rows; M4 has none);
 - `Observed.codeForLevel` against the `level-vs-raw` data;
 - `ErrorMap` covers every `(operation, status, code, inner path)` in the table;
 - every recorded `{tag, categories}` equals `ErrorCategories` for that class.
@@ -2734,7 +2735,8 @@ Live milestones run serially, under the lock.
   - `bun run verify:live` exits 0 with zero mismatches, and a second fresh
     process with `--compare` exits 0;
   - `bun run verify:offline` is green, including the replay;
-  - `fixtures/truth-table.json` is committed by the orchestrator.
+  - `fixtures/truth-table.json` is committed by the orchestrator. (M4: by the
+    implementer, whose task requires a clean tree; LOG.md.)
 
 **M5 REST wrapper** (offline; fake HttpClient)
 
@@ -2915,14 +2917,20 @@ fails if a constant disagrees with the table.
    correspondence. If refuted, `Observed.codeForLevel` records the observed
    mapping; the recompute and our order still decide the tag. (M3: View and
    voice Connect answer 50001 and SendMessages 50013 as expected, but in a
-   thread a missing SendMessagesInThreads, and a locked thread, answer 50001.)
+   thread a missing SendMessagesInThreads, and a locked thread, answer 50001.
+   M4: the code depends on the route, so `Observed.viewCodeFailures` lists, per
+   operation, the first failures that answer 50001 at the action level: thread
+   sends and edits, thread creation, forum posts, crossposts and role
+   assignment; `Observed.expectedCode` applies it.)
 3. **20016 for bots (H-053, C9).** `Observed.slowmodeAppliesToBots` defaults to
    false. If a slowmode row shows 20016, set it true; the interceptor already
    surfaces it.
 4. **Embeds without EmbedLinks and TTS without SendTTS: error or silent drop
    (H-102, H-103)?** This decides `PayloadRules.mode`. (M3: embeds are refused
    with 50013; TTS is dropped, the message sent with `tts: false`, so M4 sets
-   `tts` to `degrade`.) The types move the flag
+   `tts` to `degrade`. M4: TTS degrades in text and voice text chat too, and
+   SendPolls and a reply's ReadMessageHistory missing alone are refused, 50013
+   and 160002, so `poll` and `reply` stay `error`.) The types move the flag
    between the error union and `degraded`, with no other change: limit tags
    key on presence (`[sd:probe2/q4/use.ts]`).
 5. **Inner 50035 codes: strings or numbers (H-084)?** `FieldError.code`
@@ -2948,8 +2956,9 @@ fails if a constant disagrees with the table.
    `lab-text`) returned exactly `lab-target`'s overwrite allow. M3: it **does**
    apply the timeout mask (H-241: a timed-out subject reads only View and
    ReadMessageHistory of what it is granted), so M4 adds
-   `OracleScope.includesTimeout`; ten send rows are `resolver-vs-oracle` until
-   then.
+   `Observed.oracleAppliesTimeout` (the constant the text above calls
+   `OracleScope.includesTimeout`), and agreement compares the oracle after the
+   timeout mask; the ten M3 rows agree.
 10. **Do rejected command creates count toward 200 per day (H-205)?** Negative
     tests use one command name, a local daily counter aborts at 150, and
     `LOG.md` records the before/after GET counts.
@@ -2964,7 +2973,12 @@ fails if a constant disagrees with the table.
     H-159), unarchive permission conflicts (H-038, H-039), sending in archived
     threads (H-035), private-thread visibility (H-033, H-047).** These are
     `Operations` and `ResolverRules` entries. If archived sends fail,
-    `ThreadArchived` is added to the `thread.send` row.
+    `ThreadArchived` is added to the `thread.send` row. (M4: everything in
+    voice text chat needs Connect, and it has no pins at all (50019); an
+    archived thread refuses edits, deletes, reactions and pins but accepts
+    joining, leaving and adding a member; unarchiving needs
+    SendMessagesInThreads and no ManageThreads; a thread's creator may archive,
+    lock and delete it without ManageThreads; LOG.md has the rows.)
 14. **Does the gateway honour `capabilities` from the G7 codec (H-160)?** The
     obfuscation scenario checks it. If not, the run fails, and the fallback is
     the portal toggle (D20's alternative), which is Rhys's decision.

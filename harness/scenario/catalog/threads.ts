@@ -41,7 +41,6 @@ export const createThreadRow = (row: Combination): Scenario => {
 
 // ---- threads -------------------------------------------------------------------------------------------
 
-type ThreadValue = "public" | "private" | "announcement-thread" | "forum-post"
 type Action = "join" | "leave" | "add-member" | "archive" | "lock" | "delete"
 
 const channelOfThread = (value: string): Setup["channel"] => {

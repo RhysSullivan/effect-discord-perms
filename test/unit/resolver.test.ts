@@ -250,6 +250,21 @@ describe("the resolver's masks", () => {
   })
 })
 
+describe("the guild-level resolution (member operations)", () => {
+  const g = guild([role(everyone, set("ViewChannel")), role(roleA, set("ManageRoles", "KickMembers"))])
+  it("is the base permissions, with no overwrites and no implicit mask, then the timeout mask", () => {
+    const plain = resolve({ guild: g, channel: { _tag: "Guild" }, member: member([roleA]), now })
+    expect(plain).toMatchObject({ masks: [], timeout: undefined })
+    expect(Flags.toSortedNames(plain.effective)).toEqual(["KickMembers", "ManageRoles", "ViewChannel"])
+    // no View masks nothing at guild level
+    expect(Flags.toSortedNames(resolve({ guild: guild([role(roleA, set("ManageRoles"))]), channel: { _tag: "Guild" }, member: member([roleA]), now }).effective)).toEqual(["ManageRoles"])
+    const timedOut = resolve({ guild: g, channel: { _tag: "Guild" }, member: member([roleA], later), now })
+    expect(timedOut).toMatchObject({ masks: ["timeout"], timeout: { until: later } })
+    expect(Flags.toSortedNames(timedOut.effective)).toEqual(["ViewChannel"])
+    expect(Flags.toSortedNames(timedOut.afterOverwrites)).toEqual(["KickMembers", "ManageRoles", "ViewChannel"])
+  })
+})
+
 describe("hierarchy", () => {
   const g = guild([role(everyone, Flags.empty, 0), role(roleA, Flags.empty, 3), role(roleB, Flags.empty, 2), role(roleC, Flags.empty, 2)])
   it("needs the bot's highest role strictly above the target's; equal positions break on the lower ID (H-064)", () => {

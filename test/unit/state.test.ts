@@ -136,6 +136,15 @@ describe("the reducer", () => {
     expect(guildOf(run([["GUILD_ROLE_UPDATE", { guild_id: ids.guild, role: role(ids.roleB, "0", 1) }]], after.snapshot).snapshot).stale).toBe(false)
   })
 
+  it("reads a forum's REQUIRE_TAG flag (H-044), and only on forum and media channels", () => {
+    const forum = run([["CHANNEL_CREATE", channelUpdate("300000000000000015", 15, [], 1 << 4)]], booted.snapshot)
+    expect(guildOf(forum.snapshot).channels.get(ChannelId.make("300000000000000015"))?.requireTag).toBe(true)
+    const untagged = run([["CHANNEL_CREATE", channelUpdate("300000000000000015", 15, [], 0)]], booted.snapshot)
+    expect(guildOf(untagged.snapshot).channels.get(ChannelId.make("300000000000000015"))?.requireTag).toBe(false)
+    const text = run([["CHANNEL_UPDATE", channelUpdate(ids.text, 0, [], 1 << 4)]], booted.snapshot)
+    expect(guildOf(text.snapshot).channels.get(ChannelId.make(ids.text))?.requireTag).toBe(false)
+  })
+
   it("clears a channel's unseen mark when a channel or thread event brings it", () => {
     const unseen = (id: string): Snapshot => {
       const guild = guildOf(booted.snapshot)

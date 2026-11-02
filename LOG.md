@@ -140,6 +140,103 @@ table). Findings marked **M4** are the mismatches M3 leaves for M4's fixes:
   30-65 s of dfx's retry wait) while Converge and the wait's read-back each listed the guild's channels. They
   now read single channels with `getChannel`; the next full run had no 429 at all.
 
+M4, the whole matrix (the families of §5.9, targeted rows and flip controls). The rows named are in
+`fixtures/truth-table.json`; rows from the development runs before a fix are in the M4 milestone notes. Each
+finding changed a constant, and the replay holds the constant to the table (§5.13):
+
+- **M4, H-102: TTS without SendTTSMessages degrades outside threads too.** In text and in voice text chat the
+  message is sent with `tts: false` (`send/targeted/tts-without-tts-text`, `send/targeted/tts-without-tts-voice`),
+  as in threads (M3). `PayloadRules.tts.mode = "degrade"` for every kind.
+- **M4, H-055: SendPolls missing on its own answers 403 50013** (`send/targeted/poll-without-send-polls`), so
+  `PayloadRules.poll.mode = "error"` holds. **H-091, H-135: a reply without ReadMessageHistory, SendMessages
+  granted, answers 403 160002** (`send/targeted/reply-without-history`), mapped to `MissingReadMessageHistory`.
+- **M4, H-036: the lock itself answers 403 50001.** A member of a locked thread without ManageThreads gets 50001
+  on a send (`send/targeted/locked-thread-member`), as non-members did in M3, so the refused auto-join was not
+  the cause. `Observed.viewCodeFailures["thread.send"]` lists `ThreadLocked`. **H-036 refuted for edits:** the
+  same member edits its own message in a locked thread (`message/targeted/edit-own-locked-thread`, 200), so
+  `message.edit.thread` no longer lists `ThreadLocked`. Unarchiving a locked thread without ManageThreads, as its
+  creator, answers 403 160005 (`thread/targeted/unarchive-locked-creator`).
+- **M4, H-144 refuted for ReadMessageHistory: a reaction needs none.** Without it the subject still reacts in a
+  private thread, a text channel and voice text chat (`react/private-thread/unicode-existing/read-history/...`,
+  `react/text/guild/read-history/...`, `react/voice/unicode-new/read-history/...`), so the `message.react.*` rows
+  dropped it (the `reaction` variant stays, with nothing to build). AddReactions is conditional as documented: an
+  emoji already on the message needs none (`react/public-thread/unicode-existing/add-reactions/...`, 200), a new
+  one does (`react/text/unicode-new/add-reactions/absent/normal`, 50013).
+- **M4, H-024: a timed-out bot cannot react even where no flag is needed**: with an emoji already there and View
+  its only requirement, the timed-out subject got 403 50013 (the development run's
+  `flip/react/text/unicode-existing/view/role-overwrite-deny/timed-out`). The react rows are `blockedByTimeout`.
+- **M4: pinning and unpinning need ReadMessageHistory, checked as access to the message**: without it, every
+  other flag granted, both answer 403 50001 (`pins/text/pin/read-history/absent/normal`,
+  `pins/targeted/unpin-without-history`), and so does a timed-out subject without it
+  (`pins/public-thread/pin/read-history/absent/timed-out`), so it ranks with View (`viewLevel`, §3.2 tier 1).
+  H-050 confirmed: ManageMessages without PinMessages answers 50013 (`pins/targeted/manage-messages-without-pin`).
+  H-107 confirmed: listing pins without ReadMessageHistory answers 200 with an empty list
+  (`pins/announcement/list/read-history/role-overwrite-deny/normal`, recorded as degraded).
+- **M4, H-159 refuted: voice text chat has no pins.** The subject with every flag got 400 50019 "This message
+  cannot be pinned in this channel" in `lab-voice` (the development run's `flip/pins/voice/pin/*`), and so did the
+  harness, an Administrator (its pin fixture, `setup-unsupported: rejected-by-discord`), as in `lab-stage` (M2).
+  `message.pin.voice` and `message.unpin.voice` left the table and voice left the pins family; listing in voice
+  stays (`pins/targeted/voice-list`). Whether voice messages lose `pin` in the types is M6's (a type rule).
+- **M4, H-141: crossposting needs ReadMessageHistory, checked as access**: without it a crosspost with View,
+  SendMessages and ManageMessages answered 403 50001 (the M4 messages trial), and with it 200
+  (`message/announcement/crosspost-foreign/none/normal`). Without SendMessages, or under a timeout, a crosspost
+  answers 50001 (`message/announcement/crosspost-own/op-flag/normal`, `.../crosspost-own/none/timed-out`); without
+  ManageMessages on another's message 50013 (`.../crosspost-foreign/op-flag/normal`). Discord limits publishing to
+  about 10 per hour per announcement channel; a run makes 4, so no two full runs may start within the same
+  20 minutes or so.
+- **M4, H-152 generalised: everything in voice text chat needs Connect.** Editing one's own message and deleting
+  another's without it answer 403 50001 (`message/targeted/voice-edit-own-without-connect`,
+  `message/targeted/voice-delete-foreign-without-connect`); deleting one's own and bulk delete are targeted rows
+  too (`message/targeted/voice-{delete-own,bulk-delete}-without-connect`). New rows `message.edit.voice`,
+  `message.deleteOwn.voice`, `message.deleteForeign.voice` and `voice.bulkDelete` require it. A timeout removes
+  Connect, so a timed-out subject in voice gets 50001 (View level), whatever else it lacks.
+- **M4, H-037 partly refuted: an archived thread refuses deletes too.** Deleting one's own message, another's, or
+  a bulk delete in an archived thread answer 400 50083 (`message/targeted/delete-own-archived-thread`,
+  `.../delete-foreign-archived-thread`, `.../bulk-delete-archived-thread`), as editing, reacting and pinning do;
+  new rows `message.deleteOwn.thread`, `message.deleteForeign.thread`, `thread.bulkDelete` list `ThreadArchived`.
+  But **joining, leaving and adding a member succeed** in an archived thread (`thread/targeted/join-archived`,
+  `leave-archived`, `add-member-archived`; H-046 refuted for adding), so those rows dropped `ThreadArchived`.
+- **M4, H-038 decided: unarchiving needs SendMessagesInThreads, not SendMessages, membership or ManageThreads.** A
+  member with View and SMIT unarchives, and so does a non-member with SendMessages and SMIT; a moderator with
+  ManageThreads but no SMIT gets 403 50001 (`thread/targeted/unarchive-*`). New row `thread.unarchive` (View, SMIT).
+- **M4: every thread edit needs SendMessagesInThreads.** Archiving, locking and setting a thread's slowmode with
+  View and ManageThreads but without SMIT answered 403 50001 (`thread/*/archive/subject/none/...` and
+  `channelEdit/public-thread/none/absent/normal` in the development runs); `thread.setArchived`,
+  `thread.setLocked` and `thread.edit` require it, and their missing SMIT or ManageThreads answers 50001.
+- **M4, H-045 partly refuted: a thread's creator may archive, lock and delete it without ManageThreads**
+  (`thread/targeted/archive-creator-without-manage`, `thread/announcement-thread/lock/subject/op-flag/...`,
+  `thread/announcement-thread/delete/subject/op-flag/...`, all 200); without ManageThreads anyone else gets 50001
+  (`thread/targeted/archive-without-manage`, `lock-without-manage`). `ResolverRules.threadCreatorMayArchive`
+  (docs), `threadCreatorMayLock` and `threadCreatorMayDelete` (live). The new `thread.delete` row has no creator
+  exception in its types: the exception only removes a failure.
+- **M4, H-032 refined: leaving a thread needs no View**: a member left with View denied on the parent
+  (`thread/targeted/member-without-parent-view`, `thread/forum-post/leave/harness/view/timed-out/member`), so
+  `thread.leave` requires nothing and preflight does not fail it on a channel it cannot see.
+- **M4, H-040, H-041: creating a thread without its creation flag, or under a timeout, answers 403 50001**
+  (`createThread/*/op-flag/*`, `createThread/announcement/public/none/timed-out`, and from a message,
+  `createThread/targeted/from-message-without-flag`); with the flag both kinds succeed. Adding a member without
+  SMIT, or under a timeout, answers 50001 too (`thread/forum-post/add-member/subject/op-flag/...`).
+- **M4, H-031, H-044 confirmed: a forum post needs SendMessages, not SMIT or CreatePublicThreads** (without it
+  403 50001: `createPost/targeted/forum-with-threads-flags-only`), and a forum with `REQUIRE_TAG` refuses an
+  untagged post with 400 40067 (`createPost/targeted/forum-require-tag-untagged`) and takes a tagged one.
+- **M4, members: H-060, H-061, H-064, H-066 confirmed; role assignment answers 50001 where the others answer
+  50013.** A role below the subject's highest is assigned whatever the target's rank (`member/add-role/above/below/...`);
+  the role at or above it answers 50013 (`member/add-role/below/above/...`); nickname, timeout, kick and ban of an
+  equal or higher target answer 50013 (`member/{nickname,timeout,kick-expect-fail,ban-expect-fail}/above|equal/...`).
+  Without ManageRoles, or under a timeout, a role assignment answers 50001
+  (`member/add-role/below/equal/op-flag/...`, `member/remove-role/equal/equal/none/target-plain/timed-out`). The
+  timeout masks guild-level permissions too: a timed-out subject holding the flag fails every member operation.
+  Every kick and ban the matrix sent was predicted to fail by the guard's docs model and did (50013).
+- **M4, H-015 confirmed for edits, and H-162: renames and topic edits succeed with ManageChannels**, one per
+  channel per run, with no 429 (`channelEdit/targeted/{rename-text,topic-announcement,topic-forum}`); a voice
+  rename without Connect answers 50001 (`channelEdit/targeted/rename-voice-without-connect`).
+- **M4, H-241 applied: with the oracle compared after the timeout mask, no timed-out row disagrees with it**
+  (M3's ten `resolver-vs-oracle` rows agree). With the M3 verifier's change, unseen rows compare ViewChannel with
+  the oracle; every one agrees.
+- **M4: a timed-out thread send with SendMessagesInThreads also missing answers 50001**
+  (`send/targeted/order-timeout-smit`). Both failures answer 50001 in threads, so which one Discord checked first is
+  not observable; the timeout keeps its §3.2 rank and `viewCodeFailures["thread.send"]` lists it.
+
 ## dfx deviations
 
 Where dfx got in the way and we wrapped or adapted it, and why.
@@ -428,6 +525,75 @@ the same commit.
 - **M3: the dry-run stub is built but step (b) does not use it yet** (§6 M3 says (b) is `decide` until M6): the
   shared client applies the Lab guard, then answers a canned body (`fixtures/canned/create-message.json`) and
   sends nothing, unit-tested in `test/unit/dry-run.test.ts`.
+
+- **M4: the operation table changed from the findings above** (§2.4, §4.7 updated): `thread.delete` (the threads
+  family deletes the subject's own threads, and the table had no row for it); `thread.unarchive` (H-038);
+  `message.edit.voice`, `message.deleteOwn.voice`, `message.deleteForeign.voice` and `voice.bulkDelete` (Connect);
+  `message.deleteOwn.thread`, `message.deleteForeign.thread` and `thread.bulkDelete` (`ThreadArchived`); SMIT in
+  `thread.setArchived`, `thread.setLocked` and `thread.edit`; ReadMessageHistory in the pin, unpin and crosspost
+  rows and out of the react rows; `ThreadArchived` out of `thread.join`, `thread.leave` and `thread.addMember`,
+  `ThreadLocked` out of `message.edit.thread`; `message.pin.voice` and `message.unpin.voice` removed; `thread.leave`
+  requires nothing. 47 rows (M1 had 40). Three optional row fields carry what a flag list cannot: `degrades` (the
+  pins list's ReadMessageHistory, reported as `degraded`), `blockedByTimeout` (an own edit, a reaction) and
+  `viewLevel` (ReadMessageHistory for pin, unpin and crosspost, ranked with View, §3.2 tier 1). Each row's type is
+  pinned in `test/types/pass/operations-table.ts`. The public signatures that use these rows arrive in M6, which
+  must map each kind to its `.thread`/`.voice` row and drop `pin`/`unpin` from voice and stage messages.
+- **M4: the resolver record's `level` counts every failure** (§5.10 updated): `action` when the bot can see the
+  channel and preflight found any failure, the timeout, the hierarchy and a thread's state included; `view` also
+  when a row's `viewLevel` flag is missing. M3 counted only missing error-mode flags, so a locked thread with every
+  flag was `none` and its 50001 could only be a `level-vs-raw` mismatch.
+- **M4: the observed codes are per operation** (§5.10, §8 item 2 updated): `Observed.viewCodeFailures` lists the
+  first failures Discord answers with 50001 at the `action` level, and `Observed.expectedCode` gives the code
+  agreement and the replay check. One mapping per level could not hold: in a text channel a missing SendMessages
+  answers 50013, in a crosspost 50001.
+- **M4: the oracle's timeout mask is `Observed.oracleAppliesTimeout`** (§8 item 9 named an `OracleScope`
+  module): one more decided constant, held to the table by the replay like the others.
+- **M4: member operations resolve at guild level** (§4.6 updated): `ChannelInput` `Guild` applies the base
+  permissions and the timeout mask, no overwrites and no implicit rule, and step (a) reads the target member
+  through `SubjectRaw` for the hierarchy, as the library's `Members.get` will. Member rows have no channel to read
+  the oracle in, so their oracle is `not-applicable`.
+- **M4: preflight takes the request's facts** (§4.7 updated): `DecideArgs` carries the reaction's emoji state, the
+  target's and the assigned role's rank, whether the bot created the thread and whether a post is tagged, and
+  `ChannelSnap.requireTag` (from the channel flag) feeds the new `TagRequired` failure. `scenario/Facts.ts` derives
+  them for the matrix and the replay alike.
+- **M4: new modules** (§1.2 updated): `harness/Predict.ts` (steps (a) and (b) from the setup alone, shared by the
+  replay and the flip selection), `harness/Fixtures.ts`, `harness/Drivers.ts`, `harness/scenario/Facts.ts` and
+  `catalog/{common,index}.ts`, plus the family catalogs §1.2 named (`createThread` lives in `catalog/threads.ts`
+  with the threads family, the forum posts and the thread targeted rows; the flips in `catalog/flips.ts`).
+- **M4: the subject's own fixtures are made before Converge, with temporary access** (§5.10 step 2 updated): a
+  `subject-message` or `subject-thread` must be the subject's even in a setup that hides the channel or times it
+  out. The harness lifts a leftover timeout and gives the subject a member overwrite on the overwrite channel;
+  Converge, which reads the lab afterwards, replaces it. The DSL's fixtures changed (§5.8 updated): the
+  foreign message, reaction and pin are the harness's (it can act in voice text chat), `target-role` gives a role
+  removal's role, and M3's unused `target-message` and `crossposted-subject-message` are gone.
+- **M4: the members family excludes two role collisions** (§5.9 updated): the lab has one role per position, so an
+  add-role row never gives the target a role it already holds for its rank, and a remove-role row's target ranks at
+  least as high as the role it holds to lose. 22 rows (the design had 21).
+- **M4: the pins family has no voice or stage** (§5.9 updated): their text chat has no pins (above), so the
+  channel dimension is text, announcement, a public thread and an archived one, and `connect` left the missing
+  dimension. 18 rows (the design had 25).
+- **M4: the flip controls are one per (operation row, first missing flag)** (§5.9 updated): §5.9's "every row
+  where exactly one flag is the first missing flag" would flip nearly every failing row; the flag-coverage check
+  of §5.5 needs one per (row, flag). The first family row in ID order whose prediction has the flag first and is not
+  blind is flipped; the flip drops the flag from every removal and adds it to the first non-administrator grant.
+  57 flips. `flip-control` is judged after the run against the original's live row (`Agreement.flipAgreement`),
+  and `test/unit/facts.test.ts` checks offline that every flip's predicted failures are its original's minus the
+  first.
+- **M4: Converge also sets the target's roles and clears its nickname and timeout, and sets the scenario channel's
+  slowmode and required tag** (§5.8). Cleanup restores the scenario thread before deleting messages, because an
+  archived thread refuses message deletes (400 50083; the first trial run aborted on it).
+- **M4: the lab has a guild emoji** (`lab_emoji`, §5.7 updated) for reactions with a guild emoji; the guard admits
+  only `lab_` emoji creates and no emoji edits or deletes, and checks that a channel rename keeps a lab name (§5.6
+  updated). It issues kick and ban permits as §5.6 describes (`LabGuard.permitKickOrBan`).
+- **M4: Safety checks kick and ban rows and counts name and topic edits per channel** (§5.6); its target check
+  resolves on the overwrite channel, since a thread the subject creates during the scenario has no ID yet, and it
+  skips a channel the guild lacks (`lab-media`), where nothing is sent.
+- **M4: the replay's catalog check.** Beyond §5.13 the replay requires the table's scenarios to be exactly the
+  catalog's, each with the catalog's setup and operation, so a catalog change without a new live run fails it.
+  `Limits` has no rows to be checked against yet: the limit probes are rule rows (§5.5), which arrive in M6 with
+  `src/payload/Limits.ts`; M4 found nothing to change there.
+- **M4: the truth table is committed by the implementer**, not the orchestrator (§6 M4), because the task requires
+  a clean tree and the replay in `verify:offline` reads the committed file.
 
 ## Escalated rules
 
