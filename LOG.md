@@ -599,6 +599,16 @@ the same commit.
   `rate limited: <route> retry-after <s>` on stderr when a 429 arrives. The same scenario group then ran cleanly
   (`--only 'send/announcement-thread/**'`, no 429), so the stall did not reproduce; the run was stopped and the
   exit runs restarted.
+- **M4: Discord allows 1,000 role edits per guild per day, and the matrix had used them** (§5.10, §5.11). The
+  stall above, and a second abort 18 scenarios into the next run (`converge: lab-grant permissions`, no response
+  within 90 s, no 429), are the role bucket: a no-op `PATCH /guilds/{id}/roles/{lab-grant}` answered
+  `x-ratelimit-limit: 1000`, `x-ratelimit-remaining: 0`, `x-ratelimit-reset-after: 86371` (one more each time:
+  a bucket that refills about one edit per 86 s). dfx takes the `remaining` of its first answer as the bucket's
+  limit over the whole reset window, so a run that starts with fewer edits left than it needs stalls in dfx's
+  own limiter without a 429. The runner's group order (§5.10's "ordered to minimise writes") now sorts setup groups
+  by the role state they need first: a run makes 67 role edits, one per distinct role state, instead of 216. A
+  full run must start with at least about 75 edits left in the bucket (`.scratch`-free check: one no-op role
+  PATCH prints `x-ratelimit-remaining`), which after a run takes about 1.8 hours of refill.
 - **M4: the truth table is committed by the implementer**, not the orchestrator (§6 M4), because the task requires
   a clean tree and the replay in `verify:offline` reads the committed file.
 

@@ -54,6 +54,7 @@ import { LabCheckFailed, LabGuard, LabRequestFailed, labStep, labStepUnless } fr
 import * as LabIds from "./LabIds.ts"
 import * as Materialize from "./Materialize.ts"
 import * as Outcome from "./Outcome.ts"
+import * as Predict from "./Predict.ts"
 import { Pacing } from "./Pacing.ts"
 import * as Provision from "./Provision.ts"
 import * as Reset from "./Reset.ts"
@@ -97,9 +98,23 @@ export const catalog: ReadonlyArray<Scenario> = Catalog.scenarios
 
 const encodeSetup = Schema.encodeSync(Schema.toCodecJson(Setup))
 
-/** Groups equal setups together, keeping each group in ID order and the groups in a fixed order (§5.10). */
+/**
+ * The role permissions a setup materializes (`@everyone`'s and every lab role's), as a sortable key. Role edits
+ * are the scarcest write: Discord allows 1,000 per guild per day on `PATCH /guilds/{id}/roles/{id}`, refilled
+ * at about one per 86 s (M4 live), and the setups use 67 distinct role states.
+ */
+const roleStateOf = (scenario: Scenario): string => {
+  const state = Materialize.desired(scenario.setup, Predict.symbolicIds)
+  return [state.everyone, ...LabIds.roleSpecs.map((spec) => state.rolePermissions.get(spec.name) ?? 0n)].map((bits) => bits.toString().padStart(16, "0")).join("|")
+}
+
+/**
+ * Groups equal setups together, keeping each group in ID order and the groups in a fixed order (§5.10): by the
+ * role state they need, then by the canonical setup, so the run changes role permissions once per role state
+ * rather than once per setup.
+ */
 export const order = (scenarios: ReadonlyArray<Scenario>): ReadonlyArray<Scenario> => {
-  const signature = (scenario: Scenario) => TruthTable.canonicalJson(encodeSetup(scenario.setup))
+  const signature = (scenario: Scenario) => `${roleStateOf(scenario)}#${TruthTable.canonicalJson(encodeSetup(scenario.setup))}`
   return scenarios
     .map((scenario) => ({ scenario, key: signature(scenario) }))
     .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.scenario.id < b.scenario.id ? -1 : a.scenario.id > b.scenario.id ? 1 : 0))
