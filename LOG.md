@@ -625,7 +625,11 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
     scenarios in 605 s, the same counts and the same 28 mismatches, `compare: identical to the previous table`;
     the two tables are byte-identical (sha256 `4458a2ba...8b39aa`, 131,537 bytes). Exit 1 (mismatches).
   - then `bun run harness:selftest` (the guard now reads channel PATCH bodies): 13 dirt steps, 34 problems seen,
-    reset 28 writes, at baseline, second reset 0 writes.
+    reset 28 writes, at baseline, second reset 0 writes;
+  - **C**, on commit `8a38125` (the final code but for two unused type imports removed after it):
+    `bun --no-env-file harness/main.ts run --only 'send/**' --compare`, a third fresh process: 103 scenarios in
+    611 s, 2,175 requests, 565 writes, 64 invalid, no 429, the same 28 mismatches, `compare: identical to the
+    previous table`. The lock was gone afterwards.
 - The table's raw classes: 46 `50001`, 39 `success`, 9 `50013`, 7 `degraded` (MentionEveryone 5, SendTTSMessages 2),
   1 `other-error` (160002), 1 `setup-unsupported` (`admin-exempt`). Agreement: 75 agree, 28 mismatches.
 - **Mismatches left for M4** (all genuine, see "Live findings"):
