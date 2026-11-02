@@ -592,6 +592,13 @@ the same commit.
   catalog's, each with the catalog's setup and operation, so a catalog change without a new live run fails it.
   `Limits` has no rows to be checked against yet: the limit probes are rule rows (§5.5), which arrive in M6 with
   `src/payload/Limits.ts`; M4 found nothing to change there.
+- **M4: every lab step has a deadline, and every 429 is reported at once** (§5.10, §5.11): the first exit run sat
+  idle for 15 minutes in its 53rd scenario (`send/announcement-thread/embed/role/view/role-overwrite-deny/timed-out`)
+  with only the gateway socket open, which is dfx sleeping inside a harness call; harness calls had no deadline.
+  `labStep` now fails after 90 s with status 0 (the command aborts naming the step), and the shared client prints
+  `rate limited: <route> retry-after <s>` on stderr when a 429 arrives. The same scenario group then ran cleanly
+  (`--only 'send/announcement-thread/**'`, no 429), so the stall did not reproduce; the run was stopped and the
+  exit runs restarted.
 - **M4: the truth table is committed by the implementer**, not the orchestrator (§6 M4), because the task requires
   a clean tree and the replay in `verify:offline` reads the committed file.
 
@@ -625,7 +632,11 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   per scenario (its raw class and any mismatch) and a summary. Per-scenario detail (message IDs, the oracle,
   step timings, 429s) goes to `/tmp/effect-discord-perms-live-<start ms>.log`. With `--only`, `--write` and
   `--compare` use `/tmp/effect-discord-perms-truth-table.only-<glob slug>.json`. The send catalog (103 rows) takes
-  about 10 minutes and some 2,200 requests; it exits 1 while any mismatch remains.
+  about 10 minutes and some 2,200 requests; it exits 1 while any mismatch remains. The whole M4 catalog (354
+  rows) takes about 33 minutes, some 7,300 requests and 1,800 writes, about 220 of them invalid (the raw 403s).
+- **Crossposts are rate-limited per announcement channel** (about 10 publishes per hour). A full run publishes 4
+  messages in `lab-announcement` in its first few minutes, so never start more than two full runs (or runs of
+  `message/**` and `flip/**`) within one hour.
 - **Reset self-test: re-run `bun run harness:selftest` whenever `Reset.ts` (or `LabIds.ts`'s baseline) changes.**
   The smoke and reset exit checks run on a clean lab, where a reset that wrote nothing would pass too. The
   self-test dirties the lab (role permissions and mentionability, a leftover role the target holds and the
@@ -855,3 +866,52 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
     tts/role/payload/role-overwrite-deny}/timed-out`;
   - `preflight-vs-raw` (2): TTS degrades (H-102):
     `send/{forum-post,public-thread}/tts/member-overwrite-allow/payload/member-overwrite-deny/normal`.
+
+### M4 Matrix to zero mismatches
+
+- Before M4, the M3 verifier's five minor findings (commit `5d63b96`; "Design deviations", "Before M4").
+- The catalog (`harness/scenario/catalog/`): `send.ts` (89 pairwise, 20 targeted), `messages.ts` (22, 10),
+  `reactions.ts` (25, 4), `pins.ts` (18, 4), `threads.ts` (the createThread family 8 and the threads family 24,
+  with 20 targeted rows for threads, thread creation from a message and forum posts), `channelEdit.ts` (21, 5),
+  `members.ts` (22, 1), and `flips.ts`, one flip control per (operation row, first missing flag): 293 family rows
+  and 61 flips, 354 scenarios. `index.ts` assembles them; Safety and the run-start selection check pass over all
+  of them, offline and at run start.
+- The runner (`harness/Runner.ts`) runs every operation: the subject's own fixtures with temporary access
+  (`Fixtures.ts`), Converge with the target's roles and the channel's settings, the harness's fixtures, the wait,
+  step (a) at channel or guild level, (b), the raw call per operation (`Drivers.ts`), cleanup, and the flip
+  controls judged after the run. Kick and ban go out only with the guard's permit (`LabGuard.permitKickOrBan`);
+  every one the matrix sent failed, as the docs model predicted.
+- From the findings ("Live findings", M4): the operation table (47 rows), `PayloadRules.tts` (degrade),
+  `ResolverRules.threadCreatorMayLock`/`MayDelete`, `Observed.viewCodeFailures`/`oracleAppliesTimeout`, preflight's
+  conditional AddReactions, hierarchy, creator exemptions, tags, `blockedByTimeout` and `viewLevel`. `Limits` was
+  not changed: M4 has no limit rows (they are M6's rule rows).
+- `test/replay/truth-table.test.ts` (§5.13): every row's steps (a) and (b) rebuilt from the setup
+  (`harness/Predict.ts`) and agreement; the table's scenarios equal the catalog's; the constants held to the
+  table (each `viewCodeFailures` entry must be witnessed by a row; the four entries the first exit attempt did not
+  witness got targeted rows, and the exit runs started again).
+- Unit tests: `facts.test.ts` (the row per kind, predictions, the whole catalog through Safety, the flip
+  controls' predicted failures), and new cases in the preflight, agreement, resolver, state, materialize and
+  lab-guard tests. Mutation checks (each reverted, each failed its test): 18 for the verifier's findings and 29
+  for M4's logic, among them the creator exemptions, the blind-row rule, `blockedByTimeout`, the hierarchy, tags,
+  conditional AddReactions, the `viewLevel` order and level, the guild-level timeout mask, `Facts.complete`,
+  agreement's state-failure and oracle-timeout rules, the flip judgment, `expectedCode`, the guard's permit
+  consumption, target and prediction (including its ID tie-break), the rename check, Converge's settings and target
+  read-back, the pins degradation's fixture condition, Safety's kick and ban check, the flips' blind rule, the
+  target's Administrator, the rebuilt unseen thread, and the reducer's REQUIRE_TAG flag.
+- **Not covered by M4's rows** (§5.9's targeted families, with the reason; none is claimed as verified):
+  - overwrite algebra H-004 (an Administrator bit inside an overwrite), H-009 (array order), H-010 (role
+    positions), H-011 (an overwrite for a role not held): the Setup cannot express them (one role per grant
+    source, one array order). The resolver's 4,000-case comparison with the documented algorithm covers them
+    offline only. H-005 and H-007 have no row with an `@everyone` overwrite allow as the grant (the send family's
+    grant sources do not include it);
+  - H-053 (bots ignore slowmode): no row sends twice in a slowmode channel, so `Observed.slowmodeAppliesToBots`
+    stays the documented `false`, unconfirmed (the replay only checks that no row answered 20016);
+  - H-043 (`ThreadAlreadyExists`, 160004) and H-141's `AlreadyCrossposted` (40033): preflight cannot know a
+    message already has a thread or was crossposted from what it holds, so these stay recompute-only tags;
+  - H-048, H-051 (250 pins, cost), H-052 (a message from another channel), H-062, H-063 (role edits, no such
+    phase-1 operation), H-065 (the owner is Rhys), H-068 (Perms Lab has no managed roles, M2), H-069 (no own-
+    nickname operation), H-146;
+  - the type rules' live pairs (H-041 private threads in announcement channels, H-054 announcement slowmode,
+    H-086, H-088, H-092, H-101, H-120..H-131 limits, H-143), which are M6's rule rows, and a voice message's
+    missing `pin`, now a type rule too; H-104 and external stickers need a second guild;
+  - H-160, H-161 (obfuscation): M7, with the codec.

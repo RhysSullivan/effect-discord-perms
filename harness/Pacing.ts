@@ -33,8 +33,12 @@ export interface Stats {
 export interface Interface {
   /** Waits for the next slot of the global bucket, then counts the request (and the write, if it is one). */
   readonly take: (method: string, url: string) => Effect.Effect<void>
-  /** Counts a response's status (and a 429's route). Dies when the invalid-request count reaches the cap. */
-  readonly recordStatus: (status: number, method: string, url: string) => Effect.Effect<void>
+  /**
+   * Counts a response's status (and a 429's route). A 429 is also reported at once on stderr with its route
+   * template and Discord's `retry-after` (seconds), because dfx then waits that long before it retries and a
+   * long wait would otherwise look like a hang. Dies when the invalid-request count reaches the cap.
+   */
+  readonly recordStatus: (status: number, method: string, url: string, retryAfter?: string) => Effect.Effect<void>
   /** The counters so far. */
   readonly stats: Effect.Effect<Stats>
 }
@@ -103,9 +107,11 @@ export const make = (options: Options): Effect.Effect<Interface> =>
         if (wait > 0) yield* Effect.sleep(Duration.millis(wait))
       })
 
-    const recordStatus = (status: number, method: string, url: string): Effect.Effect<void> =>
+    const recordStatus = (status: number, method: string, url: string, retryAfter?: string): Effect.Effect<void> =>
       status === 401 || status === 403 || status === 429
-        ? Ref.modify(counters, (current): readonly [number, Counters] => {
+        ? Effect.andThen(
+          status === 429 ? Effect.sync(() => console.error(`rate limited: ${routeKey(method, url)} retry-after ${retryAfter ?? "(none)"} s`)) : Effect.void,
+          Ref.modify(counters, (current): readonly [number, Counters] => {
           const rateLimited = new Map(current.rateLimited)
           if (status === 429) {
             const route = routeKey(method, url)
@@ -118,7 +124,7 @@ export const make = (options: Options): Effect.Effect<Interface> =>
               ? Effect.die(new Error(`invalid-request budget exhausted: ${invalid} responses with status 401, 403 or 429 (cap ${options.invalidCap})`))
               : Effect.void
           )
-        )
+        ))
         : Effect.void
 
     const stats = Ref.get(counters).pipe(

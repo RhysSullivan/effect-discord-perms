@@ -39,7 +39,7 @@
  * guild, so the stored IDs in `.lab-state.json` are never trusted on their own.
  */
 import type { DiscordRESTError } from "dfx/DiscordREST"
-import { Clock, Context, Effect, Layer, Option, Ref, Schema } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Option, Ref, Schema } from "effect"
 import type * as HttpClientRequest from "effect/http/HttpClientRequest"
 import { classify } from "../src/rest/ErrorMap.ts"
 import type { ChannelId, GuildId, RoleId, UserId } from "../src/Snowflake.ts"
@@ -471,9 +471,16 @@ export class LabCheckFailed extends Schema.TaggedError<LabCheckFailed>()("LabChe
 }) {}
 
 /**
- * Runs one dfx call as a named lab step. A Discord failure becomes `LabRequestFailed` with only the status,
- * code and message copied out (never the live request or response). A rate-limited response that escaped
- * dfx, and malformed or unencodable requests, are defects (§3.1).
+ * How long one lab step may take, dfx's waits after 429s included. A step past it fails with status 0 (no
+ * response), which aborts the command naming the step: M4 live, a run sat idle for 15 minutes inside one
+ * harness call, which is what an unbounded dfx 429 wait looks like from outside.
+ */
+export const labStepDeadline = Duration.seconds(90)
+
+/**
+ * Runs one dfx call as a named lab step, within {@link labStepDeadline}. A Discord failure becomes
+ * `LabRequestFailed` with only the status, code and message copied out (never the live request or response). A
+ * rate-limited response that escaped dfx, and malformed or unencodable requests, are defects (§3.1).
  */
 export const labStep =
   (step: string) =>
@@ -490,7 +497,11 @@ export const labStep =
                 : Effect.fail(new LabRequestFailed({ step, status: failure.response.status, code: failure.response.code, message: failure.response.message }))
             )
           )
-        )
+        ),
+        Effect.timeoutOrElse({
+          duration: labStepDeadline,
+          orElse: () => Effect.fail(new LabRequestFailed({ step, status: 0, code: 0, message: `no response within ${Duration.format(labStepDeadline)}` }))
+        })
       )
     })
 

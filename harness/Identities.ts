@@ -20,6 +20,7 @@ import { BunHttpClient, BunSocket } from "@effect/platform-bun"
 import { DiscordConfig, DiscordRESTMemoryLive } from "dfx"
 import { DiscordREST, type DiscordRestService } from "dfx/DiscordREST"
 import { Config, Context, Effect, Layer, Option } from "effect"
+import * as Headers from "effect/http/Headers"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import type * as Socket from "effect/socket/Socket"
@@ -50,7 +51,9 @@ export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpCli
     const guard = yield* Lab.LabGuard
     const sent = base.pipe(
       HttpClient.tapRequest((request) => pacing.take(request.method, request.url)),
-      HttpClient.transformResponse(Effect.tap((response) => pacing.recordStatus(response.status, response.request.method, response.request.url)))
+      HttpClient.transformResponse(
+        Effect.tap((response) => pacing.recordStatus(response.status, response.request.method, response.request.url, Option.getOrUndefined(Headers.get(response.headers, "retry-after"))))
+      )
     )
     return HttpClient.make((request) =>
       Effect.gen(function* () {

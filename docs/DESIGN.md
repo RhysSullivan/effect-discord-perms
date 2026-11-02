@@ -669,8 +669,10 @@ is `OpErrors<G>[op]` plus argument-derived limit tags):
   `CommunicationDisabled`.
 - Thread operations exist only on thread kinds: `join`, `leave`,
   `addMember`, `setArchived`, `setLocked`.
-- `ThreadArchived` appears on edit, react, pin, unpin, join, leave and
-  addMember, but not on send (C16, H-035). The matrix confirms this.
+- `ThreadArchived` appears on edit, react, pin and unpin, but not on send
+  (C16, H-035). (M4 live: deletes and bulk deletes in an archived thread
+  answer 50083 too, so their thread rows list it; joining, leaving and adding
+  a member succeed, so those rows do not.)
 - **CommunicationDisabled** is in every row whose required flags the timeout
   mask removes (everything except View and ReadMessageHistory, H-020), gated by
   `Observed.botsCanBeTimedOut`. Rows needing only those two flags
@@ -1166,8 +1168,8 @@ so the matrix has to find it.
 | `PermissionDeniedUnattributed` | permission | every op that can return 50013/50001 | 50013/50001 where recompute finds nothing | never guess |
 | `PermissionRevokedSinceCheck {flag}` | permission | ops on a handle from `require` | 50013 where recompute finds a flag in `granted` | D8 |
 | `CommunicationDisabled {until}` | state | every row whose flags the timeout mask removes; `require` | preflight (member timeout) or 50013 + recompute | only if `Observed.botsCanBeTimedOut` |
-| `ThreadLocked` | state | thread send, thread edit, own edit in threads, setArchived | 160005 (H 400/403) through recompute | |
-| `ThreadArchived` | state | own edit in threads, react, pin, unpin, join, leave, addMember | 50083 (H 400) through recompute | not on send (H-035) |
+| `ThreadLocked` | state | thread send, thread edit, setArchived, unarchive (M4: not an own edit, which a locked thread allows) | 160005 (403) through recompute; a locked thread's send answers 50001 (M4) | |
+| `ThreadArchived` | state | own edit, deletes and bulk delete in threads, react, pin, unpin (M4: not join, leave or addMember, which succeed) | 50083 (400) through recompute | not on send (H-035) |
 | `SlowmodeActive {retryAfterMs}` | state | send | 20016 (429 coded or 400) | only if `Observed.slowmodeAppliesToBots` (D11); default false (H-053) |
 | `TargetAboveInHierarchy` | state | setNickname, timeout, kick, ban | 50013 where recompute finds the target not below; also preflight | H-062..H-066 |
 | `RoleAboveInHierarchy` | state | addRole, removeRole | 50013 where recompute finds the role not below the bot's top role; also preflight | H-060; H-061 decides whether target rank also matters |

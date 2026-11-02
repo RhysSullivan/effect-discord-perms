@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Option } from "effect"
+import { Effect, Exit, Fiber, Option } from "effect"
+import * as TestClock from "effect/testing/TestClock"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
-import { formBody, type GuardState, kickBanPredictedToFail, kickBanRoute, make, noBody, type RequestBody, textBody, verdict } from "../../harness/Lab.ts"
+import { formBody, type GuardState, kickBanPredictedToFail, kickBanRoute, labStep, labStepDeadline, make, noBody, type RequestBody, textBody, verdict } from "../../harness/Lab.ts"
 import { ChannelId, GuildId, RoleId, UserId } from "../../src/Snowflake.ts"
 
 /**
@@ -289,6 +290,15 @@ describe("the guard service", () => {
       expect(kickBanPredictedToFail("kick", { ...succeeds, subject: { roles: [] }, roles: [{ id: guild, permissions: String(1n << 1n), position: 0 }] })).toBe(true)
       // a prediction for another guild is refused
       expect(Exit.isFailure(yield* Effect.exit(guard.permitKickOrBan("kick", { ...above, guildId: GuildId.make("100000000000000077") })))).toBe(true)
+    })
+  )
+
+  it.effect("bounds a lab step: a call that never answers (dfx waiting out a long 429) fails with status 0, naming the step", () =>
+    Effect.gen(function* () {
+      const fiber = yield* Effect.never.pipe(labStep("converge: get the subject"), Effect.flip, Effect.forkChild)
+      yield* TestClock.adjust(labStepDeadline)
+      const failure = yield* Fiber.join(fiber)
+      expect(failure).toMatchObject({ _tag: "LabRequestFailed", step: "converge: get the subject", status: 0, code: 0 })
     })
   )
 
