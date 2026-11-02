@@ -20,7 +20,8 @@
  *    restore their names, slowmode 0 and auto-archive (10080 minutes); the subject is a member of none of them
  *    and the target of all of them (so it can post fixtures in the private thread).
  * 7. Pins and messages: delete every message the harness, the subject or the target wrote in a lab channel
- *    (bulk delete below 14 days, single deletes above), so untracked messages from a timed-out request go too.
+ *    (bulk delete below 14 days, single deletes above), so untracked messages from a timed-out request go too;
+ *    a listed message that is already gone (10008) is skipped (`deletePlanned`).
  *    A forum post's starter message is kept, and system messages Discord does not allow deleting (a thread's
  *    "added to the thread" notices) are left. Every pinned message that is not deleted is unpinned first.
  * 8. The subject's guild commands to an empty list.
