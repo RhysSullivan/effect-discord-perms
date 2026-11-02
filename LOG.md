@@ -237,6 +237,29 @@ finding changed a constant, and the replay holds the constant to the table (§5.
   (`send/targeted/order-timeout-smit`). Both failures answer 50001 in threads, so which one Discord checked first is
   not observable; the timeout keeps its §3.2 rank and `viewCodeFailures["thread.send"]` lists it.
 
+After the M4 verifier, from the targeted rows it asked for (the targeted subset run and the exit runs below):
+
+- **M4, H-053 confirmed: slowmode does not apply to bots.** The subject without BypassSlowmode sent twice in a row,
+  under three seconds apart, in `lab-text` with a 60 s slowmode: both 200, no 429
+  (`send/targeted/slowmode-second-send`; with BypassSlowmode the same, `...-bypass`). `Observed.slowmodeAppliesToBots`
+  stays `false`, now with a witness the replay requires.
+- **M4, §3.2: Discord checks a send's payload flags before a thread's lock.** A member of a locked thread with View
+  and SMIT sending an embed without EmbedLinks got 403 50013 (`send/targeted/order-locked-embed`), EmbedLinks' code;
+  with EmbedLinks granted the same send got the lock's 50001 (its flip control). `ThreadLocked` now ranks after the
+  payload flags ("Design deviations").
+- **M4, H-005 and H-007 confirmed with an `@everyone` overwrite allow as the grant:** View and Send allowed only by
+  the `@everyone` overwrite let the subject send (`send/targeted/overwrite-everyone-allow`), and a role overwrite
+  deny of Send beats that allow (403 50013, `...-role-deny`).
+- **M4, H-021 and H-067: timing out an Administrator answers 403 50013 even when it ranks below the bot**
+  (`member/targeted/timeout-admin-below`: the target holds `lab-admin`, below the subject's `lab-mid`, and the
+  subject holds ModerateMembers), so `TargetIsAdministrator` stands on its own.
+- **M4: a timeout does not stop deleting one's own message** where the subject can see the channel, in a text
+  channel and in a thread (`message/targeted/delete-own-timed-out`, `...-thread`, both 200), so `message.deleteOwn`
+  and `message.deleteOwn.thread` rightly omit `CommunicationDisabled`.
+- **M4 (H-087, cleanup): Discord's message list can lag a bulk delete.** Right after the subject's bulk delete in
+  `lab-voice`, the harness's listing still returned a deleted message, and deleting it answered 404 10008 (the M4
+  verifier's first exit run). Cleanup now treats 10008 as done ("Design deviations").
+
 ## dfx deviations
 
 Where dfx got in the way and we wrapped or adapted it, and why.

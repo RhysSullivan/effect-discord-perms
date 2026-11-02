@@ -678,7 +678,9 @@ is `OpErrors<G>[op]` plus argument-derived limit tags):
   mask removes (everything except View and ReadMessageHistory, H-020), gated by
   `Observed.botsCanBeTimedOut`. Rows needing only those two flags
   (`channel.pins`, `join`, `leave`, own `delete`) do not list it; `voice.pins`
-  needs Connect, which the mask removes, so it does (M1).
+  needs Connect, which the mask removes, so it does (M1). (M4 live: a timed-out
+  subject that sees the channel deletes its own message, in a text channel and
+  in a thread, `message/targeted/delete-own-timed-out{,-thread}`.)
 - **PermissionDeniedUnattributed** is in every row that sends a guild request,
   including `channel.pins`, `voice.pins`, `join` and `leave`: a 50001 there
   goes through the recompute, which may find nothing (§3.1, §4.9). Only
