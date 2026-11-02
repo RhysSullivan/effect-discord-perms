@@ -946,3 +946,7 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
     139 success, 136 `50001`, 48 `50013`, 17 other (12 x 50083, 3 x 160002, 40067, 160005), 12 degraded,
     2 `setup-unsupported` (`kind-not-available` for the media post, `admin-exempt`). `bun run verify:offline` is
     green with the replay: 799 tests in 32 files, 363 of them the replay.
+  - **exit run 2**, 79 minutes later (the bucket's refill), same code: `bun run verify:live` (`run --write
+    --compare`) exited 0: role budget 86 left, 354 scenarios in 2,061 s, 7,320 requests, 1,625 writes, 221
+    invalid, no 429, **0 mismatches**, `compare: identical to the previous table` (the committed one); it wrote the
+    same bytes (`b726e638...d26480`).
