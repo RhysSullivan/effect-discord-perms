@@ -607,8 +607,9 @@ the same commit.
   limit over the whole reset window, so a run that starts with fewer edits left than it needs stalls in dfx's
   own limiter without a 429. The runner's group order (§5.10's "ordered to minimise writes") now sorts setup groups
   by the role state they need first: a run makes 67 role edits, one per distinct role state, instead of 216. A
-  full run must start with at least about 75 edits left in the bucket (`.scratch`-free check: one no-op role
-  PATCH prints `x-ratelimit-remaining`), which after a run takes about 1.8 hours of refill.
+  full run must start with about 75 edits left in the bucket, which after a run takes about 1.8 hours of refill;
+  the runner checks it before any scenario write (one no-op role PATCH, reading `x-ratelimit-remaining`) and
+  fails fast with the wait instead of stalling.
 - **M4: the truth table is committed by the implementer**, not the orchestrator (§6 M4), because the task requires
   a clean tree and the replay in `verify:offline` reads the committed file.
 
@@ -644,6 +645,9 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   `--compare` use `/tmp/effect-discord-perms-truth-table.only-<glob slug>.json`. The send catalog (103 rows) takes
   about 10 minutes and some 2,200 requests; it exits 1 while any mismatch remains. The whole M4 catalog (354
   rows) takes about 33 minutes, some 7,300 requests and 1,800 writes, about 220 of them invalid (the raw 403s).
+- **Role edits are rate-limited per guild: 1,000 a day, refilled about one per 86 s.** A full run needs about 75
+  (67 for its setups, plus resets); `run` checks the bucket at start and says how long to wait. Two full runs
+  need about 1.8 hours between them. The reset self-test and smoke make a few each.
 - **Crossposts are rate-limited per announcement channel** (about 10 publishes per hour). A full run publishes 4
   messages in `lab-announcement` in its first few minutes, so never start more than two full runs (or runs of
   `message/**` and `flip/**`) within one hour.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as Predict from "../../harness/Predict.ts"
+import { order, roleEditsOf } from "../../harness/Runner.ts"
 import { flipSetup, flipsOf } from "../../harness/scenario/catalog/flips.ts"
 import { familyRows, flipRows, scenarios } from "../../harness/scenario/catalog/index.ts"
 import { Setup } from "../../harness/scenario/Dsl.ts"
@@ -114,6 +115,20 @@ describe("the whole catalog", () => {
     const edit = (id: string, field: "name" | "topic") => ({ id, hypotheses: [], setup: setup(), operation: { _tag: "channelEdit", field } as const })
     expect(Safety.checkCatalog([edit("a", "name")])).toEqual([])
     expect(Safety.checkCatalog([edit("a", "name"), edit("b", "topic")]).map((violation) => violation.rule)).toEqual(["one-rename-per-channel"])
+  })
+})
+
+describe("the run order", () => {
+  it("groups the catalog by role state, so a run changes role permissions once per state (Discord allows 1,000 role edits a day)", () => {
+    const ordered = order(scenarios)
+    expect([...ordered].map((scenario) => scenario.id).sort()).toEqual(scenarios.map((scenario) => scenario.id).sort())
+    expect(order(scenarios)).toEqual(ordered)
+    expect(roleEditsOf(ordered)).toBe(67)
+    // the M3 order (by setup alone) changed them far more often
+    const bySetup = [...scenarios].sort((a, b) => (JSON.stringify(a.setup) < JSON.stringify(b.setup) ? -1 : 1))
+    expect(roleEditsOf(bySetup)).toBeGreaterThan(150)
+    const one = (flags: ReadonlyArray<"ViewChannel" | "SendMessages">) => ({ id: flags.join(), hypotheses: [], setup: setup({ grants: [{ flags, via: "role" as const }] }), operation: { _tag: "send" as const, payload: "plain" as const } })
+    expect(roleEditsOf([one(["ViewChannel"]), one(["ViewChannel"]), one(["ViewChannel", "SendMessages"])])).toBe(1)
   })
 })
 

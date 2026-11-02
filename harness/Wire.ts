@@ -10,11 +10,12 @@
  * request type lacks (dfx.md §0), and the permission oracle (`src/rest/Oracle.ts`).
  */
 import type { DiscordRestService } from "dfx/DiscordREST"
-import { Clock, Effect, Option, Schema } from "effect"
+import { Clock, Duration, Effect, Option, Schema } from "effect"
+import * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import { DiscordErrorBody } from "../src/rest/ErrorMap.ts"
 import { ChannelId, EmojiId, GuildId, MessageId, RoleId, StickerId, UserId } from "../src/Snowflake.ts"
-import { LabRequestFailed } from "./Lab.ts"
+import { LabRequestFailed, labStepDeadline } from "./Lab.ts"
 
 /** A permission bitfield as Discord serialises it: a decimal string. */
 export const Bitfield = Schema.String.check(Schema.isPattern(/^\d+$/))
@@ -146,9 +147,10 @@ export const decode =
       Effect.orDie
     )
 
-/** A raw request's outcome: the status and the decoded JSON body (or `None` for an empty or non-JSON body). */
+/** A raw request's outcome: the status, the response headers, and the decoded JSON body (or `None` for an empty or non-JSON body). */
 export interface RawResponse {
   readonly status: number
+  readonly headers: Headers.Headers
   readonly body: Option.Option<unknown>
 }
 
@@ -176,10 +178,14 @@ export const raw = (
               : Effect.die(new Error(`${step}: ${error.reason._tag}`))
           )
         )
-      )
+      ),
+      Effect.timeoutOrElse({
+        duration: labStepDeadline,
+        orElse: () => Effect.fail(new LabRequestFailed({ step, status: 0, code: 0, message: `no response within ${Duration.format(labStepDeadline)}` }))
+      })
     )
     const body = yield* response.json.pipe(Effect.option)
-    return { status: response.status, body }
+    return { status: response.status, headers: response.headers, body }
   })
 
 /** Fails with `LabRequestFailed` unless the raw response is a 2xx; copies Discord's code and message when present. */

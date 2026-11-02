@@ -30,7 +30,8 @@
  * (message IDs, timings) goes to the run log, never to the table.
  */
 import { BunFileSystem } from "@effect/platform-bun"
-import { Clock, Duration, Effect, FileSystem, Schema } from "effect"
+import { Clock, Duration, Effect, FileSystem, Option, Schema } from "effect"
+import * as Headers from "effect/http/Headers"
 import type { PlatformError } from "effect/PlatformError"
 import { BotRuntime } from "../src/bot/Bot.ts"
 import { SubjectRaw } from "../src/bot/Internals.ts"
@@ -107,6 +108,53 @@ const roleStateOf = (scenario: Scenario): string => {
   const state = Materialize.desired(scenario.setup, Predict.symbolicIds)
   return [state.everyone, ...LabIds.roleSpecs.map((spec) => state.rolePermissions.get(spec.name) ?? 0n)].map((bits) => bits.toString().padStart(16, "0")).join("|")
 }
+
+/** The role edits Converge makes over `ordered` (one per role whose permissions change between consecutive setups). */
+export const roleEditsOf = (ordered: ReadonlyArray<Scenario>): number => {
+  let previous: ReadonlyArray<string> | undefined
+  let edits = 0
+  for (const scenario of ordered) {
+    const state = roleStateOf(scenario).split("|")
+    if (previous !== undefined) edits += state.filter((bits, index) => bits !== previous?.[index]).length
+    previous = state
+  }
+  return edits
+}
+
+/** Role edits a run needs beyond its scenarios': the resets' and the budget check's own. */
+const roleEditMargin = 8
+
+/** Discord's refill of the role bucket, about one edit per this many milliseconds (1,000 per day; M4 live). */
+const roleEditRefillMs = 86_400
+
+const Remaining = Schema.Struct({ permissions: Schema.String })
+
+/**
+ * Checks that the guild's role-edit bucket holds what the run needs, before any scenario write, by writing
+ * `lab-grant`'s permissions back unchanged and reading `x-ratelimit-remaining` (§5.11; M4 live: a run that starts
+ * short stalls inside dfx's limiter without a 429). Costs one role edit.
+ */
+const checkRoleBudget = (ids: Materialize.Ids, needed: number): Effect.Effect<void, LabCheckFailed | LabRequestFailed, HarnessRest> =>
+  Effect.gen(function* () {
+    const rest = yield* HarnessRest
+    const grant = ids.roles.get("lab-grant")
+    if (grant === undefined) return yield* Effect.die(new Error("no ID for lab-grant"))
+    const roles = yield* rest.listGuildRoles(ids.guildId).pipe(labStep("role budget: list roles"), Effect.flatMap(Wire.decode(Schema.Array(Schema.Struct({ id: Schema.String, ...Remaining.fields })), "listGuildRoles")))
+    const current = roles.find((role) => role.id === grant)
+    if (current === undefined) return yield* Effect.die(new Error("lab-grant is not listed"))
+    const answer = yield* Wire.raw(rest, "role budget: write lab-grant back", "PATCH", `/guilds/${ids.guildId}/roles/${grant}`, { body: { permissions: current.permissions } })
+    yield* Wire.ensureOk("role budget: write lab-grant back", answer)
+    const remaining = Number(Option.getOrElse(Headers.get(answer.headers, "x-ratelimit-remaining"), () => "NaN"))
+    if (!Number.isFinite(remaining)) return yield* new LabCheckFailed({ check: "role budget", detail: "the role PATCH carried no x-ratelimit-remaining header" })
+    yield* Effect.sync(() => console.log(`role budget: ${remaining} role edits left; the run needs about ${needed}`))
+    if (remaining < needed) {
+      const minutes = Math.ceil(((needed - remaining) * roleEditRefillMs) / 60_000)
+      return yield* new LabCheckFailed({
+        check: "role budget",
+        detail: `${remaining} role edits left in the guild's bucket, the run needs about ${needed}; Discord refills about one per ${roleEditRefillMs / 1000} s, so start again in about ${minutes} minutes`
+      })
+    }
+  })
 
 /**
  * Groups equal setups together, keeping each group in ID order and the groups in a fixed order (§5.10): by the
@@ -383,6 +431,7 @@ export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenari
     yield* Effect.sync(() => console.log(`provision: ${Provision.summary(provision)}`))
     const state = yield* LabIds.load(context.guildId).pipe(Effect.provide(BunFileSystem.layer))
     const ids = yield* idsOf(state, report)
+    yield* checkRoleBudget(ids, roleEditsOf(order(scenarios)) + roleEditMargin)
 
     // the pairwise selections (every row valid, every valid pair and value covered, deterministic), then Safety
     // over the catalog and every scenario's materialized state, before any scenario write
