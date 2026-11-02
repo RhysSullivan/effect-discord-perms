@@ -2395,7 +2395,10 @@ scenarios**. (M4 has 236 pairwise rows, 58 targeted rows and 58 flip controls,
 
 Scenarios are grouped by setup signature, and groups are ordered to minimise
 writes. Within a group, order is by ID. The order is fixed, so runs are
-reproducible.
+reproducible. (M4: the groups are sorted by the role permissions their setups
+need first, then by the canonical setup, because role edits are the scarcest
+write; a run makes one role edit per distinct role state, 67, where sorting by
+setup alone made 216.)
 
 1. **Converge** the setup in the fixed order of §5.8: harness reads, then the
    minimal writes. The harness reads the roles, the subject, the scenario
@@ -2527,7 +2530,17 @@ channel_types, ...) and expects one write.
   by Safety.
 - 401, 403 and 429 responses are counted per run. The run aborts at **1,500**,
   15% of Discord's 10,000 per 10 minutes (H-094). The expected count is about
-  500.
+  500. (M4: about 220 per full run; each 429 is printed as it arrives, with its
+  `retry-after`.)
+- (M4 live) Discord allows **1,000 role edits per guild per day**
+  (`PATCH /guilds/{id}/roles/{id}`: `x-ratelimit-limit: 1000`, refilled about one
+  per 86 s). A run checks the bucket before any scenario write and fails with
+  the wait when it holds fewer than the run needs (about 75); dfx would
+  otherwise stall in its own limiter, which takes the bucket's first
+  `remaining` as its limit for the whole reset window. Every lab step has a
+  90 s deadline, so a stall aborts naming the step.
+- (M4 live) Announcement publishing (crosspost) is limited to about 10 per
+  channel per hour; a run makes 4.
 - Target duration is **at most 30 minutes**, at roughly 2 to 3.5 s per
   scenario for about 500 scenarios. The runner prints a running ETA and aborts
   at 60 minutes as an infrastructure failure.
