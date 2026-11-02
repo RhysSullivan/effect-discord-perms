@@ -4,16 +4,19 @@
  * runs that observed the same thing write the same bytes.
  *
  * Also the row builders shared by the runner and the offline replay: the resolver record of step (a), with its
- * `level`, and a library error as `{tag, categories}`.
+ * `level`, preflight's record of step (b), and a library error as `{tag, categories}`.
  */
 import { Effect, FileSystem, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
+import { PreflightDecision } from "../src/errors/Cause.ts"
 import { categoriesOf } from "../src/errors/Category.ts"
 import { type PermissionFlag, PermissionFlags } from "../src/errors/Missing.generated.ts"
 import * as Flags from "../src/permissions/Flags.ts"
 import { type OpName, Operations, type OpSpec } from "../src/permissions/Operations.ts"
+import { type Decision, decide, tagOf, toError } from "../src/permissions/Preflight.ts"
 import { blindMasks, type Resolution } from "../src/permissions/Resolver.ts"
 import { Observation, Setup } from "./scenario/Dsl.ts"
+import type { Facts } from "./scenario/Facts.ts"
 
 /** A permission flag name. */
 export const Flag = Schema.Literals(PermissionFlags)
@@ -175,25 +178,51 @@ export const differences = (before: TruthTable, after: TruthTable): ReadonlyArra
 export const recordError = (error: { readonly _tag: string }): RecordedError => ({ tag: error._tag, categories: [...categoriesOf(error)] })
 
 /**
- * The level of a resolution for an operation whose error-mode flags are `needed` (§5.10): `view` when the bot
- * cannot see the channel (a blind mask, no ViewChannel, or no Connect in a voice row), `action` when it can and
- * an error-mode flag is missing, `none` otherwise.
+ * The level of a resolution for an operation (§5.10): `view` when the bot cannot see the channel or the target
+ * (a blind mask, or no ViewChannel, no Connect, or no `viewLevel` flag on a row that requires it; M4 live:
+ * ReadMessageHistory for a pin or a crosspost), `action` when it can and preflight still found a
+ * failure (a missing flag, the timeout, the hierarchy, the thread's state), `none` otherwise. Member operations
+ * require neither View nor Connect, so they are never `view`.
  */
-export const levelOf = (op: OpName, resolution: Resolution, needed: ReadonlyArray<PermissionFlag>): ResolverRecord["level"] => {
+export const levelOf = (op: OpName, resolution: Resolution, decision: Pick<Decision, "failures">): ResolverRecord["level"] => {
   const row: OpSpec = Operations[op]
-  if (resolution.masks.some((mask) => blindMasks.has(mask)) || !Flags.has(resolution.effective, "ViewChannel")) return "view"
+  if (resolution.masks.some((mask) => blindMasks.has(mask))) return "view"
+  if (row.flags.includes("ViewChannel") && !Flags.has(resolution.effective, "ViewChannel")) return "view"
   if (row.flags.includes("Connect") && !Flags.has(resolution.effective, "Connect")) return "view"
-  return needed.some((flag) => !Flags.has(resolution.effective, flag)) ? "action" : "none"
+  if ((row.viewLevel ?? []).some((flag) => !Flags.has(resolution.effective, flag))) return "view"
+  return decision.failures.length > 0 ? "action" : "none"
 }
 
 /** Step (a)'s record: the required flags, what is missing after and before the masks, the masks and the level. */
-export const resolverRecord = (op: OpName, resolution: Resolution, required: ReadonlyArray<PermissionFlag>, needed: ReadonlyArray<PermissionFlag>): ResolverRecord => {
+export const resolverRecord = (op: OpName, resolution: Resolution, required: ReadonlyArray<PermissionFlag>, decision: Pick<Decision, "failures">): ResolverRecord => {
   const missingFrom = (set: Flags.PermissionSet) => Flags.sortFlags(required.filter((flag) => !Flags.has(set, flag)))
   return {
     required: Flags.sortFlags(required),
     missing: missingFrom(resolution.effective),
     missingBeforeMasks: missingFrom(resolution.afterOverwrites),
     masks: [...resolution.masks],
-    level: levelOf(op, resolution, needed)
+    level: levelOf(op, resolution, decision)
+  }
+}
+
+/** Steps (a) and (b) as the table records them, from one resolution (shared by the runner and the replay). */
+export interface StepRecords {
+  readonly decision: Decision
+  readonly resolver: ResolverRecord
+  /** Step (b): preflight's first failure, or `pass` (until M6 step (b) is `Preflight.decide` itself). */
+  readonly preflight: "pass" | RecordedError
+  readonly preflightSet: ReadonlyArray<string>
+}
+
+/** Runs preflight over `resolution` for an operation with complete facts, and records steps (a) and (b). */
+export const stepRecords = (facts: Facts, resolution: Resolution, route: string): StepRecords => {
+  const decision = decide(facts.op, resolution, facts.args)
+  const [first] = decision.failures
+  const cause = new PreflightDecision({ route, basis: "gateway-state" })
+  return {
+    decision,
+    resolver: resolverRecord(facts.op, resolution, facts.required, decision),
+    preflight: first === undefined ? "pass" : recordError(toError(facts.op, first, cause)),
+    preflightSet: decision.failures.map((failure) => tagOf(facts.op, failure))
   }
 }

@@ -26,9 +26,13 @@
  *   `communication_disabled_until`; roles change only through the per-role routes, with lab roles;
  * - AutoMod writes only delete rules named `lab-*` that the harness listed; a new sticker has a `lab-*` name,
  *   and stickers are never edited or deleted;
- * - **kick and ban are refused outright.** §5.6 allows them only where harness-side reads taken just before
- *   the call predict failure; that predicate arrives with the members family (M4). Until then no kick or ban
- *   route is allowed at all;
+ * - **kick and ban** of the target only, and only with a one-shot permit for that exact route, which the guard
+ *   issues itself (`permitKickOrBan`) when the docs model predicts failure from harness-side reads taken just
+ *   before the call: the subject holds neither the flag nor Administrator, or the target's highest role is not
+ *   below the subject's (`kickBanPredictedToFail`). The resolver under test is never consulted. Any other kick
+ *   or ban, and a second use of a permit, is refused;
+ * - a channel PATCH that renames a channel gives it a lab name; a new guild emoji has a `lab_` name, and emoji
+ *   are never edited or deleted;
  * - nothing creates or writes to a DM channel, leaves the guild, edits global commands, webhooks or invites.
  *
  * A lab object is admitted after the harness has read it from Discord (or created it) and checked its name and
@@ -63,6 +67,11 @@ export interface GuardState {
   readonly positionRoles: ReadonlySet<string>
   /** AutoMod rules named `lab-*` that the harness listed: the only rules it may delete. */
   readonly autoModRules: ReadonlySet<string>
+  /**
+   * One-shot permits for a kick or ban of the target (`DELETE /guilds/{g}/members/{t}` or `PUT /guilds/{g}/bans/{t}`),
+   * issued by `permitKickOrBan` only when failure is predicted; `check` consumes a permit when it admits it.
+   */
+  readonly kickBanPermits: ReadonlySet<string>
 }
 
 /** The guard's decision on one request. */
@@ -79,6 +88,8 @@ export const isLabRoleName = (name: string): boolean => name.startsWith("lab-")
 export const isLabRuleName = (name: string): boolean => name.startsWith("lab-")
 /** A guild sticker name the lab owns. */
 export const isLabStickerName = (name: string): boolean => name.startsWith("lab-")
+/** A guild emoji name the lab owns (emoji names allow only letters, digits and `_`). */
+export const isLabEmojiName = (name: string): boolean => name.startsWith("lab_")
 
 /**
  * What the guard can read of a request body: JSON (or any bytes) as text, the string fields of a multipart
@@ -110,7 +121,8 @@ const decodeJsonObject = Schema.decodeUnknownOption(JsonObject)
 const ChannelEdit = Schema.fromJsonString(
   Schema.Struct({
     permission_overwrites: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String }))),
-    parent_id: Schema.optionalKey(Schema.NullOr(Schema.String))
+    parent_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    name: Schema.optionalKey(Schema.String)
   })
 )
 const decodeChannelEdit = Schema.decodeUnknownOption(ChannelEdit)
@@ -161,7 +173,9 @@ const guildWrite = (state: GuardState, armed: Armed, method: string, route: stri
       return refuse(`${route}: role write not allowed`)
     }
     case "members": {
-      if (rest.length === 2 && method === "DELETE") return refuse(`${route}: kick is refused (no harness-side failure prediction yet)`)
+      if (rest.length === 2 && method === "DELETE") {
+        return target === armed.targetUserId && state.kickBanPermits.has(route) ? allow : refuse(`${route}: a kick needs a permit from a harness-side failure prediction`)
+      }
       if (rest.length === 2 && method === "PATCH") return target === "@me" || isBot(target) ? memberEdit() : refuse(`${route}: member edits target only the subject or the target`)
       if (rest.length === 4 && sub === "roles" && (method === "PUT" || method === "DELETE")) {
         return isBot(target) && isLabRole(subTarget) ? allow : refuse(`${route}: role changes only on the subject or target, with lab roles`)
@@ -169,8 +183,16 @@ const guildWrite = (state: GuardState, armed: Armed, method: string, route: stri
       return refuse(`${route}: member write not allowed`)
     }
     case "bans":
+      return rest.length === 2 && method === "PUT" && target === armed.targetUserId && state.kickBanPermits.has(route)
+        ? allow
+        : refuse(`${route}: a ban needs a permit from a harness-side failure prediction`)
     case "bulk-ban":
-      return refuse(`${route}: ban is refused (no harness-side failure prediction yet)`)
+      return refuse(`${route}: bulk bans are never allowed`)
+    case "emojis": {
+      if (rest.length !== 1 || method !== "POST") return refuse(`${route}: emoji write not allowed`)
+      const created = Option.flatMap(bodyText, decodeNamed)
+      return Option.isSome(created) && isLabEmojiName(created.value.name) ? allow : refuse(`${route}: a new emoji must have a lab_ name`)
+    }
     case "stickers": {
       if (rest.length !== 1 || method !== "POST") return refuse(`${route}: sticker write not allowed`)
       const name = body._tag === "Form" ? Option.fromUndefinedOr(body.fields.get("name")) : Option.none()
@@ -203,6 +225,8 @@ const channelWrite = (state: GuardState, armed: Armed, method: string, route: st
     if (parent !== undefined && parent !== null && (!state.channels.has(parent) || armed.protectedChannels.has(parent))) {
       return refuse(`${route}: a lab channel's parent must be a lab channel`)
     }
+    const name = edit.value.name
+    if (name !== undefined && !isLabChannelName(name)) return refuse(`${route}: a lab channel keeps a lab name, not "${name}"`)
     return allow
   }
   // A thread (or forum post) is created by `POST threads` or `POST messages/{id}/threads`; it must have a lab
@@ -223,6 +247,14 @@ const channelWrite = (state: GuardState, armed: Armed, method: string, route: st
     return rest.length === 2 && allowed ? allow : refuse(`${route}: thread membership changes only for the bots`)
   }
   return allow
+}
+
+/** A request's route as the guard names it (`METHOD /path` without the API prefix), or `undefined` for a non-Discord URL. */
+export const routeOf = (method: string, url: string): string | undefined => {
+  const parsed = URL.canParse(url) ? new URL(url) : undefined
+  if (parsed === undefined || parsed.hostname !== "discord.com") return undefined
+  const segments = parsed.pathname.replace(/^\/api\/v\d+/, "").split("/").filter((segment) => segment.length > 0)
+  return `${method.toUpperCase()} /${segments.join("/")}`
 }
 
 /**
@@ -254,6 +286,51 @@ export const verdict = (state: GuardState, method: string, url: string, body: Re
   }
 }
 
+/** What the harness read just before a kick or ban, for the docs model's prediction (§5.6). */
+export interface KickBanReads {
+  readonly guildId: GuildId
+  /** The guild's roles, `@everyone` included (its ID is the guild ID). */
+  readonly roles: ReadonlyArray<{ readonly id: string; readonly permissions: string; readonly position: number }>
+  readonly subject: { readonly roles: ReadonlyArray<string> }
+  readonly target: { readonly roles: ReadonlyArray<string> }
+}
+
+const administratorBit = 1n << 3n
+const kickBit = 1n << 1n
+const banBit = 1n << 2n
+
+/**
+ * The docs model's own prediction that a kick or ban of the target fails (P "Permission Hierarchy"; H-064):
+ * the subject's guild permissions (`@everyone` OR its roles) hold neither the flag nor Administrator, or the
+ * target's highest role is not strictly below the subject's (position, then the lower ID ranks higher; a member
+ * with no role ranks as `@everyone`). Independent of the resolver under test. A timeout is not a reason
+ * (H-022 was open when this rule was written).
+ */
+export const kickBanPredictedToFail = (action: "kick" | "ban", reads: KickBanReads): boolean => {
+  const byId = new Map(reads.roles.map((role) => [role.id, role]))
+  const everyone = byId.get(reads.guildId)
+  let permissions = everyone === undefined ? 0n : BigInt(everyone.permissions)
+  for (const id of reads.subject.roles) permissions |= BigInt(byId.get(id)?.permissions ?? "0")
+  const flag = action === "kick" ? kickBit : banBit
+  if ((permissions & (flag | administratorBit)) === 0n) return true
+  const top = (roles: ReadonlyArray<string>) => {
+    let best: { readonly id: string; readonly position: number } = { id: reads.guildId, position: 0 }
+    for (const id of roles) {
+      const role = byId.get(id)
+      if (role !== undefined && (role.position > best.position || (role.position === best.position && BigInt(role.id) < BigInt(best.id)))) best = role
+    }
+    return best
+  }
+  const subjectTop = top(reads.subject.roles)
+  const targetTop = top(reads.target.roles)
+  const subjectAbove = subjectTop.position > targetTop.position || (subjectTop.position === targetTop.position && BigInt(subjectTop.id) < BigInt(targetTop.id))
+  return !subjectAbove
+}
+
+/** The route a kick or ban of `user` takes, as the guard names routes. */
+export const kickBanRoute = (action: "kick" | "ban", guildId: GuildId, user: UserId): string =>
+  action === "kick" ? `DELETE /guilds/${guildId}/members/${user}` : `PUT /guilds/${guildId}/bans/${user}`
+
 /** The guard service. */
 export interface Interface {
   /** Checks one outgoing request. Dies (aborting the run) if the guard refuses it. */
@@ -268,6 +345,11 @@ export interface Interface {
   readonly admitHarnessRoleForPositions: (role: { readonly id: RoleId; readonly botId: UserId | undefined }) => Effect.Effect<void>
   /** Admits an AutoMod rule the harness listed, so reset may delete it. Dies if it is not named `lab-*`. */
   readonly admitAutoModRule: (rule: { readonly id: string; readonly name: string }) => Effect.Effect<void>
+  /**
+   * Issues a one-shot permit for one kick or ban of the target, after checking `kickBanPredictedToFail` over the
+   * harness's reads. Dies (aborting the run) if the docs model does not predict failure.
+   */
+  readonly permitKickOrBan: (action: "kick" | "ban", reads: KickBanReads) => Effect.Effect<void>
 }
 
 /** The process-wide Perms Lab guard. */
@@ -293,7 +375,15 @@ export const requestBody = (request: HttpClientRequest.HttpClientRequest): Reque
 /** Builds the guard for the lab guild. It starts unarmed: only reads are allowed. */
 export const make = (guildId: GuildId): Effect.Effect<Interface> =>
   Effect.gen(function* () {
-    const state = yield* Ref.make<GuardState>({ guildId, armed: Option.none(), channels: new Set(), roles: new Set(), positionRoles: new Set(), autoModRules: new Set() })
+    const state = yield* Ref.make<GuardState>({
+      guildId,
+      armed: Option.none(),
+      channels: new Set(),
+      roles: new Set(),
+      positionRoles: new Set(),
+      autoModRules: new Set(),
+      kickBanPermits: new Set()
+    })
 
     /** `@everyone`'s role ID is the guild ID. */
     const isEveryone = (role: string): boolean => role === guildId
@@ -305,12 +395,14 @@ export const make = (guildId: GuildId): Effect.Effect<Interface> =>
 
     return LabGuard.of({
       check: (request) =>
-        Ref.get(state).pipe(
-          Effect.flatMap((current) => {
-            const decision = verdict(current, request.method, request.url, requestBody(request))
-            return decision._tag === "Allow" ? Effect.void : Effect.die(new Error(`lab guard refused ${decision.reason}`))
-          })
-        ),
+        Ref.modify(state, (current): readonly [Verdict, GuardState] => {
+          const decision = verdict(current, request.method, request.url, requestBody(request))
+          const route = routeOf(request.method, request.url)
+          // a permit is consumed by the request it admits
+          return decision._tag === "Allow" && route !== undefined && current.kickBanPermits.has(route)
+            ? [decision, { ...current, kickBanPermits: new Set([...current.kickBanPermits].filter((permit) => permit !== route)) }]
+            : [decision, current]
+        }).pipe(Effect.flatMap((decision) => (decision._tag === "Allow" ? Effect.void : Effect.die(new Error(`lab guard refused ${decision.reason}`))))),
       arm: (armed) => Ref.update(state, (current) => ({ ...current, armed: Option.some(armed) })),
       admitChannel: (channel) =>
         Effect.gen(function* () {
@@ -336,6 +428,16 @@ export const make = (guildId: GuildId): Effect.Effect<Interface> =>
             return yield* Effect.die(new Error(`lab guard: role ${role.id} is not the harness's managed role`))
           }
           yield* Ref.update(state, (current) => ({ ...current, positionRoles: new Set([...current.positionRoles, role.id]) }))
+        }),
+      permitKickOrBan: (action, reads) =>
+        Effect.gen(function* () {
+          const armed = yield* armedState
+          if (reads.guildId !== guildId) return yield* Effect.die(new Error("lab guard: a kick or ban prediction for another guild"))
+          if (!kickBanPredictedToFail(action, reads)) {
+            return yield* Effect.die(new Error(`lab guard: the docs model does not predict the ${action} of the target to fail; refused`))
+          }
+          const route = kickBanRoute(action, guildId, armed.targetUserId)
+          yield* Ref.update(state, (current) => ({ ...current, kickBanPermits: new Set([...current.kickBanPermits, route]) }))
         }),
       admitAutoModRule: (rule) =>
         Effect.gen(function* () {

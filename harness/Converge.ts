@@ -3,7 +3,9 @@
  * that bring it to the desired state, in a fixed order:
  *
  * 1. take `lab-admin` from the subject and lift its timeout, when the desired state does not have them;
- * 2. `@everyone`'s and the lab roles' permissions, the subject's other lab roles, every lab channel's overwrites,
+ * 2. `@everyone`'s and the lab roles' permissions, the subject's other lab roles, the target's lab roles (its
+ *    baseline plus a members row's rank and role fixture), no nickname or timeout on the target, every read lab
+ *    channel's overwrites and settings (the scenario channel's slowmode and required tag, baseline elsewhere),
  *    and the scenario thread's subject membership (the thread is unarchived first if it has to be: membership
  *    cannot change in an archived thread);
  * 3. the timeout (10 minutes from now), so a timeout is never applied to an administrator (H-021);
@@ -21,7 +23,7 @@ import type { RoleId, UserId } from "../src/Snowflake.ts"
 import { everyoneRoleId } from "../src/state/Snapshot.ts"
 import { HarnessRest } from "./Identities.ts"
 import { isLabRoleName, type LabRequestFailed, labStep } from "./Lab.ts"
-import type * as LabIds from "./LabIds.ts"
+import * as LabIds from "./LabIds.ts"
 import { channelName, type Desired, type Ids } from "./Materialize.ts"
 import * as Reset from "./Reset.ts"
 import * as Wire from "./Wire.ts"
@@ -33,6 +35,7 @@ export const timeoutLength = Duration.minutes(10)
 export interface LabView {
   readonly roles: ReadonlyArray<Wire.Role>
   readonly subject: Wire.Member
+  readonly target: Wire.Member
   /** The lab channels read (see {@link readView}). */
   readonly channels: ReadonlyArray<Wire.Channel>
   /** The scenario thread, when the scenario acts in one. */
@@ -61,21 +64,49 @@ export const readView = (state: Desired, ids: Ids, channelNames: ReadonlySet<Lab
     const rest = yield* HarnessRest
     const roles = yield* rest.listGuildRoles(ids.guildId).pipe(labStep("converge: list roles"), Effect.flatMap(decodeArray(Wire.Role, "listGuildRoles")))
     const subject = yield* rest.getGuildMember(ids.guildId, ids.subjectUserId).pipe(labStep("converge: get the subject"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
+    const target = yield* rest.getGuildMember(ids.guildId, ids.targetUserId).pipe(labStep("converge: get the target"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
     const channels: Array<Wire.Channel> = []
     for (const name of [...channelNames].sort()) {
       const id = yield* lookup(ids.channels, name, name)
       channels.push(yield* rest.getChannel(id).pipe(labStep(`converge: get ${name}`), Effect.flatMap(Wire.decode(Wire.Channel, "getChannel"))))
     }
-    if (state.thread === undefined) return { roles, subject, channels, thread: undefined, threadMembers: undefined }
+    if (state.thread === undefined) return { roles, subject, target, channels, thread: undefined, threadMembers: undefined }
     const threadId = yield* lookup(ids.channels, state.thread.name, state.thread.name)
     const thread = yield* rest.getChannel(threadId).pipe(labStep(`converge: get ${state.thread.name}`), Effect.flatMap(Wire.decode(Wire.Channel, "getChannel")))
     const members = yield* rest.listThreadMembers(threadId).pipe(labStep(`converge: members of ${state.thread.name}`), Effect.flatMap(decodeArray(Wire.ThreadMember, "listThreadMembers")))
-    return { roles, subject, channels, thread, threadMembers: members.map((member) => member.user_id) }
+    return { roles, subject, target, channels, thread, threadMembers: members.map((member) => member.user_id) }
   })
 
 const isTimedOut = (until: string | null | undefined, now: number): boolean => until !== undefined && until !== null && Date.parse(until) > now
 
 const roleIdOf = (ids: Ids, name: LabIds.RoleName): RoleId | undefined => ids.roles.get(name)
+
+const isForumType = (type: number): boolean => type === 15 || type === 16
+
+/** The settings a read lab channel should have: the scenario channel's from the desired state, baseline for the rest. */
+export const settingsOf = (state: Desired, ids: Ids, channel: Wire.Channel): { readonly slowmode: number; readonly requireTag: boolean } => {
+  const scenario = ids.channels.get(state.channel) === channel.id
+  return { slowmode: scenario ? state.settings.slowmode : 0, requireTag: scenario && isForumType(channel.type) && state.settings.requireTag }
+}
+
+/** How a read channel's settings differ from {@link settingsOf}, as a PATCH; `undefined` when they match. */
+export const settingsPatch = (state: Desired, ids: Ids, channel: Wire.Channel): { readonly rate_limit_per_user?: number; readonly flags?: number } | undefined => {
+  const want = settingsOf(state, ids, channel)
+  const flags = channel.flags ?? 0
+  const tagged = (flags & LabIds.requireTagFlag) !== 0
+  const patch = {
+    ...((channel.rate_limit_per_user ?? 0) !== want.slowmode ? { rate_limit_per_user: want.slowmode } : {}),
+    ...(isForumType(channel.type) && tagged !== want.requireTag ? { flags: want.requireTag ? flags | LabIds.requireTagFlag : flags & ~LabIds.requireTagFlag } : {})
+  }
+  return Object.keys(patch).length === 0 ? undefined : patch
+}
+
+/** The target's lab roles, sorted, as the desired state has them. */
+const wantedTargetRoles = (state: Desired, ids: Ids): ReadonlyArray<RoleId> =>
+  state.targetRoles.flatMap((name) => {
+    const id = roleIdOf(ids, name)
+    return id === undefined ? [] : [id]
+  }).sort()
 
 /** Every way the harness's view differs from the desired state, at `now` (for the channels it read). Empty when converged. */
 export const readbackProblems = (state: Desired, ids: Ids, view: LabView, now: number, options: { readonly threadState: boolean } = { threadState: true }): ReadonlyArray<string> => {
@@ -94,11 +125,17 @@ export const readbackProblems = (state: Desired, ids: Ids, view: LabView, now: n
   }).sort()
   if (held.join() !== wanted.join()) problems.push(`subject roles ${held.join(",") || "none"}, not ${wanted.join(",") || "none"}`)
   if (isTimedOut(view.subject.communication_disabled_until, now) !== state.subjectTimedOut) problems.push(`subject timeout ${view.subject.communication_disabled_until ?? "none"}`)
+  const targetHeld = view.target.roles.filter((role) => labRoles.has(role)).toSorted()
+  const targetWanted = wantedTargetRoles(state, ids)
+  if (targetHeld.join() !== targetWanted.join()) problems.push(`target roles ${targetHeld.join(",") || "none"}, not ${targetWanted.join(",") || "none"}`)
+  if (isTimedOut(view.target.communication_disabled_until, now)) problems.push(`target timeout ${view.target.communication_disabled_until ?? "none"}`)
+  if (view.target.nick !== undefined && view.target.nick !== null) problems.push(`target nickname ${view.target.nick}`)
   for (const channel of view.channels) {
     const name = [...ids.channels].find(([, id]) => id === channel.id)?.[0]
     const overwrites = name === undefined ? undefined : state.overwrites.get(channelName(name))
     if (overwrites === undefined) problems.push(`channel ${channel.id} is not a lab channel the desired state covers`)
     else if (!Reset.overwritesMatch(channel.permission_overwrites ?? [], overwrites)) problems.push(`${name} overwrites differ`)
+    if (settingsPatch(state, ids, channel) !== undefined) problems.push(`${name ?? channel.id} settings differ`)
   }
   if (state.thread !== undefined) {
     const metadata = view.thread?.thread_metadata
@@ -189,6 +226,22 @@ export const converge = (state: Desired, ids: Ids, channels: ReadonlySet<LabIds.
     for (const role of wanted) {
       if (role !== admin && !view.subject.roles.includes(role)) yield* rest.addGuildMemberRole(ids.guildId, subject, role).pipe(labStep("converge: give a lab role"))
     }
+    // the target: its baseline and a members row's ranks, and no nickname or timeout left by an earlier row
+    const targetWanted = new Set<RoleId>(wantedTargetRoles(state, ids))
+    const labRoleIds = new Set<string>(ids.roles.values())
+    for (const role of view.target.roles) {
+      if (labRoleIds.has(role) && !targetWanted.has(role)) yield* rest.deleteGuildMemberRole(ids.guildId, ids.targetUserId, role).pipe(labStep("converge: take a lab role from the target"))
+    }
+    for (const role of targetWanted) {
+      if (!view.target.roles.includes(role)) yield* rest.addGuildMemberRole(ids.guildId, ids.targetUserId, role).pipe(labStep("converge: give the target a lab role"))
+    }
+    const targetNicked = view.target.nick !== undefined && view.target.nick !== null
+    const targetTimedOut = isTimedOut(view.target.communication_disabled_until, now)
+    if (targetNicked || targetTimedOut) {
+      yield* rest
+        .updateGuildMember(ids.guildId, ids.targetUserId, { ...(targetNicked ? { nick: null } : {}), ...(targetTimedOut ? { communication_disabled_until: null } : {}) })
+        .pipe(labStep("converge: clear the target's nickname and timeout"))
+    }
     // the thread membership first: Discord refuses to add a member who cannot view the parent (403 50001, M3
     // live), so the change is made with View granted through a temporary member overwrite on the parent, which
     // the overwrite step below then replaces with the desired overwrites
@@ -207,8 +260,13 @@ export const converge = (state: Desired, ids: Ids, channels: ReadonlySet<LabIds.
       const id = yield* lookup(ids.channels, name, name)
       const channel = view.channels.find((candidate) => candidate.id === id)
       // a channel not read is at baseline, which is what the desired state has for every channel but the scenario's
-      if (channel === undefined || (id !== parentTouched && Reset.overwritesMatch(channel.permission_overwrites ?? [], overwrites))) continue
-      yield* rest.updateChannel(id, { permission_overwrites: yield* wireOverwrites(overwrites) }).pipe(labStep(`converge: overwrites of ${name}`))
+      if (channel === undefined) continue
+      const settings = settingsPatch(state, ids, channel)
+      const sameOverwrites = id !== parentTouched && Reset.overwritesMatch(channel.permission_overwrites ?? [], overwrites)
+      if (sameOverwrites && settings === undefined) continue
+      yield* rest
+        .updateChannel(id, { ...(sameOverwrites ? {} : { permission_overwrites: yield* wireOverwrites(overwrites) }), ...settings })
+        .pipe(labStep(`converge: overwrites and settings of ${name}`))
     }
 
     // 3. the timeout, never on an administrator (H-021)

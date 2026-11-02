@@ -7,7 +7,7 @@
  * - Role positions are set once: the lab roles form one block at the bottom of the hierarchy, top to bottom
  *   `lab-high`, `lab-mid`, `lab-low`, the subject's managed role, the target's managed role, `lab-grant`,
  *   ..., `lab-unmentionable` (H-073). They are written only when the observed order differs, and read back.
- * - A guild sticker.
+ * - A guild sticker and a guild emoji (`lab_emoji`, for reactions with a guild emoji).
  *
  * If provisioning wrote anything, it ends with a full reset, which brings the new objects to the same
  * baseline (the target's roles, thread memberships, the system messages thread creation posts), so a reset
@@ -290,7 +290,23 @@ const ensureSticker = (run: Provisioning) =>
     yield* record(run, { created: LabIds.stickerSpec.name }, (state) => ({ ...state, sticker: sticker.id }))
   })
 
-/** Creates what is missing, sets role positions, ensures the sticker, then resets if anything was written. */
+/** The lab's guild emoji: a 128 x 128 PNG, sent as a data URI (createGuildEmoji takes JSON). Unknown Emoji is 10014. */
+const ensureEmoji = (run: Provisioning) =>
+  Effect.gen(function* () {
+    const rest = yield* HarnessRest
+    const id = (yield* Ref.get(run.state)).emoji
+    if (id !== undefined) {
+      const found = yield* rest.getGuildEmoji(run.context.guildId, id).pipe(labStepUnless("provision: get emoji", [10014]))
+      if (found._tag === "Some") return
+    }
+    const image = `data:image/png;base64,${Buffer.from(solidPng(128, [237, 66, 69])).toString("base64")}`
+    const emoji = yield* rest
+      .createGuildEmoji(run.context.guildId, { name: LabIds.emojiSpec.name, image, roles: [] })
+      .pipe(labStep("provision: create emoji"), Effect.flatMap(Wire.decode(Wire.Emoji, "createGuildEmoji")))
+    yield* record(run, { created: LabIds.emojiSpec.name }, (state) => ({ ...state, emoji: emoji.id }))
+  })
+
+/** Creates what is missing, sets role positions, ensures the sticker and the emoji, then resets if anything was written. */
 export const run = (context: Reset.Context): Effect.Effect<Result, LabRequestFailed | LabCheckFailed | PlatformError, HarnessRest | SubjectRaw | LabGuard | Pacing> =>
   Effect.gen(function* () {
     const pacing = yield* Pacing
@@ -307,6 +323,7 @@ export const run = (context: Reset.Context): Effect.Effect<Result, LabRequestFai
     yield* ensureThreads(provisioning, view)
     const positions = yield* ensurePositions(provisioning)
     yield* ensureSticker(provisioning)
+    yield* ensureEmoji(provisioning)
     const written = Reset.writesBetween(before, yield* pacing.stats)
     const notes: Array<string> = [...(yield* Ref.get(provisioning.notes)), ...positions.notes]
     if (written.writes > 0) notes.push(...(yield* Reset.run(context)).notes)

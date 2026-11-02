@@ -9,7 +9,7 @@
 import { PermissionFlagsBits } from "discord-api-types/v10"
 import { Effect, FileSystem, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import { ChannelId, GuildId, RoleId, StickerId } from "../src/Snowflake.ts"
+import { ChannelId, EmojiId, GuildId, RoleId, StickerId } from "../src/Snowflake.ts"
 import { LabCheckFailed } from "./Lab.ts"
 
 // ---- spec ---------------------------------------------------------------------------------------------
@@ -45,6 +45,23 @@ export const threadSpecs = [
 
 /** A lab thread name. */
 export type ThreadName = (typeof threadSpecs)[number]["name"]
+
+/**
+ * The threads a scenario creates as the subject (the `subject-thread` fixture), one name per kind: never
+ * provisioned or stored; cleanup deletes them, and reset deletes any it finds as scenario threads.
+ */
+export const scenarioThreadSpecs = [
+  { name: "lab-subject-public-thread", parent: "lab-text", type: 11 },
+  { name: "lab-subject-private-thread", parent: "lab-text", type: 12 },
+  { name: "lab-subject-announcement-thread", parent: "lab-announcement", type: 10 },
+  { name: "lab-subject-forum-post", parent: "lab-forum", type: 11 }
+] as const satisfies ReadonlyArray<{ readonly name: string; readonly parent: ChannelName; readonly type: number }>
+
+/** A scenario thread name. */
+export type ScenarioThreadName = (typeof scenarioThreadSpecs)[number]["name"]
+
+/** The names of the threads and posts the subject creates as an operation (createThread, createPost); cleanup deletes them. */
+export const createdThreadName = "lab-created-thread"
 
 /**
  * The lab's roles, top to bottom. `lab-admin` holds Administrator; it is the "administrator" grant source and
@@ -102,6 +119,24 @@ export const requireTagFlag = 1 << 4
 /** The guild sticker the lab provisions. */
 export const stickerSpec = { name: "lab-sticker", tags: "lab", description: "Perms Lab sticker" } as const
 
+/** The guild emoji the lab provisions (reactions with a guild emoji). Emoji names allow only letters, digits and `_`. */
+export const emojiSpec = { name: "lab_emoji" } as const
+
+/**
+ * The roles that set ranks in the members family (H-060..H-067): the subject holds `lab-mid`; the target holds
+ * nothing more (below), `lab-mid` (equal) or `lab-high` (above); a role assigned or removed is `lab-low`
+ * (below the subject's highest role), `lab-mid` (its own highest role) or `lab-high` (above it).
+ */
+export const rankRoles = {
+  subject: "lab-mid",
+  target: { below: undefined, equal: "lab-mid", above: "lab-high" },
+  assigned: { below: "lab-low", equal: "lab-mid", above: "lab-high" }
+} as const satisfies {
+  readonly subject: RoleName
+  readonly target: { readonly [K in "below" | "equal" | "above"]: RoleName | undefined }
+  readonly assigned: { readonly [K in "below" | "equal" | "above"]: RoleName }
+}
+
 // ---- persisted IDs ------------------------------------------------------------------------------------
 
 /** The persisted IDs, keyed by lab name. Channels and threads share one map (threads are channels). */
@@ -110,6 +145,7 @@ export const LabState = Schema.Struct({
   channels: Schema.Record(Schema.String, ChannelId),
   roles: Schema.Record(Schema.String, RoleId),
   sticker: Schema.optionalKey(StickerId),
+  emoji: Schema.optionalKey(EmojiId),
   /**
    * Lab channels Discord refused to create because the kind is not available in this guild (50024 on create,
    * observed for GuildMedia in M2). Provision does not retry them; scenarios on them record

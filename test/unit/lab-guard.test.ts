@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit, Option } from "effect"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
-import { formBody, type GuardState, make, noBody, type RequestBody, textBody, verdict } from "../../harness/Lab.ts"
+import { formBody, type GuardState, kickBanPredictedToFail, kickBanRoute, make, noBody, type RequestBody, textBody, verdict } from "../../harness/Lab.ts"
 import { ChannelId, GuildId, RoleId, UserId } from "../../src/Snowflake.ts"
 
 /**
@@ -29,7 +29,8 @@ const armed: GuardState = {
   channels: new Set([labChannel]),
   roles: new Set([labRole]),
   positionRoles: new Set([harnessRole]),
-  autoModRules: new Set([labRule])
+  autoModRules: new Set([labRule]),
+  kickBanPermits: new Set()
 }
 const api = (path: string) => `https://discord.com/api/v10${path}`
 const decide = (method: string, path: string, body?: string | RequestBody, state: GuardState = armed) =>
@@ -121,13 +122,34 @@ describe("the guard's verdict", () => {
     expect(decide("PATCH", `/channels/${labChannel}`, json({ parent_id: rules }))).toBe("Refuse")
     expect(decide("PATCH", `/channels/${labChannel}`)).toBe("Refuse")
     expect(decide("PATCH", `/channels/${labChannel}`, "not json")).toBe("Refuse")
+    // a rename keeps a lab name
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ name: "lab-text-b" }))).toBe("Allow")
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ name: "general" }))).toBe("Refuse")
   })
 
-  it("refuses kick and ban outright, and member edits of anyone but the two bots", () => {
+  it("creates only lab_ emoji, and never edits or deletes one", () => {
+    expect(decide("POST", `/guilds/${guild}/emojis`, json({ name: "lab_emoji", image: "data:image/png;base64,AA==" }))).toBe("Allow")
+    expect(decide("POST", `/guilds/${guild}/emojis`, json({ name: "wave", image: "data:image/png;base64,AA==" }))).toBe("Refuse")
+    expect(decide("POST", `/guilds/${guild}/emojis`)).toBe("Refuse")
+    expect(decide("PATCH", `/guilds/${guild}/emojis/1`, json({ name: "lab_emoji" }))).toBe("Refuse")
+    expect(decide("DELETE", `/guilds/${guild}/emojis/1`)).toBe("Refuse")
+  })
+
+  it("refuses kick and ban without a permit, allows exactly the permitted route on the target, and refuses member edits of anyone but the two bots", () => {
     expect(decide("DELETE", `/guilds/${guild}/members/${target}`)).toBe("Refuse")
     expect(decide("PUT", `/guilds/${guild}/bans/${target}`)).toBe("Refuse")
     expect(decide("DELETE", `/guilds/${guild}/bans/${target}`)).toBe("Refuse")
     expect(decide("POST", `/guilds/${guild}/bulk-ban`)).toBe("Refuse")
+    const permitted: GuardState = { ...armed, kickBanPermits: new Set([kickBanRoute("kick", guild, target), kickBanRoute("ban", guild, target)]) }
+    expect(decide("DELETE", `/guilds/${guild}/members/${target}`, undefined, permitted)).toBe("Allow")
+    expect(decide("PUT", `/guilds/${guild}/bans/${target}`, json({ delete_message_seconds: 0 }), permitted)).toBe("Allow")
+    // the permit names the target's route: the harness, the subject and Rhys are never kicked or banned
+    for (const user of [harness, subject, rhys]) {
+      expect(decide("DELETE", `/guilds/${guild}/members/${user}`, undefined, { ...permitted, kickBanPermits: new Set([`DELETE /guilds/${guild}/members/${user}`]) })).toBe("Refuse")
+      expect(decide("PUT", `/guilds/${guild}/bans/${user}`, undefined, { ...permitted, kickBanPermits: new Set([`PUT /guilds/${guild}/bans/${user}`]) })).toBe("Refuse")
+    }
+    expect(decide("DELETE", `/guilds/${guild}/bans/${target}`, undefined, permitted)).toBe("Refuse")
+    expect(decide("POST", `/guilds/${guild}/bulk-ban`, json({ user_ids: [target] }), permitted)).toBe("Refuse")
     expect(decide("PATCH", `/guilds/${guild}/members/${target}`, json({ nick: null, communication_disabled_until: null }))).toBe("Allow")
     expect(decide("PATCH", `/guilds/${guild}/members/${subject}`, json({ communication_disabled_until: "2026-11-01T23:00:00Z" }))).toBe("Allow")
     expect(decide("PATCH", `/guilds/${guild}/members/@me`, json({ nick: "lab" }))).toBe("Allow")
@@ -222,6 +244,39 @@ describe("the guard service", () => {
       expect(Exit.isFailure(yield* Effect.exit(guard.admitAutoModRule({ id: otherRule, name: "Block Mention Spam" })))).toBe(true)
       yield* guard.admitAutoModRule({ id: labRule, name: "lab-keyword" })
       expect(Exit.isSuccess(yield* Effect.exit(guard.check(HttpClientRequest.delete(api(`/guilds/${guild}/auto-moderation/rules/${labRule}`)))))).toBe(true)
+    })
+  )
+
+  it.effect("issues a one-shot kick or ban permit only when the docs model predicts failure from the harness's reads (§5.6)", () =>
+    Effect.gen(function* () {
+      const guard = yield* make(guild)
+      yield* guard.arm({ harnessUserId: harness, subjectUserId: subject, targetUserId: target, protectedChannels: new Set([rules]) })
+      const roles = [
+        { id: guild, permissions: "0", position: 0 },
+        { id: "400000000000000010", permissions: String(1n << 1n), position: 9 },
+        { id: "400000000000000011", permissions: "0", position: 10 }
+      ]
+      const kick = HttpClientRequest.delete(api(`/guilds/${guild}/members/${target}`))
+      // the subject holds KickMembers and outranks the target: a kick could succeed, so no permit
+      const succeeds = { guildId: guild, roles, subject: { roles: ["400000000000000010"] }, target: { roles: [] } }
+      expect(kickBanPredictedToFail("kick", succeeds)).toBe(false)
+      expect(Exit.isFailure(yield* Effect.exit(guard.permitKickOrBan("kick", succeeds)))).toBe(true)
+      expect(Exit.isFailure(yield* Effect.exit(guard.check(kick)))).toBe(true)
+      // the target ranks above: the kick must fail, so one permit, used once
+      const above = { ...succeeds, target: { roles: ["400000000000000011"] } }
+      expect(kickBanPredictedToFail("kick", above)).toBe(true)
+      yield* guard.permitKickOrBan("kick", above)
+      expect(Exit.isSuccess(yield* Effect.exit(guard.check(kick)))).toBe(true)
+      expect(Exit.isFailure(yield* Effect.exit(guard.check(kick)))).toBe(true)
+      // without the flag (and without Administrator) the ban must fail
+      expect(kickBanPredictedToFail("ban", succeeds)).toBe(true)
+      const admin = roles.map((role) => (role.id === "400000000000000010" ? { ...role, permissions: "8" } : role))
+      expect(kickBanPredictedToFail("ban", { ...succeeds, roles: admin })).toBe(false)
+      // equal rank fails; @everyone counts for a member with no roles
+      expect(kickBanPredictedToFail("kick", { ...succeeds, target: { roles: ["400000000000000010"] } })).toBe(true)
+      expect(kickBanPredictedToFail("kick", { ...succeeds, subject: { roles: [] }, roles: [{ id: guild, permissions: String(1n << 1n), position: 0 }] })).toBe(true)
+      // a prediction for another guild is refused
+      expect(Exit.isFailure(yield* Effect.exit(guard.permitKickOrBan("kick", { ...above, guildId: GuildId.make("100000000000000077") })))).toBe(true)
     })
   )
 

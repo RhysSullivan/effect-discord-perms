@@ -1,0 +1,31 @@
+/**
+ * The whole matrix catalog (DESIGN §5.9): every family's pairwise and targeted rows, and their flip controls.
+ * Rule rows (M6) and intent sessions (M7) join it later.
+ */
+import type { Scenario } from "../Dsl.ts"
+import * as ChannelEdit from "./channelEdit.ts"
+import { byId } from "./common.ts"
+import { flipsOf } from "./flips.ts"
+import * as Members from "./members.ts"
+import * as Messages from "./messages.ts"
+import * as Pins from "./pins.ts"
+import * as Reactions from "./reactions.ts"
+import * as Send from "./send.ts"
+import * as Threads from "./threads.ts"
+
+/** Every family's rows, before the flip controls. */
+export const familyRows: ReadonlyArray<Scenario> = [
+  ...Send.scenarios,
+  ...Messages.scenarios,
+  ...Reactions.scenarios,
+  ...Pins.scenarios,
+  ...Threads.scenarios,
+  ...ChannelEdit.scenarios,
+  ...Members.scenarios
+]
+
+/** The flip controls of the family rows. */
+export const flipRows: ReadonlyArray<Scenario> = flipsOf(familyRows)
+
+/** The catalog `verify:live` runs, sorted by ID. */
+export const scenarios: ReadonlyArray<Scenario> = byId([...familyRows, ...flipRows])

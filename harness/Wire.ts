@@ -13,7 +13,7 @@ import type { DiscordRestService } from "dfx/DiscordREST"
 import { Clock, Effect, Option, Schema } from "effect"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import { DiscordErrorBody } from "../src/rest/ErrorMap.ts"
-import { ChannelId, GuildId, MessageId, RoleId, StickerId, UserId } from "../src/Snowflake.ts"
+import { ChannelId, EmojiId, GuildId, MessageId, RoleId, StickerId, UserId } from "../src/Snowflake.ts"
 import { LabRequestFailed } from "./Lab.ts"
 
 /** A permission bitfield as Discord serialises it: a decimal string. */
@@ -133,6 +133,9 @@ export const AutoModRule = Schema.Struct({ id: Schema.String, name: Schema.Strin
 
 /** A guild sticker. */
 export const Sticker = Schema.Struct({ id: StickerId, name: Schema.String })
+
+/** A guild emoji. */
+export const Emoji = Schema.Struct({ id: EmojiId, name: Schema.String })
 
 /** Decodes a body the harness received from Discord. A mismatch is a defect naming `what`. */
 export const decode =

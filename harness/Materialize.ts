@@ -34,8 +34,8 @@ import type { ChannelId, GuildId, RoleId, UserId } from "../src/Snowflake.ts"
 import * as LabIds from "./LabIds.ts"
 import type { Setup } from "./scenario/Dsl.ts"
 
-/** A lab channel or thread name. */
-export type LabName = LabIds.ChannelName | LabIds.ThreadName
+/** A lab channel or thread name, including the threads a scenario creates as the subject. */
+export type LabName = LabIds.ChannelName | LabIds.ThreadName | LabIds.ScenarioThreadName
 
 /** The lab's IDs (real ones live, fake ones offline). */
 export interface Ids {
@@ -45,6 +45,7 @@ export interface Ids {
   readonly subjectUserId: UserId
   readonly targetUserId: UserId
   readonly roles: ReadonlyMap<LabIds.RoleName, RoleId>
+  /** The stored lab channels and threads, and (once created) the scenario's own thread. */
   readonly channels: ReadonlyMap<LabName, ChannelId>
   /** Lab channels Discord would not create here (`lab-media`, M2). */
   readonly unavailable: ReadonlySet<string>
@@ -60,11 +61,20 @@ export interface DesiredOverwrite {
 
 /** The scenario thread's desired state. */
 export interface DesiredThread {
-  readonly name: LabIds.ThreadName
+  readonly name: LabIds.ThreadName | LabIds.ScenarioThreadName
+  /** Who created it: the harness (a provisioned thread) or the subject (the `subject-thread` fixture). */
+  readonly creator: "harness" | "subject"
   readonly archived: boolean
   readonly locked: boolean
-  /** The subject's membership, when the setup sets it (private threads); baseline otherwise (not a member). */
+  /** The subject's membership, when the setup sets it; baseline otherwise (not a member). */
   readonly subjectMember: boolean
+}
+
+/** The scenario channel's settings Converge sets (§5.8 `channelSettings`); baseline is slowmode 0 and no required tag. */
+export interface DesiredSettings {
+  readonly slowmode: number
+  /** Forum and media only (H-044). */
+  readonly requireTag: boolean
 }
 
 /** The desired lab state for one setup. */
@@ -79,14 +89,18 @@ export interface Desired {
   /** The lab roles the subject holds, in spec order. */
   readonly subjectRoles: ReadonlyArray<LabIds.RoleName>
   readonly subjectTimedOut: boolean
+  /** The lab roles the target holds, in spec order: its baseline roles, plus its rank and role fixtures (members family). */
+  readonly targetRoles: ReadonlyArray<LabIds.RoleName>
   /** Every available lab channel's overwrites (threads have none). */
   readonly overwrites: ReadonlyMap<LabIds.ChannelName, ReadonlyArray<DesiredOverwrite>>
   /** The scenario thread, when the scenario acts in one. */
   readonly thread: DesiredThread | undefined
+  /** The scenario channel's (or thread's) settings; every other channel is at baseline. */
+  readonly settings: DesiredSettings
 }
 
-/** The lab name of a scenario channel. */
-export const labNameOf: { readonly [K in Setup["channel"]]: LabName } = {
+/** The lab name of a scenario channel kind, provisioned. */
+export const provisionedNameOf: { readonly [K in Setup["channel"]]: LabIds.ChannelName | LabIds.ThreadName } = {
   text: "lab-text",
   announcement: "lab-announcement",
   voice: "lab-voice",
@@ -99,7 +113,32 @@ export const labNameOf: { readonly [K in Setup["channel"]]: LabName } = {
   "announcement-thread": "lab-announcement-thread"
 }
 
-const threadSpec = (name: LabName) => LabIds.threadSpecs.find((spec) => spec.name === name)
+/** The thread the subject creates for a `subject-thread` setup, per kind. */
+const scenarioThreadOf: { readonly [K in Setup["channel"]]: LabIds.ScenarioThreadName | undefined } = {
+  text: undefined,
+  announcement: undefined,
+  voice: undefined,
+  stage: undefined,
+  forum: undefined,
+  media: undefined,
+  "forum-post": "lab-subject-forum-post",
+  "public-thread": "lab-subject-public-thread",
+  "private-thread": "lab-subject-private-thread",
+  "announcement-thread": "lab-subject-announcement-thread"
+}
+
+/** The lab name a setup acts in: the provisioned channel or thread, or the subject's own thread for `subject-thread`. */
+export const labNameOf = (setup: Setup): LabName => {
+  if (!setup.fixtures.includes("subject-thread")) return provisionedNameOf[setup.channel]
+  const name = scenarioThreadOf[setup.channel]
+  if (name === undefined) throw new Error(`Materialize: a subject-thread setup needs a thread kind, not ${setup.channel}`)
+  return name
+}
+
+/** The spec of the thread the subject creates for a scenario. */
+export const scenarioThreadSpec = (name: LabName) => LabIds.scenarioThreadSpecs.find((spec) => spec.name === name)
+
+const threadSpec = (name: LabName) => LabIds.threadSpecs.find((spec) => spec.name === name) ?? scenarioThreadSpec(name)
 const channelSpec = (name: LabName) => LabIds.channelSpecs.find((spec) => spec.name === name)
 
 /** The kind of a lab channel or thread, from its spec. */
@@ -130,7 +169,7 @@ const lookup = <K, V>(map: ReadonlyMap<K, V>, key: K, what: string): V => {
 
 /** The desired lab state for `setup` (see the module comment). */
 export const desired = (setup: Setup, ids: Ids): Desired => {
-  const channel = labNameOf[setup.channel]
+  const channel = labNameOf(setup)
   const overwriteChannel = overwriteChannelOf(channel)
   let everyone = 0n
   const rolePermissions = new Map<LabIds.RoleName, bigint>(LabIds.roleSpecs.map((spec) => [spec.name, spec.permissions]))
@@ -195,21 +234,39 @@ export const desired = (setup: Setup, ids: Ids): Desired => {
       ? undefined
       : {
         name: spec.name,
+        creator: scenarioThreadSpec(spec.name) === undefined ? "harness" : "subject",
         archived: state === "archived" || state === "archived-locked",
         locked: state === "locked" || state === "archived-locked",
         subjectMember: setup.subjectThreadMember ?? false
       }
+  // the members family's ranks (§5.9): the subject's highest role, the target's, and the role assigned or removed
+  const ranked = setup.targetRank !== undefined || setup.roleRank !== undefined
+  if (ranked) held.add(LabIds.rankRoles.subject)
+  const targetHeld = new Set<LabIds.RoleName>(LabIds.targetBaselineRoles)
+  const targetRank = setup.targetRank === undefined ? undefined : LabIds.rankRoles.target[setup.targetRank]
+  if (targetRank !== undefined) targetHeld.add(targetRank)
+  if (setup.targetAdmin === true) targetHeld.add("lab-admin")
+  if (setup.fixtures.includes("target-role")) {
+    if (setup.roleRank === undefined) throw new Error("Materialize: a target-role fixture needs a roleRank")
+    targetHeld.add(LabIds.rankRoles.assigned[setup.roleRank])
+  }
+  const order = (names: ReadonlySet<LabIds.RoleName>) => LabIds.roleSpecs.map((entry) => entry.name).filter((name) => names.has(name))
   return {
     channel,
     overwriteChannel,
     everyone,
     rolePermissions,
-    subjectRoles: LabIds.roleSpecs.map((entry) => entry.name).filter((name) => held.has(name)),
+    subjectRoles: order(held),
     subjectTimedOut: setup.memberState === "timed-out",
+    targetRoles: order(targetHeld),
     overwrites,
-    thread
+    thread,
+    settings: { slowmode: setup.channelSettings?.slowmode ?? 0, requireTag: setup.channelSettings?.requireTag ?? false }
   }
 }
+
+/** The role a role operation assigns or removes (`roleRank`), or `undefined` for other setups. */
+export const assignedRoleOf = (setup: Setup): LabIds.RoleName | undefined => (setup.roleRank === undefined ? undefined : LabIds.rankRoles.assigned[setup.roleRank])
 
 /** A lab role's desired permissions (the desired state holds every lab role's). */
 export const rolePermissionsOf = (state: Desired, name: LabIds.RoleName): bigint => lookup(state.rolePermissions, name, `${name}'s permissions`)
@@ -238,6 +295,9 @@ export const guildOf = (state: Desired, ids: Ids): GuildInput => {
   return { id: ids.guildId, ownerId: ids.ownerId, roles }
 }
 
+/** Whether a lab channel kind is a forum or media channel (posts, and `REQUIRE_TAG`). */
+const forumLike = (kind: ChannelKind): boolean => kind === "forum" || kind === "media"
+
 /** A lab channel or thread as the desired state has it. */
 export const channelOf = (state: Desired, ids: Ids, name: LabName): ChannelSnap => {
   const kind = kindOf(name)
@@ -249,7 +309,11 @@ export const channelOf = (state: Desired, ids: Ids, name: LabName): ChannelSnap 
     parentId: spec === undefined ? (name === "lab" ? undefined : lookup(ids.channels, "lab", "lab")) : lookup(ids.channels, spec.parent, spec.parent),
     obfuscated: false,
     overwrites: spec === undefined ? lookup(state.overwrites, channelName(name), `${name}'s overwrites`).map(toOverwrite) : [],
-    thread: spec === undefined ? undefined : { archived: thread?.archived ?? false, locked: thread?.locked ?? false, ownerId: undefined }
+    thread:
+      spec === undefined
+        ? undefined
+        : { archived: thread?.archived ?? false, locked: thread?.locked ?? false, ownerId: thread?.creator === "subject" ? ids.subjectUserId : undefined },
+    requireTag: forumLike(kind) && name === state.channel && state.settings.requireTag
   }
 }
 
@@ -257,7 +321,7 @@ export const channelOf = (state: Desired, ids: Ids, name: LabName): ChannelSnap 
 export const memberOf = (state: Desired, ids: Ids, who: "subject" | "target", timedOutUntil: string): MemberInput =>
   who === "subject"
     ? { userId: ids.subjectUserId, roleIds: state.subjectRoles.map((name) => lookup(ids.roles, name, name)), timedOutUntil: state.subjectTimedOut ? timedOutUntil : null }
-    : { userId: ids.targetUserId, roleIds: LabIds.targetBaselineRoles.map((name) => lookup(ids.roles, name, name)), timedOutUntil: null }
+    : { userId: ids.targetUserId, roleIds: state.targetRoles.map((name) => lookup(ids.roles, name, name)), timedOutUntil: null }
 
 /** The resolver's channel input for `name` over the desired state, for the subject or the target. */
 export const channelInputOf = (state: Desired, ids: Ids, name: LabName, who: "subject" | "target"): ChannelInput => {
@@ -271,8 +335,8 @@ export const channelInputOf = (state: Desired, ids: Ids, name: LabName, who: "su
 
 /** What the subject's gateway state must show for one lab channel. */
 export type ChannelView =
-  /** It can view the channel: the overwrites, exactly. */
-  | { readonly _tag: "Visible"; readonly id: ChannelId; readonly overwrites: ReadonlyArray<DesiredOverwrite> }
+  /** It can view the channel: the overwrites, exactly, and (forum and media) whether posts need a tag. */
+  | { readonly _tag: "Visible"; readonly id: ChannelId; readonly overwrites: ReadonlyArray<DesiredOverwrite>; readonly requireTag: boolean }
   /** It cannot: obfuscated, or (before Discord's switch) these real overwrites. */
   | { readonly _tag: "Hidden"; readonly id: ChannelId; readonly overwrites: ReadonlyArray<DesiredOverwrite> }
 
@@ -305,7 +369,7 @@ export const project = (state: Desired, ids: Ids, now: number): Projection => {
   const channels = new Map<LabIds.ChannelName, ChannelView>()
   for (const [name, overwrites] of state.overwrites) {
     const id = lookup(ids.channels, name, name)
-    channels.set(name, subjectSees(state, ids, name, now) ? { _tag: "Visible", id, overwrites } : { _tag: "Hidden", id, overwrites })
+    channels.set(name, subjectSees(state, ids, name, now) ? { _tag: "Visible", id, overwrites, requireTag: channelOf(state, ids, name).requireTag } : { _tag: "Hidden", id, overwrites })
   }
   const thread = state.thread
   return {
@@ -357,6 +421,7 @@ export const projectionProblems = (projection: Projection, snapshot: Snapshot, g
     if (view._tag === "Hidden" && channel.obfuscated) continue
     if (channel.obfuscated) problems.push(`${name} obfuscated, but the subject can view it`)
     else if (!sameOverwrites(channel.overwrites, view.overwrites)) problems.push(`${name} overwrites differ`)
+    else if (view._tag === "Visible" && channel.requireTag !== view.requireTag) problems.push(`${name} requireTag ${channel.requireTag}, not ${view.requireTag}`)
   }
   const thread = projection.thread
   if (thread !== undefined) {

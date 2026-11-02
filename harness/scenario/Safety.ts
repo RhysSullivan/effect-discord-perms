@@ -10,9 +10,11 @@
  * - Mentions: users only the three bots, roles only `lab-mentionable`/`lab-unmentionable`, which only the
  *   target holds; a reply's `repliedUser` only towards a bot's message. The send payloads mention nobody else.
  * - No row's removals affect the target: in the scenario channel it keeps the flags it posts fixtures with.
- * - At most one renamed setup (`nameVariant: "b"`) per lab channel per run (H-162).
- * - Kick and ban rows must satisfy `kickBanMustFail`; the members family brings them (M4), and this module's
- *   check for them arrives with it.
+ * - At most one name or topic edit per lab channel per run (H-162): a `channelEdit` name or topic operation,
+ *   or a renamed setup (`nameVariant: "b"`).
+ * - Every kick or ban row is one the docs model predicts to fail (`kickBanMustFail`, L1): the subject is not
+ *   granted the flag (nor any administrator source), or the target does not rank below it. The Lab guard
+ *   checks the same rule again from harness-side reads just before the call (§5.6).
  */
 import type { PermissionFlag } from "../../src/errors/Missing.generated.ts"
 import * as Flags from "../../src/permissions/Flags.ts"
@@ -20,6 +22,7 @@ import { resolve } from "../../src/permissions/Resolver.ts"
 import * as LabIds from "../LabIds.ts"
 import * as Materialize from "../Materialize.ts"
 import type { Scenario } from "./Dsl.ts"
+import { kickBanMustFail } from "./Pairwise.ts"
 
 /** One violation. */
 export interface Violation {
@@ -43,11 +46,23 @@ export const checkScenario = (scenario: Scenario): ReadonlyArray<Violation> => {
       for (const flag of grant.flags) if (pingFlags.includes(flag)) add("no-everyone-ping", `an @everyone payload granting ${flag}`)
     }
   }
-  if (scenario.operation._tag === "send" && scenario.operation.payload === "reply" && !scenario.setup.fixtures.some((fixture) => fixture === "harness-message" || fixture === "subject-message" || fixture === "target-message")) {
+  if (scenario.operation._tag === "send" && scenario.operation.payload === "reply" && !scenario.setup.fixtures.some((fixture) => fixture === "harness-message" || fixture === "subject-message")) {
     add("reply-to-bots", "a reply without a bot message to reply to")
+  }
+  const operation = scenario.operation
+  if (operation._tag === "member" && (operation.action === "kick" || operation.action === "ban")) {
+    const flag = operation.action === "kick" ? "KickMembers" : "BanMembers"
+    const granted = scenario.setup.grants.some((grant) => grant.via === "administrator" || grant.flags.includes(flag) || grant.flags.includes("Administrator"))
+    if (!kickBanMustFail({ missing: granted ? "none" : "op-flag", targetRank: scenario.setup.targetRank ?? "below" })) {
+      add("kick-ban-must-fail", `a ${operation.action} with ${flag} granted and the target below the subject could succeed`)
+    }
   }
   return out
 }
+
+/** Whether a scenario edits a channel's name or topic (H-162 counts both). */
+const renames = (scenario: Scenario): boolean =>
+  scenario.setup.channelSettings?.nameVariant === "b" || (scenario.operation._tag === "channelEdit" && scenario.operation.field !== "slowmode")
 
 /** The checks over the whole catalog: every scenario's, unique IDs, and at most one renamed setup per channel. */
 export const checkCatalog = (scenarios: ReadonlyArray<Scenario>): ReadonlyArray<Violation> => {
@@ -57,15 +72,13 @@ export const checkCatalog = (scenarios: ReadonlyArray<Scenario>): ReadonlyArray<
     if (seen.has(scenario.id)) out.push({ scenario: scenario.id, rule: "unique-ids", detail: "duplicate scenario ID" })
     seen.add(scenario.id)
   }
-  const renamed = new Map<string, Set<string>>()
+  const renamed = new Map<string, Array<string>>()
   for (const scenario of scenarios) {
-    if (scenario.setup.channelSettings?.nameVariant !== "b") continue
-    const setups = renamed.get(scenario.setup.channel) ?? new Set()
-    setups.add(JSON.stringify(scenario.setup))
-    renamed.set(scenario.setup.channel, setups)
+    if (!renames(scenario)) continue
+    renamed.set(scenario.setup.channel, [...(renamed.get(scenario.setup.channel) ?? []), scenario.id])
   }
-  for (const [channel, setups] of renamed) {
-    if (setups.size > 1) out.push({ scenario: channel, rule: "one-rename-per-channel", detail: `${setups.size} renamed setups for ${channel} (H-162)` })
+  for (const [channel, ids] of renamed) {
+    if (ids.length > 1) out.push({ scenario: channel, rule: "one-rename-per-channel", detail: `${ids.length} name or topic edits of ${channel} in one run: ${ids.join(", ")} (H-162)` })
   }
   return out
 }
@@ -73,8 +86,13 @@ export const checkCatalog = (scenarios: ReadonlyArray<Scenario>): ReadonlyArray<
 /** The flags the target posts fixtures with; its `lab-target` overwrite allows them on every lab channel (§5.7). */
 export const targetFixtureFlags: ReadonlyArray<PermissionFlag> = Flags.toSortedNames(Flags.fromBits(LabIds.targetOverwriteAllow))
 
-/** The checks over a scenario's materialized desired state (`now` places a desired timeout in the future). */
+/**
+ * The checks over a scenario's materialized desired state (`now` places a desired timeout in the future). A
+ * scenario in a channel the lab does not have sends nothing, so it has nothing to check.
+ */
 export const checkMaterialized = (scenario: Scenario, state: Materialize.Desired, ids: Materialize.Ids, now: number): ReadonlyArray<Violation> => {
+  // a channel the guild does not have: the row records kind-not-available and sends nothing
+  if (ids.unavailable.has(state.channel) || ids.unavailable.has(state.overwriteChannel)) return []
   const out: Array<Violation> = []
   const add = (rule: string, detail: string) => out.push({ scenario: scenario.id, rule, detail })
   if (mentionsEveryone(scenario)) {
@@ -90,13 +108,15 @@ export const checkMaterialized = (scenario: Scenario, state: Materialize.Desired
       }
     }
   }
+  // threads use their parent's overwrites (H-030), so the overwrite channel decides; a thread the subject
+  // creates during the scenario has no ID yet
   const resolution = resolve({
     guild: Materialize.guildOf(state, ids),
-    channel: Materialize.channelInputOf(state, ids, state.channel, "target"),
+    channel: Materialize.channelInputOf(state, ids, state.overwriteChannel, "target"),
     member: Materialize.memberOf(state, ids, "target", new Date(now).toISOString()),
     now
   })
   const lost = targetFixtureFlags.filter((flag) => !Flags.has(resolution.afterOverwrites, flag))
-  if (lost.length > 0) add("target-unaffected", `the target loses ${lost.join(", ")} in ${state.channel}`)
+  if (lost.length > 0) add("target-unaffected", `the target loses ${lost.join(", ")} in ${state.overwriteChannel}`)
   return out
 }

@@ -43,16 +43,16 @@ describe("pairwise selection", () => {
     expect(pairwise(family)).toEqual(rows)
   })
 
-  it("selects the measured row counts (§5.9; send has one more than the design's 88, see LOG.md)", () => {
+  it("selects the measured row counts (§5.9; send and members have one more than the design's 88 and 21, pins seven fewer than its 25, see LOG.md)", () => {
     expect(Object.fromEntries(Object.entries(families).map(([name, family]) => [name, pairwise(family).length]))).toEqual({
       send: 89,
       react: 25,
-      pins: 25,
+      pins: 18,
       createThread: 8,
       threads: 24,
       channelEdit: 21,
       messages: 22,
-      members: 21
+      members: 22
     })
   })
 
@@ -85,7 +85,7 @@ describe("the send catalog", () => {
   })
 
   it("never grants MentionEveryone, Administrator or an administrator source in a row that mentions @everyone (L3)", () => {
-    const everyoneRows = sendScenarios.filter((scenario) => scenario.operation.payload === "mention-everyone")
+    const everyoneRows = sendScenarios.filter((scenario) => scenario.operation._tag === "send" && scenario.operation.payload === "mention-everyone")
     expect(everyoneRows.length).toBeGreaterThan(0)
     for (const scenario of everyoneRows) {
       const state = Materialize.desired(scenario.setup, fakeIds)

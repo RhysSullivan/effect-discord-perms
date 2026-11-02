@@ -63,11 +63,14 @@ export const degradedFlags = (payload: SendPayload, message: CreatedMessage): Re
   return Flags.sortFlags(dropped)
 }
 
-/** A 2xx outcome. */
-export const succeeded = (payload: SendPayload, message: CreatedMessage): RawOutcome => {
-  const degraded = degradedFlags(payload, message)
-  return { class: degraded.length > 0 ? "degraded" : "success", status: 200, code: 0, inner: [], degraded: [...degraded], mappedTag: "n/a" }
+/** A 2xx outcome whose response lacks the effect of `degraded` (sorted here). */
+export const ok = (degraded: ReadonlyArray<PermissionFlag>): RawOutcome => {
+  const sorted = Flags.sortFlags(degraded)
+  return { class: sorted.length > 0 ? "degraded" : "success", status: 200, code: 0, inner: [], degraded: [...sorted], mappedTag: "n/a" }
 }
+
+/** A send's 2xx outcome, read back from the created message. */
+export const succeeded = (payload: SendPayload, message: CreatedMessage): RawOutcome => ok(degradedFlags(payload, message))
 
 /** A Discord error answer. */
 export const rejected = (response: DiscordResponse): RawOutcome => ({

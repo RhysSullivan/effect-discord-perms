@@ -44,19 +44,29 @@ export const Flag = Schema.Literals(PermissionFlags)
 export const Rank = Schema.Literals(["below", "equal", "above"])
 
 /**
- * Objects created before the operation, by symbolic name. `harness-message` is a plain message the harness
- * posts (a reply's target): the harness can post in every lab channel, including voice text chat, where the
- * target cannot without Connect.
+ * Objects created before the operation, by symbolic name:
+ *
+ * - `subject-message`: the subject's own plain message, posted by the subject before Converge applies the
+ *   setup (with temporary access, `Fixtures.ts`), so even a setup that hides the channel has one;
+ * - `harness-message` and `second-harness-message`: plain messages the harness posts (a reply's target, a
+ *   foreign message, a bulk delete's pair); the harness can post in every lab channel, including voice text
+ *   chat, where the target cannot without Connect;
+ * - `existing-reaction`: the harness has reacted to `harness-message` with the scenario's emoji;
+ * - `pinned-harness-message`: the harness has pinned `harness-message`;
+ * - `guild-sticker`: the lab's sticker (send);
+ * - `subject-thread`: the scenario thread is one the subject created (before Converge, with temporary access),
+ *   instead of the provisioned one of that kind;
+ * - `target-role`: the target holds the role of `roleRank` (a role removal's subject).
  */
 export const Fixture = Schema.Literals([
   "subject-message",
-  "target-message",
   "harness-message",
+  "second-harness-message",
   "existing-reaction",
-  "pinned-subject-message",
+  "pinned-harness-message",
   "guild-sticker",
   "subject-thread",
-  "crossposted-subject-message"
+  "target-role"
 ])
 /** A fixture. */
 export type Fixture = typeof Fixture.Type
@@ -93,16 +103,57 @@ export const SendPayload = Schema.Literals(["plain", "embed", "file", "reply", "
 /** A send payload variant. */
 export type SendPayload = typeof SendPayload.Type
 
-/** What a scenario does. M3 has the send family; later milestones add their operations here. */
-export const Operation = Schema.Union([Schema.TaggedStruct("send", { payload: SendPayload })])
+/** A message operation (the messages family, §5.9). */
+export const MessageAction = Schema.Literals(["edit-own", "delete-own", "delete-foreign", "crosspost-own", "crosspost-foreign", "bulk-delete"])
+/** A reaction's emoji: a unicode emoji nobody has used on the message, the same one already there, the lab's guild emoji. */
+export const ReactEmoji = Schema.Literals(["unicode-new", "unicode-existing", "guild"])
+/** A pins operation. */
+export const PinAction = Schema.Literals(["pin", "unpin", "list"])
+/** A thread operation (the threads family, plus `unarchive` for H-038/H-039). */
+export const ThreadAction = Schema.Literals(["join", "leave", "add-member", "archive", "unarchive", "lock", "delete"])
+/** A channel edit: slowmode (pairwise), or one name or topic edit per lab channel per run (H-162). */
+export const EditField = Schema.Literals(["slowmode", "name", "topic"])
+/** A member operation on the target (kick and ban only where the docs model predicts failure, §5.6). */
+export const MemberAction = Schema.Literals(["add-role", "remove-role", "nickname", "timeout", "kick", "ban"])
+
+/** What a scenario does. */
+export const Operation = Schema.Union([
+  Schema.TaggedStruct("send", { payload: SendPayload }),
+  Schema.TaggedStruct("message", { action: MessageAction }),
+  Schema.TaggedStruct("react", { emoji: ReactEmoji }),
+  Schema.TaggedStruct("pins", { action: PinAction }),
+  /** A new thread in the scenario channel, standalone or from `harness-message`. */
+  Schema.TaggedStruct("createThread", { visibility: Schema.Literals(["public", "private"]), fromMessage: Schema.Boolean }),
+  Schema.TaggedStruct("thread", { action: ThreadAction }),
+  Schema.TaggedStruct("channelEdit", { field: EditField }),
+  Schema.TaggedStruct("member", { action: MemberAction }),
+  /** A forum or media post, with or without a tag (H-031, H-044). */
+  Schema.TaggedStruct("createPost", { tagged: Schema.Boolean })
+])
 /** An operation. */
 export type Operation = typeof Operation.Type
 
-/** The operation as the truth table records it: `send:<payload>`. */
+/** The operation as the truth table records it, for example `send:embed` or `thread:archive`. */
 export const operationKey = (operation: Operation): string => {
   switch (operation._tag) {
     case "send":
       return `send:${operation.payload}`
+    case "message":
+      return `message:${operation.action}`
+    case "react":
+      return `react:${operation.emoji}`
+    case "pins":
+      return `pins:${operation.action}`
+    case "createThread":
+      return `createThread:${operation.visibility}${operation.fromMessage ? ":from-message" : ""}`
+    case "thread":
+      return `thread:${operation.action}`
+    case "channelEdit":
+      return `channelEdit:${operation.field}`
+    case "member":
+      return `member:${operation.action}`
+    case "createPost":
+      return `createPost:${operation.tagged ? "tagged" : "untagged"}`
   }
 }
 
@@ -138,4 +189,6 @@ export interface Scenario {
   readonly operation: Operation
   /** Rule rows only (M6); matrix rows have no expectation, agreement decides. */
   readonly expect?: Observation
+  /** A flip control's original row (§5.9): this row is its setup with only the original's first missing flag granted. */
+  readonly flipOf?: string
 }

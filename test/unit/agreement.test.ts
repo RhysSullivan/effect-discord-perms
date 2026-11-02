@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest"
-import { agreement } from "../../harness/Agreement.ts"
+import { Effect } from "effect"
+import { agreement, expectedOracleMissing, flipAgreement } from "../../harness/Agreement.ts"
+import * as Drivers from "../../harness/Drivers.ts"
+import { expectedCode } from "../../src/permissions/Observed.ts"
 import * as Outcome from "../../harness/Outcome.ts"
 import { Setup } from "../../harness/scenario/Dsl.ts"
 import * as TruthTable from "../../harness/TruthTable.ts"
 import { DiscordResponse, FieldError } from "../../src/errors/Cause.ts"
 import type { PermissionFlag } from "../../src/errors/Missing.generated.ts"
 import * as Flags from "../../src/permissions/Flags.ts"
+import type { OpName } from "../../src/permissions/Operations.ts"
+import { type DecideArgs, decide } from "../../src/permissions/Preflight.ts"
 import { resolve } from "../../src/permissions/Resolver.ts"
 import { MessageId } from "../../src/Snowflake.ts"
 import { channel, everyone, guild, guildId, known, later, member, now, role, roleOverwrite, set, thread } from "../support/guild.ts"
@@ -15,7 +20,7 @@ import { channel, everyone, guild, guildId, known, later, member, now, role, rol
  * readback, and the truth table's canonical, order-independent bytes.
  */
 const setup = new Setup({ channel: "text", grants: [{ flags: ["ViewChannel", "SendMessages"], via: "role" }], removals: [], memberState: "normal", fixtures: [] })
-const facts = { needed: ["ViewChannel", "SendMessages", "EmbedLinks"] as const, degradable: ["MentionEveryone"] as const }
+const facts = { op: "channel.send" as const, needed: ["ViewChannel", "SendMessages", "EmbedLinks"] as const, degradable: ["MentionEveryone"] as const }
 const success: TruthTable.RawOutcome = { class: "success", status: 200, code: 0, inner: [], degraded: [], mappedTag: "n/a" }
 const denied = (code: number): TruthTable.RawOutcome => ({ class: code === 50001 ? "50001" : code === 50013 ? "50013" : "other-error", status: 403, code, inner: [], degraded: [], mappedTag: "n/a" })
 const row = (overrides: Partial<Omit<TruthTable.Row, "agreement">>): Omit<TruthTable.Row, "agreement"> => ({
@@ -98,8 +103,62 @@ describe("agreement", () => {
     expect(agreement(row({ ...base, recompute: { tag: "MissingEmbedLinks", categories: ["permission"] } }), facts)).toBe("recompute-vs-preflight")
   })
 
+  it("reads the code from Observed: 50001 for the view level and an operation's listed failures, 50013 otherwise", () => {
+    expect(expectedCode("thread.send", "action", "MissingSendMessagesInThreads")).toBe(50001)
+    expect(expectedCode("thread.send", "action", "CommunicationDisabled")).toBe(50001)
+    expect(expectedCode("channel.send", "action", "CommunicationDisabled")).toBe(50013)
+    expect(expectedCode("channel.send", "action", "MissingSendMessagesInThreads")).toBe(50013)
+    expect(expectedCode("channel.send", "view", "CommunicationDisabled")).toBe(50001)
+    expect(expectedCode("channel.send", "none", undefined)).toBeUndefined()
+    const threadFacts = { op: "thread.send" as const, needed: ["ViewChannel", "SendMessagesInThreads"] as const, degradable: [] }
+    const smit = row({
+      resolver: { required: ["SendMessagesInThreads", "ViewChannel"], missing: ["SendMessagesInThreads"], missingBeforeMasks: ["SendMessagesInThreads"], masks: [], level: "action" },
+      preflight: { tag: "MissingSendMessagesInThreads", categories: ["access", "permission"] },
+      preflightSet: ["MissingSendMessagesInThreads"],
+      oracle: { missing: ["SendMessagesInThreads"] }
+    })
+    expect(agreement({ ...smit, raw: denied(50001) }, threadFacts)).toBe("agree")
+    expect(agreement({ ...smit, raw: denied(50013) }, threadFacts)).toBe("level-vs-raw")
+  })
+
+  it("explains a refusal by a state failure without a missing flag (a locked thread, the hierarchy), not as resolver-vs-raw", () => {
+    const locked = row({
+      resolver: { required: ["SendMessagesInThreads", "ViewChannel"], missing: [], missingBeforeMasks: [], masks: [], level: "action" },
+      preflight: { tag: "ThreadLocked", categories: ["state"] },
+      preflightSet: ["ThreadLocked"],
+      raw: denied(50001)
+    })
+    expect(agreement(locked, { op: "thread.send", needed: ["ViewChannel", "SendMessagesInThreads"], degradable: [] })).toBe("agree")
+    expect(agreement({ ...locked, preflight: { tag: "MissingViewChannel", categories: ["access", "permission"] }, preflightSet: ["MissingViewChannel"], resolver: { ...locked.resolver, level: "view" } }, { op: "thread.send", needed: ["ViewChannel", "SendMessagesInThreads"], degradable: [] })).toBe("resolver-vs-raw")
+  })
+
+  it("compares the oracle with the timeout mask applied (H-241)", () => {
+    const timedOut = { required: ["AttachFiles", "SendMessages", "ViewChannel"] as const, missing: ["AttachFiles", "SendMessages"] as const, missingBeforeMasks: [] as const, masks: ["timeout"] as const, level: "action" as const }
+    expect(expectedOracleMissing(timedOut)).toEqual(["AttachFiles", "SendMessages"])
+    const timedRow = row({ resolver: timedOut, preflight: { tag: "CommunicationDisabled", categories: ["state"] }, preflightSet: ["CommunicationDisabled"], raw: denied(50013), oracle: { missing: ["AttachFiles", "SendMessages"] } })
+    expect(agreement(timedRow, facts)).toBe("agree")
+    expect(agreement({ ...timedRow, oracle: { missing: [] } }, facts)).toBe("resolver-vs-oracle")
+  })
+
   it("agrees on a setup Discord would not build", () => {
     expect(agreement(row({ preflight: "n/a", raw: Outcome.unsupported("kind-not-available"), oracle: "not-applicable" }), facts)).toBe("agree")
+  })
+})
+
+describe("flip controls", () => {
+  const failed = (set: ReadonlyArray<string>): TruthTable.Row => ({
+    ...row({ preflight: set[0] === undefined ? "pass" : { tag: set[0], categories: ["permission"] }, preflightSet: [...set], raw: set.length > 0 ? denied(50013) : success }),
+    agreement: "agree"
+  })
+  it("needs the flip to succeed when the original had one failure, and to fail with the next one otherwise", () => {
+    expect(flipAgreement(failed(["MissingEmbedLinks"]), failed([]))).toBe("agree")
+    expect(flipAgreement(failed(["MissingEmbedLinks"]), failed(["MissingAttachFiles"]))).toBe("flip-control")
+    expect(flipAgreement(failed(["MissingSendMessages", "MissingEmbedLinks"]), failed(["MissingEmbedLinks"]))).toBe("agree")
+    expect(flipAgreement(failed(["MissingSendMessages", "MissingEmbedLinks"]), failed([]))).toBe("flip-control")
+    // an original that did not fail, or an unbuilt setup, leaves nothing to check; a flip's own mismatch stays
+    expect(flipAgreement(failed([]), failed(["MissingAttachFiles"]))).toBe("agree")
+    expect(flipAgreement({ ...failed(["MissingEmbedLinks"]), raw: Outcome.unsupported("admin-exempt") }, failed(["MissingAttachFiles"]))).toBe("agree")
+    expect(flipAgreement(failed(["MissingEmbedLinks"]), { ...failed([]), agreement: "preflight-vs-raw" })).toBe("preflight-vs-raw")
   })
 })
 
@@ -127,6 +186,18 @@ describe("the raw outcome", () => {
     expect(Outcome.succeeded("mention-everyone", message({}))).toMatchObject({ class: "degraded", degraded: ["MentionEveryone"] })
     expect(Outcome.succeeded("plain", message({})).class).toBe("success")
   })
+
+  it("reads a pins list back: empty although the harness pinned a message means ReadMessageHistory was missing (H-107)", () =>
+    Effect.gen(function* () {
+      const pinned = new Setup({ channel: "text", grants: [], removals: [], memberState: "normal", fixtures: ["harness-message", "pinned-harness-message"] })
+      const list = (items: ReadonlyArray<unknown>, at: Setup = pinned) =>
+        Drivers.outcomeOf({ setup: at, operation: { _tag: "pins", action: "list" } }, { answer: { _tag: "Ok", body: { items, has_more: false } }, created: undefined })
+      expect(yield* list([])).toMatchObject({ class: "degraded", degraded: ["ReadMessageHistory"] })
+      expect((yield* list([{ pinned_at: "x", message: {} }])).class).toBe("success")
+      // without a pin to list, an empty list is just empty
+      expect((yield* list([], setup)).class).toBe("success")
+      expect((yield* Drivers.outcomeOf({ setup, operation: { _tag: "thread", action: "join" } }, { answer: { _tag: "Ok", body: undefined }, created: undefined })).class).toBe("success")
+    }).pipe(Effect.runSync))
 
   it("classifies Discord's answers with sorted inner codes and the dedicated code's tag", () => {
     const response = (status: number, code: number, fieldErrors: ReadonlyArray<FieldError> = []) =>
@@ -173,10 +244,12 @@ describe("the resolver record (step a)", () => {
   const resolution = (target: Parameters<typeof resolve>[0]["channel"], granted = all, timedOutUntil: string | null = null) =>
     resolve({ guild: guild([role(everyone, granted)]), channel: target, member: member([], timedOutUntil), now })
   const deny = (...flags: ReadonlyArray<PermissionFlag>) => [roleOverwrite(guildId, Flags.empty, set(...flags))]
+  const levelOf = (op: OpName, resolved: ReturnType<typeof resolution>, args: DecideArgs = { payload: [] }) => TruthTable.levelOf(op, resolved, decide(op, resolved, args))
 
   it("records the required flags sorted, what is missing after the masks and before them, and the masks", () => {
     // no Send masks EmbedLinks (H-013): missing after the masks, present before them
-    const record = TruthTable.resolverRecord("channel.send", resolution(known(channel("text", deny("SendMessages")))), ["ViewChannel", "SendMessages", "EmbedLinks"], ["ViewChannel", "SendMessages", "EmbedLinks"])
+    const resolved = resolution(known(channel("text", deny("SendMessages"))))
+    const record = TruthTable.resolverRecord("channel.send", resolved, ["ViewChannel", "SendMessages", "EmbedLinks"], decide("channel.send", resolved, { payload: ["embeds"] }))
     expect(record).toEqual({
       required: ["EmbedLinks", "SendMessages", "ViewChannel"],
       missing: ["EmbedLinks", "SendMessages"],
@@ -185,22 +258,29 @@ describe("the resolver record (step a)", () => {
       level: "action"
     })
     // flags outside `required` are never listed, whatever the resolution lacks
-    expect(TruthTable.resolverRecord("channel.send", resolution(known(channel("text")), set("ViewChannel")), ["ViewChannel"], ["ViewChannel"]).missing).toEqual([])
+    const bare = resolution(known(channel("text")), set("ViewChannel"))
+    expect(TruthTable.resolverRecord("channel.send", bare, ["ViewChannel"], decide("channel.send", bare, { payload: [] })).missing).toEqual([])
   })
 
-  it("levels a blind channel, a missing View and a voice row without Connect as view", () => {
-    const needed = ["ViewChannel", "SendMessages"] as const
-    expect(TruthTable.levelOf("channel.send", resolution({ _tag: "Unseen" }), needed)).toBe("view")
-    expect(TruthTable.levelOf("channel.send", resolution(known(channel("text", deny("ViewChannel")))), needed)).toBe("view")
-    expect(TruthTable.levelOf("thread.send", resolution(known(thread("private-thread"), channel("text"))), ["ViewChannel", "SendMessagesInThreads"])).toBe("view")
-    expect(TruthTable.levelOf("voice.send", resolution(known(channel("voice", deny("Connect")))), ["ViewChannel", "Connect", "SendMessages"])).toBe("view")
+  it("levels a blind channel, a missing View and a voice row without Connect (the timeout's included) as view", () => {
+    expect(levelOf("channel.send", resolution({ _tag: "Unseen" }))).toBe("view")
+    expect(levelOf("channel.send", resolution(known(channel("text", deny("ViewChannel")))))).toBe("view")
+    expect(levelOf("thread.send", resolution(known(thread("private-thread"), channel("text"))))).toBe("view")
+    expect(levelOf("voice.send", resolution(known(channel("voice", deny("Connect")))))).toBe("view")
+    // M3 live: a timed-out subject in voice answers 50001, because the timeout removes Connect
+    expect(levelOf("voice.send", resolution(known(channel("voice")), all, later))).toBe("view")
     // Connect only counts on a row that requires it
-    expect(TruthTable.levelOf("channel.send", resolution(known(channel("text")), set("ViewChannel", "SendMessages")), needed)).toBe("none")
+    expect(levelOf("channel.send", resolution(known(channel("text")), set("ViewChannel", "SendMessages")))).toBe("none")
   })
 
-  it("levels a missing error-mode flag, or a timeout that removes one, as action, and a missing degrade-mode flag as none", () => {
-    expect(TruthTable.levelOf("channel.send", resolution(known(channel("text", deny("SendMessages")))), ["ViewChannel", "SendMessages"])).toBe("action")
-    expect(TruthTable.levelOf("channel.send", resolution(known(channel("text")), all, later), ["ViewChannel", "SendMessages"])).toBe("action")
-    expect(TruthTable.levelOf("channel.send", resolution(known(channel("text")), set("ViewChannel", "SendMessages")), ["ViewChannel", "SendMessages"])).toBe("none")
+  it("levels any preflight failure with the channel visible as action: a missing flag, the timeout, a locked thread, the hierarchy", () => {
+    expect(levelOf("channel.send", resolution(known(channel("text", deny("SendMessages")))))).toBe("action")
+    expect(levelOf("channel.send", resolution(known(channel("text")), all, later))).toBe("action")
+    expect(levelOf("thread.send", resolution(known(thread("public-thread", { locked: true }), channel("text"))))).toBe("action")
+    const guildScope = resolution({ _tag: "Guild" }, set("KickMembers"))
+    expect(levelOf("member.kick", guildScope, { payload: [], target: { below: false, administrator: false } })).toBe("action")
+    expect(levelOf("member.kick", guildScope, { payload: [], target: { below: true, administrator: false } })).toBe("none")
+    // a missing degrade-mode flag fails nothing
+    expect(levelOf("channel.send", resolution(known(channel("text")), set("ViewChannel", "SendMessages")), { payload: ["mentionsEveryone"] })).toBe("none")
   })
 })

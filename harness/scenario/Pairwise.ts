@@ -157,14 +157,15 @@ export const families = {
     valid: (r) => !(r.missing === "none" && r.removal !== "absent") && !(r.missing === "connect" && r.channel !== "voice")
   },
   pins: {
+    // no voice or stage: their text chat has no pins (400 50019 even for the harness, M2 and M4 live)
     dimensions: {
-      channel: ["text", "announcement", "voice", "public-thread", "archived-thread"],
+      channel: ["text", "announcement", "public-thread", "archived-thread"],
       op: ["pin", "unpin", "list"],
-      missing: ["none", "view", "pin-messages", "read-history", "connect"],
+      missing: ["none", "view", "pin-messages", "read-history"],
       removal: ["absent", "role-overwrite-deny", "member-overwrite-deny"],
       memberState: ["normal", "timed-out"]
     },
-    valid: (r) => !(r.missing === "none" && r.removal !== "absent") && !(r.missing === "connect" && r.channel !== "voice")
+    valid: (r) => !(r.missing === "none" && r.removal !== "absent")
   },
   createThread: {
     dimensions: { parent: ["text", "announcement"], visibility: ["public", "private"], missing: ["none", "view", "op-flag"], memberState: ["normal", "timed-out"] },
@@ -219,6 +220,12 @@ export const families = {
     valid: (r) => {
       const roleOp = r.op === "add-role" || r.op === "remove-role"
       if (roleOp !== (r.roleRank !== "n/a")) return false
+      // the lab has one role per position (§5.7), so a rank and a role of the same rank are the same role: the
+      // target cannot be given a role it already holds for its rank (add-role), and holding the role to remove
+      // makes its rank at least the role's (remove-role)
+      const rank = (value: string | undefined): number => (value === "below" ? 0 : value === "equal" ? 1 : 2)
+      if (r.op === "add-role" && r.roleRank !== "below" && r.roleRank === r.targetRank) return false
+      if (r.op === "remove-role" && rank(r.targetRank) < rank(r.roleRank)) return false
       // kick and ban only where the docs model predicts failure; never missing=none with the target below (L1)
       const kickOrBan = r.op === "kick-expect-fail" || r.op === "ban-expect-fail"
       return !(kickOrBan && r.missing === "none" && r.targetRank === "below")

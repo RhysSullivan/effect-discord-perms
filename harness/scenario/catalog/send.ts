@@ -1,106 +1,24 @@
 /**
  * The send catalog (DESIGN §5.9): the pairwise send family, and targeted rows for hypotheses the pairwise
- * dimensions cannot express. Also each scenario's operation facts (the table row it uses, its payload features)
- * and its wire payload for the raw call of step (c), which is what the library's `ToDfx` will send (M6):
- * `allowed_mentions` always `{ parse: [] }` plus explicit opt-ins (§2.3).
+ * dimensions cannot express. Also each payload variant's wire request for the raw call of step (c), which is
+ * what the library's `ToDfx` will send (M6): `allowed_mentions` always `{ parse: [] }` plus explicit opt-ins
+ * (§2.3).
  */
 import type { MessageCreateRequest } from "dfx/DiscordREST/Generated"
 import type { PermissionFlag } from "../../../src/errors/Missing.generated.ts"
 import type { OpName } from "../../../src/permissions/Operations.ts"
-import { errorModeFlags, requiredFlags } from "../../../src/permissions/Preflight.ts"
-import { degradeFlags, errorFlags, type PayloadRuleName } from "../../../src/payload/PayloadRules.ts"
+import { errorModeFlags } from "../../../src/permissions/Preflight.ts"
+import { type PayloadRuleName, payloadRuleNames, PayloadRules } from "../../../src/payload/PayloadRules.ts"
 import type { MessageId, StickerId } from "../../../src/Snowflake.ts"
-import { type Fixture, type GrantSource, type LabChannel, type Removal, type Scenario, type SendPayload, Setup } from "../Dsl.ts"
+import { type Fixture, type GrantSource, type Removal, type Scenario, type SendPayload, Setup } from "../Dsl.ts"
+import { staticFactsOf } from "../Facts.ts"
 import { type Combination, families, pairwise } from "../Pairwise.ts"
-
-/** The send row for a channel kind (§2.4 `SendOpByKind`). */
-export const sendOpOf = (channel: LabChannel): OpName => {
-  switch (channel) {
-    case "text":
-    case "announcement":
-      return "channel.send"
-    case "voice":
-    case "stage":
-      return "voice.send"
-    case "forum-post":
-    case "public-thread":
-    case "private-thread":
-    case "announcement-thread":
-      return "thread.send"
-    case "forum":
-    case "media":
-      return "forum.createPost"
-  }
-}
-
-/** The payload features (`PayloadRules`) a send payload variant carries. A guild sticker has none (H-138). */
-export const featuresOf = (payload: SendPayload): ReadonlyArray<PayloadRuleName> => {
-  switch (payload) {
-    case "plain":
-    case "guild-sticker":
-      return []
-    case "embed":
-      return ["embeds"]
-    case "file":
-      return ["files"]
-    case "reply":
-      return ["reply"]
-    case "tts":
-      return ["tts"]
-    case "poll":
-      return ["poll"]
-    case "mention-everyone":
-      return ["mentionsEveryone"]
-  }
-}
-
-/** What preflight, the resolver record and agreement need about a send scenario. */
-export interface SendFacts {
-  readonly op: OpName
-  readonly features: ReadonlyArray<PayloadRuleName>
-  /** The row's flags and the payload's error-mode and degrade-mode flags. */
-  readonly required: ReadonlyArray<PermissionFlag>
-  /** The flags whose absence fails the request. */
-  readonly needed: ReadonlyArray<PermissionFlag>
-  /** The payload's degrade-mode flags. */
-  readonly degradable: ReadonlyArray<PermissionFlag>
-}
-
-/** The facts of sending `payload` in `channel`. */
-export const factsOf = (channel: LabChannel, payload: SendPayload): SendFacts => {
-  const op = sendOpOf(channel)
-  const features = featuresOf(payload)
-  const args = { payload: features }
-  return { op, features, required: requiredFlags(op, args), needed: errorModeFlags(op, args), degradable: degradeFlags(features) }
-}
+import { channelFields } from "./common.ts"
 
 /** The fixtures a payload needs: a message to reply to, or the provisioned guild sticker. */
 export const fixturesFor = (payload: SendPayload): ReadonlyArray<Fixture> => (payload === "reply" ? ["harness-message"] : payload === "guild-sticker" ? ["guild-sticker"] : [])
 
 // ---- the pairwise family ------------------------------------------------------------------------------
-
-const channelOf = (value: string): Pick<Setup, "channel" | "threadState" | "subjectThreadMember"> => {
-  switch (value) {
-    case "archived-thread":
-      return { channel: "public-thread", threadState: "archived" }
-    case "locked-thread":
-      return { channel: "public-thread", threadState: "locked" }
-    case "private-thread":
-      // a private thread is visible only to its members (H-033): pairwise rows put the subject in it, and a
-      // targeted row covers the non-member
-      return { channel: "private-thread", subjectThreadMember: true }
-    case "text":
-    case "announcement":
-    case "voice":
-    case "stage":
-    case "forum-post":
-    case "public-thread":
-    case "announcement-thread":
-      return { channel: value }
-    default:
-      throw new Error(`send catalog: unknown channel ${value}`)
-  }
-}
 
 const hypothesesOf = (row: Combination): ReadonlyArray<`H-${number}`> => {
   const out = new Set<`H-${number}`>(["H-001", "H-080"])
@@ -154,6 +72,14 @@ const hypothesesOf = (row: Combination): ReadonlyArray<`H-${number}`> => {
 }
 
 /** The flag a pairwise `missing` value takes away. */
+/**
+ * The payload's flags a row may grant, whatever their `PayloadRules` mode, so the family's rows stay the same
+ * when a mode changes from a live finding: every rule's flag but MentionEveryone, which is never granted in an
+ * `@everyone` row (Safety, L3).
+ */
+export const grantablePayloadFlags = (features: ReadonlyArray<PayloadRuleName>): ReadonlyArray<PermissionFlag> =>
+  [...new Set(payloadRuleNames.filter((name) => features.includes(name)).map((name) => PayloadRules[name].flag))].filter((flag) => flag !== "MentionEveryone")
+
 const missingFlag = (missing: string, op: OpName, features: ReadonlyArray<PayloadRuleName>): PermissionFlag | undefined => {
   switch (missing) {
     case "none":
@@ -165,7 +91,7 @@ const missingFlag = (missing: string, op: OpName, features: ReadonlyArray<Payloa
     case "connect":
       return "Connect"
     case "payload": {
-      const [flag] = errorFlags(features)
+      const [flag] = grantablePayloadFlags(features)
       if (flag === undefined) throw new Error("send catalog: missing=payload on a payload without a flag")
       return flag
     }
@@ -191,10 +117,10 @@ export const fromCombination = (row: Combination): Scenario => {
   if (!isPayload(payload) || !isGrantSource(grantSource) || !isRemoval(removal) || (memberState !== "normal" && memberState !== "timed-out")) {
     throw new Error(`send catalog: malformed row ${JSON.stringify(row)}`)
   }
-  const channel = channelOf(channelValue)
-  const facts = factsOf(channel.channel, payload)
-  const taken = missingFlag(missing, facts.op, facts.features)
-  const needed = [...facts.needed]
+  const channel = channelFields(channelValue)
+  const facts = staticFactsOf({ setup: new Setup({ ...channel, grants: [], removals: [], memberState: "normal", fixtures: [] }), operation: { _tag: "send", payload } })
+  const taken = missingFlag(missing, facts.op, facts.args.payload)
+  const needed = [...new Set([...errorModeFlags(facts.op, { payload: [] }), ...grantablePayloadFlags(facts.args.payload)])]
   const granted = grantSource === "administrator" ? [] : removal === "absent" ? needed.filter((flag) => flag !== taken) : needed
   const setup = new Setup({
     ...channel,
@@ -357,6 +283,13 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     grants: [{ flags: ["ViewChannel", "Connect", "SendMessages"], via: "role" }],
     removals: [],
     memberState: "normal"
+  }),
+  // ordering: the timeout and a missing SendMessagesInThreads, whose code (50001) differs from the timeout's
+  targeted("order-timeout-smit", ["H-020", "H-031"], "plain", {
+    channel: "public-thread",
+    grants: [{ flags: ["ViewChannel"], via: "role" }],
+    removals: [],
+    memberState: "timed-out"
   }),
   // ordering: the timeout ranks above a missing SendMessages (H-020)
   targeted("order-timeout-send", ["H-020", "H-023"], "plain", {

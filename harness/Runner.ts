@@ -1,22 +1,28 @@
 /**
  * The matrix runner (DESIGN §5.1 `verify:live`, §5.10): resets and provisions the lab, runs the catalog
- * serially, and writes the truth table.
+ * serially, judges the flip controls, and writes the truth table.
  *
  * One scenario (§5.10):
  *
- * 1. **Converge** to the materialized desired state (`Converge.ts`, the fixed order of §5.8).
- * 2. **Fixtures**: the harness posts what the payload needs, then sets the thread's archived and locked state.
+ * 1. **Converge**: the subject's own fixtures first (`Fixtures.subjectObjects`, with temporary access), then
+ *    the materialized desired state (`Converge.ts`, the fixed order of §5.8).
+ * 2. **Fixtures**: the harness's messages, reaction and pin (`Fixtures.harnessObjects`), then the thread's
+ *    archived and locked state.
  * 3. **Wait** until the harness's read-back, the subject's gateway state and the oracle agree (`Wait.ts`).
- * 4. **(a) Resolver** over the subject's guild state. A scenario thread is refreshed first through the
- *    library's `GuildState.refresh`, so the subject's view of it is a function of the setup (fetched when it
- *    can see it, unseen when it cannot), not of which events earlier scenarios happened to deliver.
+ * 4. **(a) Resolver** over the subject's guild state: for a channel operation, a scenario thread is refreshed
+ *    first through the library's `GuildState.refresh`, so the subject's view of it is a function of the setup;
+ *    a member operation resolves at guild level, and the subject reads the target member (as the library's
+ *    `Members.get` will, M6) for the hierarchy.
  * 5. **(b) Preflight**: `Preflight.decide` (M6 switches this step to the real operation over `DryRun`).
- * 6. **(c) Raw call** through `SubjectRaw`, with no check, classified by `Outcome.ts`. A payload that mentions
- *    `@everyone` is sent only if the oracle shows the subject without MentionEveryone and Administrator.
+ * 6. **(c) Raw call** through `SubjectRaw`, with no check (`Drivers.ts`), classified by `Outcome.ts`. A payload
+ *    that mentions `@everyone` is sent only if the oracle shows the subject without MentionEveryone and
+ *    Administrator; a kick or ban only with the Lab guard's permit, which it issues from harness-side reads.
  * 7. **(d) Recompute**: `n/a` until M5.
- * 8. **Oracle**: the value the wait settled on, restricted to the required flags.
- * 9. **Cleanup**: the scenario channel's bot messages, and the thread back to baseline.
- * 10. **Record** the row with its agreement.
+ * 8. **Oracle**: the value the wait settled on, restricted to the required flags (`not-applicable` for member
+ *    operations, which have no channel).
+ * 9. **Cleanup**: the threads the scenario created, the scenario channel's bot messages, and the thread back to
+ *    baseline. The next Converge undoes the rest (overwrites, settings, roles, the target's state).
+ * 10. **Record** the row with its agreement; flip controls are judged against their originals after the run.
  *
  * Scenarios are grouped by setup (equal setups run back to back, so the lab converges once per group) and run
  * in a fixed order, so runs are reproducible. A timeout of the raw call, a wait past its cap, or a refused
@@ -24,38 +30,41 @@
  * (message IDs, timings) goes to the run log, never to the table.
  */
 import { BunFileSystem } from "@effect/platform-bun"
-import { Clock, Duration, Effect, FileSystem, Option, Schema } from "effect"
+import { Clock, Duration, Effect, FileSystem, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { BotRuntime } from "../src/bot/Bot.ts"
 import { SubjectRaw } from "../src/bot/Internals.ts"
-import { PreflightDecision } from "../src/errors/Cause.ts"
 import type { Transient } from "../src/errors/Transient.ts"
 import * as Flags from "../src/permissions/Flags.ts"
-import { decide, tagOf, toError } from "../src/permissions/Preflight.ts"
-import { inputFromSnapshot, resolve } from "../src/permissions/Resolver.ts"
+import { requiredFlags } from "../src/permissions/Preflight.ts"
+import { type FromSnapshot, guildInputFromSnapshot, inputFromSnapshot, resolve } from "../src/permissions/Resolver.ts"
 import * as Oracle from "../src/rest/Oracle.ts"
 import { send } from "../src/rest/Request.ts"
-import { type ChannelId, MessageId, type RoleId, type StickerId } from "../src/Snowflake.ts"
+import type { ChannelId, EmojiId, RoleId, StickerId } from "../src/Snowflake.ts"
 import { isThreadKind } from "../src/state/Snapshot.ts"
-import { agreement } from "./Agreement.ts"
+import { escalatedRules } from "../scripts/lib/rules.ts"
+import { rules } from "../test/rules.ts"
+import { agreement, flipAgreement } from "./Agreement.ts"
 import * as Converge from "./Converge.ts"
+import * as Drivers from "./Drivers.ts"
+import * as Fixtures from "./Fixtures.ts"
 import { HarnessRest } from "./Identities.ts"
 import type { IdentityReport } from "./IdentityCheck.ts"
-import { LabCheckFailed, LabRequestFailed } from "./Lab.ts"
+import { LabCheckFailed, LabGuard, LabRequestFailed, labStep, labStepUnless } from "./Lab.ts"
 import * as LabIds from "./LabIds.ts"
 import * as Materialize from "./Materialize.ts"
 import * as Outcome from "./Outcome.ts"
 import { Pacing } from "./Pacing.ts"
 import * as Provision from "./Provision.ts"
 import * as Reset from "./Reset.ts"
-import * as SendCatalog from "./scenario/catalog/send.ts"
+import * as Catalog from "./scenario/catalog/index.ts"
 import { operationKey, type Scenario, Setup } from "./scenario/Dsl.ts"
+import * as Facts from "./scenario/Facts.ts"
 import { families, selectionProblems } from "./scenario/Pairwise.ts"
 import * as Safety from "./scenario/Safety.ts"
 import * as TruthTable from "./TruthTable.ts"
 import * as Wait from "./Wait.ts"
-import { escalatedRules } from "../scripts/lib/rules.ts"
-import { rules } from "../test/rules.ts"
+import * as Wire from "./Wire.ts"
 
 /** The command-line options of `run` (§5.1). */
 export interface Options {
@@ -83,8 +92,8 @@ export const globMatches = (glob: string, id: string): boolean => {
   return new RegExp(`^${pattern}$`).test(id)
 }
 
-/** The catalog M3 runs: the send family and its targeted rows. */
-export const catalog: ReadonlyArray<Scenario> = SendCatalog.scenarios
+/** The catalog: every family's pairwise and targeted rows and their flip controls (§5.9). */
+export const catalog: ReadonlyArray<Scenario> = Catalog.scenarios
 
 const encodeSetup = Schema.encodeSync(Schema.toCodecJson(Setup))
 
@@ -145,11 +154,13 @@ export interface RunResult {
 interface Context {
   readonly ids: Materialize.Ids
   readonly stickerId: StickerId | undefined
+  readonly emojiId: EmojiId | undefined
   readonly log: (line: string) => Effect.Effect<void, PlatformError>
   readonly oracleSeen: { unavailable: boolean }
   /**
-   * The lab channels whose overwrites may differ from baseline: the previous scenario's (its desired overwrites,
-   * or the temporary View grant cleanup made). Every other lab channel is at baseline since the opening reset.
+   * The lab channels whose overwrites or settings may differ from baseline: the previous scenario's (its
+   * desired state, the temporary access the fixtures gave, or what its operation edited). Every other lab
+   * channel is at baseline since the opening reset.
    */
   readonly dirty: Set<LabIds.ChannelName>
 }
@@ -163,33 +174,33 @@ const toLabFailure = (error: Oracle.OracleFailed): LabRequestFailed =>
 
 const botAuthors = (ids: Materialize.Ids, harness: string): ReadonlySet<string> => new Set([harness, ids.subjectUserId, ids.targetUserId])
 
-/** Runs one scenario and returns its row. */
+const isForumName = (name: Materialize.LabName): boolean => name === "lab-forum" || name === "lab-media"
+
+const TagsOf = Schema.Struct({ available_tags: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))) })
+
+/** Runs one scenario and returns its row (see the module comment for the steps). */
 const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
   Effect.gen(function* () {
-    const { ids } = context
-    const operation = scenario.operation
-    const payload = operation.payload
-    const facts = SendCatalog.factsOf(scenario.setup.channel, payload)
-    const state = Materialize.desired(scenario.setup, ids)
-    const base = { setup: scenario.setup, operation: operationKey(operation), recompute: "n/a" as const }
+    const { setup, operation } = scenario
+    const staticFacts = Facts.staticFactsOf(scenario)
+    const base = { setup, operation: operationKey(operation), recompute: "n/a" as const }
     const unsupportedRow = (raw: TruthTable.RawOutcome): TruthTable.Row => ({
       ...base,
-      resolver: { required: Flags.sortFlags(facts.required), missing: [], missingBeforeMasks: [], masks: [], level: "none" },
+      resolver: { required: Flags.sortFlags(requiredFlags(staticFacts.op, staticFacts.args)), missing: [], missingBeforeMasks: [], masks: [], level: "none" },
       preflight: "n/a",
       preflightSet: [],
       raw,
       oracle: "not-applicable",
       agreement: "agree"
     })
-    if (ids.unavailable.has(state.channel)) return unsupportedRow(Outcome.unsupported("kind-not-available"))
-    const channelId = ids.channels.get(state.channel)
-    if (channelId === undefined) return yield* Effect.die(new Error(`no ID for ${state.channel}`))
+    const name = Materialize.labNameOf(setup)
+    const overwriteChannel = Materialize.overwriteChannelOf(name)
+    if (context.ids.unavailable.has(name) || context.ids.unavailable.has(overwriteChannel)) return unsupportedRow(Outcome.unsupported("kind-not-available"))
     const rest = yield* HarnessRest
     const runtime = yield* BotRuntime
     const subjectRaw = yield* SubjectRaw
-    const cleanup = Effect.andThen(Converge.cleanMessages({ id: channelId, name: state.channel }, botAuthors(ids, harnessUserId)), Converge.restoreThread(state, ids))
+    const guard = yield* LabGuard
 
-    // 1-2. converge, fixtures, thread state
     const times: Array<readonly [string, number]> = []
     let mark = yield* Clock.currentTimeMillis
     const lap = (step: string) =>
@@ -197,10 +208,30 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
         times.push([step, at - mark])
         mark = at
       })
-    const channels: ReadonlySet<LabIds.ChannelName> = new Set([...context.dirty, state.overwriteChannel])
+    const channels: ReadonlySet<LabIds.ChannelName> = new Set([...context.dirty, overwriteChannel])
     // whatever happens next, the scenario's channel may be off baseline afterwards
     context.dirty.clear()
-    context.dirty.add(state.overwriteChannel)
+    context.dirty.add(overwriteChannel)
+
+    // 1. the subject's own fixtures (with temporary access), then Converge
+    const spec = Materialize.scenarioThreadSpec(name)
+    const own = yield* Fixtures.subjectObjects({ setup, ids: context.ids, overwriteChannel, channel: name, scenarioThread: spec })
+    const ids: Materialize.Ids = own.thread === undefined ? context.ids : { ...context.ids, channels: new Map(context.ids.channels).set(own.thread.name, own.thread.id) }
+    const state = Materialize.desired(setup, ids)
+    const channelId = ids.channels.get(state.channel)
+    if (channelId === undefined) return yield* Effect.die(new Error(`no ID for ${state.channel}`))
+    let created: ChannelId | undefined
+    const cleanup = Effect.gen(function* () {
+      if (created !== undefined) yield* rest.deleteChannel(created).pipe(labStepUnless("cleanup: delete the created thread", [10003]))
+      if (own.thread !== undefined) {
+        yield* rest.deleteChannel(own.thread.id).pipe(labStepUnless(`cleanup: delete ${own.thread.name}`, [10003]))
+        if (spec !== undefined && !isForumName(spec.parent)) yield* Converge.cleanMessages({ id: yield* lookupId(ids, spec.parent), name: spec.parent }, botAuthors(ids, harnessUserId))
+      } else {
+        // the thread first: an archived thread refuses message deletes (400 50083)
+        yield* Converge.restoreThread(state, ids)
+        if (!isForumName(state.channel)) yield* Converge.cleanMessages({ id: channelId, name: state.channel }, botAuthors(ids, harnessUserId))
+      }
+    })
     const converged = yield* Converge.converge(state, ids, channels)
     yield* lap("converge")
     if (converged._tag === "TimeoutRefused") {
@@ -211,75 +242,120 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
       yield* cleanup
       return unsupportedRow(Outcome.unsupported("admin-exempt"))
     }
-    let replyTo: MessageId | undefined
-    if (scenario.setup.fixtures.includes("harness-message")) replyTo = (yield* Converge.postHarnessMessage(channelId)).id
+
+    // 2. the harness's fixtures, then the thread's state
+    const posted = yield* Fixtures.harnessObjects(setup, channelId)
+    if (posted._tag === "Refused") {
+      yield* cleanup
+      return unsupportedRow(Outcome.unsupported("rejected-by-discord", posted.status, posted.code))
+    }
     yield* Converge.applyThreadState(state, ids)
     yield* lap("fixtures")
 
-    // 3. wait
-    const readOracle = Oracle.memberPermissions(rest, channelId, ids.subjectUserId, Duration.seconds(30)).pipe(
-      Effect.mapError(toLabFailure),
-      Effect.map((read): Wait.OracleValue => (read._tag === "Permissions" ? { _tag: "Permissions", permissions: read.permissions } : { _tag: "Unavailable" }))
-    )
+    // 3. wait (the oracle reads the scenario channel; member operations have no channel)
+    const readOracle: Effect.Effect<Wait.OracleValue, LabRequestFailed> =
+      staticFacts.scope === "guild"
+        ? Effect.succeed({ _tag: "NotApplicable" })
+        : Oracle.memberPermissions(rest, channelId, ids.subjectUserId, Duration.seconds(30)).pipe(
+          Effect.mapError(toLabFailure),
+          Effect.map((read): Wait.OracleValue => (read._tag === "Permissions" ? { _tag: "Permissions", permissions: read.permissions } : { _tag: "Unavailable" }))
+        )
     const settled = yield* Wait.settle({ scenario: scenario.id, state, ids, guildState: runtime.guildState, guildId: ids.guildId, channel: channelId, readOracle, channels })
     yield* lap("wait")
 
-    // 4. (a) the resolver over the subject's state
-    if (isThreadKind(Materialize.kindOf(state.channel))) yield* runtime.guildState.refresh(ids.guildId, channelId).pipe(Effect.catch(infrastructure("refresh")))
+    // 4. (a) the resolver over the subject's state, and (b) preflight
     const now = yield* Clock.currentTimeMillis
-    let fromState = inputFromSnapshot(yield* runtime.guildState.snapshot, ids.guildId, channelId, now)
-    if (fromState._tag === "NeedsRefresh") {
-      yield* runtime.guildState.refresh(ids.guildId, channelId).pipe(Effect.catch(infrastructure("refresh")))
+    let fromState: FromSnapshot
+    let hierarchy: Facts.Hierarchy | undefined
+    if (staticFacts.scope === "guild") {
+      fromState = guildInputFromSnapshot(yield* runtime.guildState.snapshot, ids.guildId, now)
+      if (fromState._tag === "NeedsRefresh") return yield* Effect.die(new Error(`${scenario.id}: the subject's state lacks ${fromState.reason}`))
+      // the library reads the target member it acts on (Members.get, M6); the subject reads it here the same way
+      const target = yield* send("/guilds/{guild.id}/members/{user.id}", "GET", subjectRaw.getGuildMember(ids.guildId, ids.targetUserId), Drivers.deadline).pipe(
+        Effect.catch(infrastructure("the subject's read of the target")),
+        Effect.flatMap((answer) => (answer._tag === "Ok" ? Wire.decode(Wire.Member, "getGuildMember")(answer.body) : Effect.die(new Error(`the subject's read of the target: ${answer.response.code}`))))
+      )
+      const assigned = Materialize.assignedRoleOf(setup)
+      hierarchy = {
+        guild: fromState.input.guild,
+        bot: fromState.input.member,
+        target: { userId: ids.targetUserId, roleIds: target.roles, timedOutUntil: target.communication_disabled_until ?? null },
+        role: assigned === undefined ? undefined : ids.roles.get(assigned)
+      }
+    } else {
+      if (isThreadKind(Materialize.kindOf(state.channel))) yield* runtime.guildState.refresh(ids.guildId, channelId).pipe(Effect.catch(infrastructure("refresh")))
       fromState = inputFromSnapshot(yield* runtime.guildState.snapshot, ids.guildId, channelId, now)
+      if (fromState._tag === "NeedsRefresh") {
+        yield* runtime.guildState.refresh(ids.guildId, channelId).pipe(Effect.catch(infrastructure("refresh")))
+        fromState = inputFromSnapshot(yield* runtime.guildState.snapshot, ids.guildId, channelId, now)
+      }
+      if (fromState._tag === "NeedsRefresh") return yield* Effect.die(new Error(`${scenario.id}: the subject's state still lacks what it needs after a refresh: ${fromState.reason}`))
     }
-    if (fromState._tag === "NeedsRefresh") return yield* Effect.die(new Error(`${scenario.id}: the subject's state still lacks what it needs after a refresh: ${fromState.reason}`))
     const resolution = resolve(fromState.input)
-    const resolver = TruthTable.resolverRecord(facts.op, resolution, facts.required, facts.needed)
+    const facts = Facts.complete(staticFacts, resolution, hierarchy)
+    const records = TruthTable.stepRecords(facts, resolution, "matrix")
 
-    // 5. (b) preflight
-    const decision = decide(facts.op, resolution, { payload: facts.features })
-    const preflightSet = decision.failures.map((failure) => tagOf(facts.op, failure))
-    const [first] = decision.failures
-    const cause = new PreflightDecision({ route: "/channels/{channel.id}/messages", basis: "gateway-state" })
-    const preflight: TruthTable.Row["preflight"] = first === undefined ? "pass" : TruthTable.recordError(toError(facts.op, first, cause))
-
-    // 8. the oracle (read during the wait)
+    // 8. the oracle (read during the wait), restricted to the required flags
     const oracleValue = settled.oracle
     const oracle: TruthTable.Row["oracle"] =
       oracleValue._tag === "Unavailable"
         ? "unavailable"
-        : { missing: Flags.sortFlags(facts.required.filter((flag) => !Flags.has(Flags.fromBits(oracleValue.permissions), flag))) }
-    if (settled.oracle._tag === "Unavailable") context.oracleSeen.unavailable = true
+        : oracleValue._tag === "NotApplicable"
+          ? "not-applicable"
+          : { missing: Flags.sortFlags(facts.required.filter((flag) => !Flags.has(Flags.fromBits(oracleValue.permissions), flag))) }
+    if (oracleValue._tag === "Unavailable") context.oracleSeen.unavailable = true
 
-    // 6. (c) the raw call, with Safety's live check for @everyone
-    if (payload === "mention-everyone") {
-      const allowed = settled.oracle._tag === "Permissions" ? Flags.fromBits(settled.oracle.permissions) : undefined
+    // 6. (c) the raw call, after Safety's live checks: @everyone only while the oracle shows the subject
+    // cannot ping everyone, and a kick or ban only with the guard's permit from harness-side reads (§5.6)
+    if (operation._tag === "send" && operation.payload === "mention-everyone") {
+      const allowed = oracleValue._tag === "Permissions" ? Flags.fromBits(oracleValue.permissions) : undefined
       if (allowed !== undefined && (Flags.has(allowed, "MentionEveryone") || Flags.has(allowed, "Administrator"))) {
         return yield* Effect.die(new Error(`Safety: ${scenario.id} would mention @everyone while the oracle shows the subject may ping everyone`))
       }
     }
-    const wire = SendCatalog.wirePayload(payload, { replyTo, stickerId: context.stickerId })
-    const call = subjectRaw.createMessage(channelId, wire.request)
-    const answer = yield* send("/channels/{channel.id}/messages", "POST", wire.files.length > 0 ? subjectRaw.withFiles(wire.files)(call) : call, Duration.seconds(30)).pipe(
-      Effect.catch(infrastructure(`${scenario.id}: the raw call`))
-    )
-    const raw =
-      answer._tag === "Ok"
-        ? Outcome.succeeded(payload, yield* Schema.decodeUnknownEffect(Outcome.CreatedMessage)(answer.body).pipe(Effect.orDie))
-        : Outcome.rejected(answer.response)
-    const created = answer._tag === "Ok" ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.Struct({ id: MessageId }))(answer.body)) : undefined
-
+    if (operation._tag === "member" && (operation.action === "kick" || operation.action === "ban")) {
+      const roles = yield* rest.listGuildRoles(ids.guildId).pipe(labStep("kick/ban: list roles"), Effect.flatMap(Wire.decode(Schema.Array(Wire.Role), "listGuildRoles")))
+      const member = (user: string) => rest.getGuildMember(ids.guildId, user).pipe(labStep("kick/ban: get a member"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
+      yield* guard.permitKickOrBan(operation.action, { guildId: ids.guildId, roles, subject: yield* member(ids.subjectUserId), target: yield* member(ids.targetUserId) })
+    }
+    const forumTag =
+      operation._tag === "createPost" && operation.tagged
+        ? (yield* rest.getChannel(channelId).pipe(labStep("the forum's tags"), Effect.flatMap(Wire.decode(TagsOf, "getChannel")))).available_tags?.find((tag) => tag.name === "lab-tag")?.id
+        : undefined
+    const assigned = Materialize.assignedRoleOf(setup)
+    const called = yield* Drivers.rawCall(operation, {
+      ids,
+      state,
+      channelId,
+      subjectMessage: own.subjectMessage,
+      harnessMessage: posted.harnessMessage,
+      secondHarnessMessage: posted.secondHarnessMessage,
+      stickerId: context.stickerId,
+      emojiId: context.emojiId,
+      forumTag,
+      roleId: assigned === undefined ? undefined : ids.roles.get(assigned),
+      now
+    }).pipe(Effect.catch(infrastructure(`${scenario.id}: the raw call`)))
+    created = called.created
+    if (created !== undefined && called.answer._tag === "Ok") yield* guard.admitChannel({ id: created, name: LabIds.createdThreadName })
+    const raw = yield* Drivers.outcomeOf(scenario, called)
     yield* lap("steps")
 
     // 9. cleanup
     yield* cleanup
     yield* lap("cleanup")
+    const message = operation._tag === "send" || operation._tag === "createPost" || operation._tag === "createThread" ? Drivers.createdMessageOf(called) : undefined
     yield* context.log(
-      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${created === undefined ? "" : ` message ${created.id}`}${replyTo === undefined ? "" : ` fixture ${replyTo}`}; preflight ${preflightSet.join(",") || "pass"}; masks ${resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}`
+      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${message === undefined ? "" : ` created ${message}`}; preflight ${records.preflightSet.join(",") || "pass"}; masks ${records.resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}`
     )
-    const row: Omit<TruthTable.Row, "agreement"> = { ...base, resolver, preflight, preflightSet, raw, oracle }
+    const row: Omit<TruthTable.Row, "agreement"> = { ...base, resolver: records.resolver, preflight: records.preflight, preflightSet: records.preflightSet, raw, oracle }
     return { ...row, agreement: agreement(row, facts) }
   })
+
+const lookupId = (ids: Materialize.Ids, name: Materialize.LabName): Effect.Effect<ChannelId> => {
+  const id = ids.channels.get(name)
+  return id === undefined ? Effect.die(new Error(`no ID for ${name}`)) : Effect.succeed(id)
+}
 
 /** Runs the matrix once over `scenarios` (the lab reset and provisioned first, and reset after). */
 export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenario>, log: (line: string) => Effect.Effect<void, PlatformError>) =>
@@ -309,7 +385,7 @@ export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenari
     const everyone = roles.find((role) => role.id === context.guildId)
     const everyoneBaseline = everyone === undefined ? [] : Flags.toSortedNames(Flags.fromBits(BigInt(everyone.permissions)))
 
-    const runContext: Context = { ids, stickerId: state.sticker, log, oracleSeen: { unavailable: false }, dirty: new Set() }
+    const runContext: Context = { ids, stickerId: state.sticker, emojiId: state.emoji, log, oracleSeen: { unavailable: false }, dirty: new Set() }
     const ordered = order(scenarios)
     const rows: Record<string, TruthTable.Row> = {}
     const pacing = yield* Pacing
@@ -331,6 +407,17 @@ export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenari
           `[${index + 1}/${ordered.length}] ${scenario.id}: ${row.raw.class}${row.agreement === "agree" ? "" : ` MISMATCH ${row.agreement}`} (${after - before} ms, eta ${eta} s${limited.length > 0 ? `, 429: ${limited.join(", ")}` : ""})`
         )
       )
+    }
+    // flip controls are judged against their originals once both have run (§5.9)
+    for (const scenario of ordered) {
+      const original = scenario.flipOf === undefined ? undefined : rows[scenario.flipOf]
+      const flip = rows[scenario.id]
+      if (scenario.flipOf === undefined || flip === undefined) continue
+      if (original === undefined) {
+        yield* log(`  ${scenario.id}: its original ${scenario.flipOf} did not run, so the flip control was not judged`)
+        continue
+      }
+      rows[scenario.id] = { ...flip, agreement: flipAgreement(original, flip) }
     }
     const closing = yield* Reset.run(context)
     yield* Effect.sync(() => console.log(`closing reset: ${Reset.summary(closing)}`))

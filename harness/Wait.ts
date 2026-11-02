@@ -6,7 +6,7 @@
  * - the harness's read-back equals the desired state (`Converge.readbackProblems`);
  * - the subject's guild state equals the desired state's subject-observable projection
  *   (`Materialize.projectionProblems`), watched through `GuildState.changes`, so no request is made;
- * - two oracle reads 300 ms apart are identical (when the oracle is available);
+ * - two oracle reads 300 ms apart are identical (when the oracle is available and the operation has a channel);
  * - a further 250 ms has passed.
  */
 import { Clock, Duration, Effect, Option, Schema, Stream } from "effect"
@@ -24,11 +24,14 @@ export const cap = Duration.seconds(15)
 /** The setup did not settle within the cap: an infrastructure abort, never a row. */
 export class SetupTimeout extends Schema.TaggedError<SetupTimeout>()("SetupTimeout", { scenario: Schema.String, detail: Schema.String }) {}
 
-/** An oracle read as the wait compares it: the permissions, or the route's absence. */
-export type OracleValue = { readonly _tag: "Permissions"; readonly permissions: bigint } | { readonly _tag: "Unavailable" }
+/**
+ * An oracle read as the wait compares it: the permissions, the route's absence, or no channel to read (member
+ * operations resolve at guild level).
+ */
+export type OracleValue = { readonly _tag: "Permissions"; readonly permissions: bigint } | { readonly _tag: "Unavailable" } | { readonly _tag: "NotApplicable" }
 
 const sameOracle = (a: OracleValue, b: OracleValue): boolean =>
-  a._tag === "Unavailable" ? b._tag === "Unavailable" : b._tag === "Permissions" && a.permissions === b.permissions
+  a._tag === "Permissions" ? b._tag === "Permissions" && a.permissions === b.permissions : a._tag === b._tag
 
 /** What the wait settled on: the oracle's stable value for the scenario channel. */
 export interface Settled {

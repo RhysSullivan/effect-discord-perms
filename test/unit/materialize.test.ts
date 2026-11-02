@@ -33,7 +33,7 @@ describe("the desired state", () => {
     expect(state.rolePermissions.get("lab-grant")).toBe(bits("ViewChannel", "SendMessagesInThreads"))
     expect(state.subjectRoles).toEqual(["lab-grant", "lab-deny"])
     expect(state.subjectTimedOut).toBe(true)
-    expect(state.thread).toEqual({ name: "lab-public-thread", archived: false, locked: true, subjectMember: false })
+    expect(state.thread).toEqual({ name: "lab-public-thread", creator: "harness", archived: false, locked: true, subjectMember: false })
     expect(state.overwrites.get("lab-text")).toEqual([
       { id: roleIdOf("lab-target"), type: 0, allow: LabIds.targetOverwriteAllow, deny: 0n },
       { id: roleIdOf("lab-deny"), type: 0, allow: 0n, deny: bits("SendMessagesInThreads") }
@@ -157,6 +157,7 @@ describe("the harness read-back", () => {
       ...LabIds.roleSpecs.map((spec) => ({ id: roleIdOf(spec.name), name: spec.name, permissions: String(state.rolePermissions.get(spec.name) ?? 0n), position: 1, managed: false, mentionable: spec.mentionable }))
     ],
     subject: { user: { id: fakeIds.subjectUserId }, roles: [roleIdOf("lab-grant")], communication_disabled_until: null },
+    target: { user: { id: fakeIds.targetUserId }, roles: [roleIdOf("lab-target"), roleIdOf("lab-unmentionable")], communication_disabled_until: null },
     channels: [...state.overwrites].map(([name, overwrites]): Wire.Channel => ({
       id: channelIdOf(name),
       type: 0,
@@ -176,6 +177,41 @@ describe("the harness read-back", () => {
     expect(Converge.readbackProblems(state, fakeIds, { ...view, roles: skewed }, now)).toEqual([`lab-grant permissions 0, not ${bits("ViewChannel")}`])
     const everyone = view.roles.map((role) => (role.id === RoleId.make(labGuildId) ? { ...role, permissions: "1024" } : role))
     expect(Converge.readbackProblems(state, fakeIds, { ...view, roles: everyone }, now)).toEqual(["@everyone permissions 1024, not 0"])
+  })
+
+  it("checks the target's lab roles, nickname and timeout", () => {
+    const ranked = Materialize.desired(new Setup({ channel: "text", grants: [], removals: [], memberState: "normal", targetRank: "above", targetAdmin: true, fixtures: [] }), fakeIds)
+    expect(ranked.subjectRoles).toEqual(["lab-mid"])
+    expect(ranked.targetRoles).toEqual(["lab-high", "lab-admin", "lab-target", "lab-unmentionable"])
+    const rankedView: Converge.LabView = {
+      ...view,
+      roles: view.roles.map((role) => ({ ...role, permissions: String(role.id === RoleId.make(labGuildId) ? 0n : (ranked.rolePermissions.get(LabIds.roleSpecs.find((spec) => roleIdOf(spec.name) === role.id)?.name ?? "lab-high") ?? 0n)) })),
+      subject: { ...view.subject, roles: [roleIdOf("lab-mid")] },
+      channels: view.channels.map((channel) => (channel.name === "lab-text" ? { ...channel, permission_overwrites: [{ id: roleIdOf("lab-target"), type: 0, allow: String(LabIds.targetOverwriteAllow), deny: "0" }] } : channel))
+    }
+    const held = (...names: ReadonlyArray<LabIds.RoleName>) => ({ ...rankedView, target: { ...rankedView.target, roles: names.map(roleIdOf) } })
+    expect(Converge.readbackProblems(ranked, fakeIds, held("lab-high", "lab-admin", "lab-target", "lab-unmentionable"), now)).toEqual([])
+    const sorted = (...names: ReadonlyArray<LabIds.RoleName>) => names.map(roleIdOf).sort().join(",")
+    expect(Converge.readbackProblems(ranked, fakeIds, held("lab-target", "lab-unmentionable"), now)).toEqual([
+      `target roles ${sorted("lab-target", "lab-unmentionable")}, not ${sorted("lab-high", "lab-admin", "lab-target", "lab-unmentionable")}`
+    ])
+    expect(Converge.readbackProblems(state, fakeIds, { ...view, target: { ...view.target, nick: "lab-nick" } }, now)).toEqual(["target nickname lab-nick"])
+    expect(Converge.readbackProblems(state, fakeIds, { ...view, target: { ...view.target, communication_disabled_until: new Date(now + 60_000).toISOString() } }, now)).toHaveLength(1)
+    // a role removal's subject holds the role first; its rank follows from it
+    const removal = new Setup({ channel: "text", grants: [], removals: [], memberState: "normal", targetRank: "below", roleRank: "below", fixtures: ["target-role"] })
+    expect(Materialize.desired(removal, fakeIds).targetRoles).toEqual(["lab-low", "lab-target", "lab-unmentionable"])
+    expect(Materialize.assignedRoleOf(removal)).toBe("lab-low")
+  })
+
+  it("puts the scenario channel's slowmode and required tag in place, and everything else back to baseline", () => {
+    const tagged = Materialize.desired(new Setup({ channel: "forum", channelSettings: { nameVariant: "a", slowmode: 0, requireTag: true }, grants: [], removals: [], memberState: "normal", fixtures: [] }), fakeIds)
+    const forum: Wire.Channel = { id: channelIdOf("lab-forum"), type: 15, name: "lab-forum", flags: 0, rate_limit_per_user: 0 }
+    expect(Converge.settingsPatch(tagged, fakeIds, forum)).toEqual({ flags: LabIds.requireTagFlag })
+    expect(Converge.settingsPatch(tagged, fakeIds, { ...forum, flags: LabIds.requireTagFlag })).toBeUndefined()
+    // another channel goes back to baseline: no slowmode, no required tag
+    const text: Wire.Channel = { id: channelIdOf("lab-text"), type: 0, name: "lab-text", rate_limit_per_user: 5 }
+    expect(Converge.settingsPatch(tagged, fakeIds, text)).toEqual({ rate_limit_per_user: 0 })
+    expect(Converge.settingsPatch(state, fakeIds, { ...forum, flags: LabIds.requireTagFlag | 2 })).toEqual({ flags: 2 })
   })
 
   it("checks the scenario thread's state and the subject's membership of it", () => {

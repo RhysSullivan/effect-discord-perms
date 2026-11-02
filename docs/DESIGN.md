@@ -202,6 +202,9 @@ harness/
   Provision.ts                   idempotent lab channels, threads, roles, sticker, positions (by stored ID)
   Reset.ts                       baseline and leftover cleanup incl. archived threads; second reset makes zero writes
   Materialize.ts                 pure: symbolic Setup -> desired state, and its subject-observable projection
+  Predict.ts                     pure: steps (a) and (b) from the setup alone (the replay's rebuild; flip selection) (M4)
+  Fixtures.ts                    the subject's own fixtures before Converge (temporary access), the harness's after (M4)
+  Drivers.ts                     step (c) per operation: the raw SubjectRaw call, its outcome, what it created (M4)
   Converge.ts                    applies the minimal diff from current to desired state, in a fixed order
   Wait.ts                        consistency waits: read-back, projected subject GuildState, stable oracle
   DryRun.ts                      Context.Reference read by the shared client: record and answer canned, never send
@@ -218,6 +221,10 @@ harness/
   scenario/
     Dsl.ts *                     Setup, Operation, Observation, Scenario
     Pairwise.ts *                deterministic greedy pairwise selection with per-family validity predicates
+    Facts.ts                     pure: a scenario's operation-table row per channel kind, scope (channel or guild) and
+                                 preflight arguments (payload, reaction, creator, hierarchy) (M4)
+    catalog/common.ts            the catalogs' shared helpers (channel values, grants without the missing flag) (M4)
+    catalog/index.ts             the whole catalog: every family and the flip controls (M4)
     catalog/send.ts              send family (pairwise) + targeted send hypotheses
     catalog/messages.ts          edit/delete/crosspost/bulkDelete family
     catalog/reactions.ts         react family
@@ -549,7 +556,8 @@ export const Operations = {
   "voice.send":   { flags: ["ViewChannel", "Connect", "SendMessages"], variant: "reply", tags: [/* as channel.send */] },
   "message.pin.thread": { flags: ["ViewChannel", "PinMessages"], variant: "default",
     tags: ["PermissionDeniedUnattributed", "CommunicationDisabled", "MaximumPinsReached", "ThreadArchived", "UnknownMessage"] },
-  // ... 40 rows in total ([sd:src/ops.ts])
+  // ... 48 rows in total (40 in [sd:src/ops.ts]; M4 added thread.delete, thread.unarchive and the
+  //     .thread/.voice variants of edit, delete and bulk delete from live findings)
 } as const satisfies Record<string, OpSpec>
 export type OpFlags = { readonly [Op in OpName]: Ops[Op]["flags"][number] }
 export type OpTags = { readonly [Op in OpName]: TagClasses[Ops[Op]["tags"][number]] }      // tag name -> class
@@ -1215,10 +1223,14 @@ the first, in this order (`src/permissions/Order.ts`):
 
 1. `ViewChannel`. This includes obfuscated channels, private threads the bot
    cannot see (§4.6), and in voice and stage channels `Connect` (H-015,
-   H-152; the `voice.*` rows).
-2. `CommunicationDisabled`, when the timeout mask applies (H-020).
-3. Access flags of the action: `SendMessages`/`SendMessagesInThreads` for send,
-   or `ReadMessageHistory` (ForReaction) for react.
+   H-152; the `voice.*` rows), then a row's `viewLevel` flags: M4 live,
+   pinning and crossposting a message without ReadMessageHistory answer 50001
+   even under a timeout, so Discord checks it as access to the message.
+2. `CommunicationDisabled`, when the timeout mask applies (H-020), or always for
+   a row the timeout blocks itself (`blockedByTimeout`: an own edit).
+3. Access flags of the action: `SendMessages`/`SendMessagesInThreads` for send.
+   (Revision 2 put `ReadMessageHistory` (ForReaction) here for react; M4 live
+   showed a reaction needs no ReadMessageHistory, so the react rows dropped it.)
 4. The action's own flags in table order, for example `ManageMessages`,
    `PinMessages`, `AddReactions`, `ManageThreads`, `CreatePublicThreads`,
    `ManageRoles`.
@@ -1431,7 +1443,9 @@ Resolution = { base: PermissionSet, afterOverwrites: PermissionSet, beforeTimeou
 ```
 
 `inputFromSnapshot(snapshot, guild, channel, now)` builds the input from the
-guild state, or says a refresh is needed first (a channel, a thread's parent or
+guild state, or says a refresh is needed first (M4: `guildInputFromSnapshot`
+builds the guild-level input of the member operations, `ChannelInput` `Guild`,
+which applies no overwrites and no implicit masks, only the timeout mask) (a channel, a thread's parent or
 the bot member the state does not hold). `unseen` (M3) is the mask for a channel
 a refresh could not fetch, or a thread whose parent is unknown (§3.1): the bot
 knows nothing of its overwrites.
@@ -1482,17 +1496,20 @@ hypotheses the matrix confirms:
 | `channel.send`, `voice.send`, `thread.send` | text/announcement; voice/stage; threads | View; Connect (voice); Send or SMIT; `requiredFlags(payload)` | timeout; locked thread |
 | `dm.send` | dm | none | |
 | `forum.createPost` | forum, media | View, Send (H-031); payload | timeout; tag required |
-| `message.edit.*` (own) | message kinds | View | timeout; archived/locked thread |
-| `message.deleteOwn` / `deleteForeign` | message kinds | View / View, ManageMessages | 2FA (foreign) |
-| `message.crosspostOwn` / `Foreign` | announcement | View, Send / + ManageMessages | already crossposted |
-| `message.react.*` | message kinds | View, (Connect), ReadMessageHistory (ForReaction), AddReactions **conditional**, + UseExternalEmojis if external | timeout; archived thread |
-| `message.pin.*`, `message.unpin.*` | message kinds | View, (Connect), PinMessages (H-050) | archived thread |
-| `channel.pins`, `voice.pins` | message kinds | View, (Connect) (RMH missing means degraded) | |
-| `channel.bulkDelete` | message kinds | View, ManageMessages | 2FA; age; count |
+| `message.edit.channel` / `.thread` / `.voice` (own) | message kinds | View, (Connect in voice, M4) | timeout (`blockedByTimeout`); archived thread (a locked one allows it, M4) |
+| `message.deleteOwn`, `deleteForeign` (each with `.thread` and `.voice`, M4) | message kinds | View, (Connect) / View, (Connect), ManageMessages | 2FA (foreign); archived thread (M4) |
+| `message.crosspostOwn` / `Foreign` | announcement | View, ReadMessageHistory (`viewLevel`, M4), Send / + ManageMessages | already crossposted |
+| `message.react.*` | message kinds | View, (Connect), AddReactions **conditional**, + UseExternalEmojis if external (no ReadMessageHistory, M4) | timeout; archived thread |
+| `message.pin.*` | message kinds | View, (Connect), ReadMessageHistory (`viewLevel`, M4), PinMessages (H-050) | archived thread |
+| `message.unpin.*` | message kinds | View, (Connect), PinMessages | archived thread |
+| `channel.pins`, `voice.pins` | message kinds | View, (Connect) (RMH missing means degraded: the row's `degrades`) | |
+| `channel.bulkDelete`, `voice.bulkDelete` (M4) | message kinds | View, (Connect), ManageMessages | 2FA; age; count |
 | `channel.createThread.public` / `.private` | text (both), announcement (public) | View, CreatePublicThreads / CreatePrivateThreads | timeout; already exists |
-| `thread.join`, `thread.leave` | threads | View | archived |
-| `thread.addMember` | threads | View, SMIT | archived |
-| `thread.setArchived`, `thread.setLocked`, `thread.edit` | threads | View, ManageThreads (creator exemption per H-038/H-039 for archive) | locked |
+| `thread.join` / `thread.leave` | threads | View / nothing (M4: leaving needs no View) | archived (leave only; joining an archived thread succeeds, M4) |
+| `thread.addMember` | threads | View, SMIT | (an archived thread accepts it, M4) |
+| `thread.setArchived`, `thread.setLocked`, `thread.edit` | threads | View, SMIT (M4), ManageThreads (creator exemption for archive, H-045) | locked |
+| `thread.unarchive` (M4) | threads | View, SMIT | locked |
+| `thread.delete` (M4) | threads | View, ManageThreads (creator exemption, M4) | 2FA |
 | `channel.edit`, `voice.edit` | non-threads | View, (Connect), ManageChannels | 2FA |
 | `member.*` | n/a | ManageRoles / ManageNicknames / ModerateMembers / KickMembers / BanMembers | role or target hierarchy; managed role; 2FA; target admin (timeout) |
 | `permissions.require` | guild channels | View + the checked flags | timeout |
@@ -2074,8 +2091,13 @@ The registry (`test/rules.ts`). IDs use the `R-` prefix; "raw" means through
     flag (harness's own computation from the role and overwrite reads), or the
     target's highest role, including both bots' managed roles, is not below the
     subject's. Otherwise the guard refuses. "Expected to fail" never comes from
-    the resolver under test. Until the members family brings that predicate
-    (M4), every kick and ban route is refused;
+    the resolver under test. (M4: the runner passes the harness's reads of the
+    roles and both members to `LabGuard.permitKickOrBan`, which checks
+    `kickBanPredictedToFail` itself and issues a one-shot permit for exactly the
+    target's kick or ban route; any other kick or ban, a second use of a permit,
+    or a bulk ban is refused);
+  - (M4) a channel PATCH that renames a channel keeps a `lab`/`lab-*` name, and
+    a new guild emoji has a `lab_` name (emoji are never edited or deleted);
   - nothing is ever sent to a DM channel with a human, and nothing leaves the
     guild, edits the guild itself, global commands, webhooks or invites.
 - **Safety** (`scenario/Safety.ts`) is a pure check that runs offline over the
@@ -2185,7 +2207,8 @@ managed role in Perms Lab) and stage pins (400 50019, M2).
   AddReactions) on every lab channel, so `@everyone` overwrite denies never
   remove the target's ability to post fixtures (H-007). An offline check asserts
   that no row's removals affect the target.
-- A guild sticker.
+- A guild sticker, and (M4) a guild emoji `lab_emoji` for reactions with a
+  guild emoji (`.lab-state.json` `emoji`).
 
 ### 5.8 Scenario DSL (`[sd:src/verify.ts]`)
 
@@ -2199,9 +2222,13 @@ export class Setup extends Schema.Class<Setup>("Setup")({
   memberState: Schema.Literals(["normal", "timed-out"]),
   targetRank: Schema.optionalKey(Rank), roleRank: Schema.optionalKey(Rank), targetAdmin: Schema.optionalKey(Schema.Boolean),
   channelSettings: Schema.optionalKey(Schema.Struct({ nameVariant: Schema.Literals(["a", "b"]), slowmode: Schema.Int, requireTag: Schema.Boolean })),
-  fixtures: Schema.Array(Schema.Literals(["subject-message", "target-message", "harness-message", "existing-reaction",
-    "pinned-subject-message", "guild-sticker", "subject-thread", "crossposted-subject-message"]))
+  fixtures: Schema.Array(Schema.Literals(["subject-message", "harness-message", "second-harness-message", "existing-reaction",
+    "pinned-harness-message", "guild-sticker", "subject-thread", "target-role"]))
 }) {}
+// M4: the fixtures the catalogs use. A foreign message, a reaction and a pin are the harness's (it can post,
+// react and pin in voice text chat, where the target cannot without Connect); `subject-thread` makes the
+// scenario thread one the subject created (`lab-subject-<kind>`); `target-role` gives the target the role a
+// removal takes away. M3's "target-message" and "crossposted-subject-message" had no row and were dropped.
 interface Scenario {
   readonly id: string                         // "<family>/<channel>/<dims...>", stable, unique
   readonly hypotheses: ReadonlyArray<`H-${number}`>
@@ -2292,11 +2319,11 @@ Validity predicates (in `[sd:pairwise.ts]`):
   `missing=none` means `removal=absent`; `connect` only for voice and stage.
   MentionEveryone is never granted in an @everyone row (Safety).
 - **react, pins, channelEdit**: `missing=none` means `removal=absent`;
-  `connect` only for voice (and stage). Open for M4: in M2 the harness
-  (Administrator) pinning its own message in `lab-stage`'s chat got 400 50019
-  "This message cannot be pinned in this channel", so stage pin rows either
-  expect 50019 or leave the pins channel dimension, with the reason in
-  `LOG.md`. The react row
+  `connect` only for voice (and stage). In M2 the harness (Administrator)
+  pinning its own message in `lab-stage`'s chat got 400 50019 "This message
+  cannot be pinned in this channel", so stage stays out of the pins channel
+  dimension (it already was: text, announcement, voice and two threads), and a
+  harness pin Discord refuses records `rejected-by-discord` (M4). The react row
   `unicode-existing × add-reactions missing` is kept: it tests the conditional
   AddReactions rule and is expected to succeed.
 - **createThread**: private only under text; private under announcement is a
@@ -2309,7 +2336,12 @@ Validity predicates (in `[sd:pairwise.ts]`):
   `lab-` names so no restore is needed (H-162).
 - **messages**: crosspost only in announcement; own edit and delete have no op
   flag.
-- **members**: `roleRank` only for add/remove role. Kick and ban rows are
+- **members**: `roleRank` only for add/remove role. (M4) The lab has one role per
+  position, so a rank and a role of the same rank are the same role: an
+  add-role row never gives the target a role it already holds for its rank
+  (`roleRank = targetRank` above `below`), and a remove-role row's target ranks
+  at least as high as the role it holds to lose (22 rows, one more than the
+  design's 21). Kick and ban rows are
   valid only where the docs model predicts failure (`kickBanMustFail`: flag
   missing, or the target not below), never with `missing=none` and the target
   below. A timeout is not used as a reason, since whether timeouts bind bots is
@@ -2345,10 +2377,17 @@ plus only F granted; it must succeed, or fail with the next-ranked failure of
 the row's `preflightSet`. A 50013 never names a flag, so this is the only
 check that the blamed flag is the right one when the oracle is unavailable.
 Kick and ban flips are not run (they could succeed): `forbidden-action`.
+(M4) One sibling per (operation row, first missing flag): the first family row
+in ID order whose prediction from the setup alone (`harness/Predict.ts`, which
+the replay holds to the live records) has F first and is not blind. The
+sibling drops F from every removal and adds it to the original's first grant
+that is not an administrator source (or a new `lab-grant` grant), and is
+judged after the run against its original's live row (`Agreement.flipAgreement`).
 
 The expected total is 234 pairwise rows, about 110 targeted rows, about 45
 flip rows, about 95 rule rows and about 16 intent sessions, roughly **500
-scenarios**.
+scenarios**. (M4 has 236 pairwise rows, 58 targeted rows and 58 flip controls,
+352 scenarios in all; the rule rows and intent sessions come in M6-M8.)
 
 ### 5.10 Executing one scenario
 
@@ -2363,7 +2402,13 @@ reproducible.
    channel has been at baseline since the opening reset, because only Converge
    and cleanup write overwrites. (M3 live: the guild channel list route answered
    429 several times a run when read twice per scenario.)
-2. **Fixtures.** The target posts, the harness archives or locks, and so on.
+2. **Fixtures.** (M4) The subject's own objects (`subject-message`, a
+   `subject-thread`) are made before Converge, with temporary access: the
+   harness lifts a leftover timeout and gives the subject a member overwrite on
+   the overwrite channel, and Converge then replaces it with the desired state.
+   After Converge the harness posts its messages, reacts and pins (a pin Discord
+   refuses makes the row `rejected-by-discord`), and then sets the thread's
+   archived and locked state (`harness/Fixtures.ts`).
 3. **Consistency wait** (`Wait.ts`, G9). All of these must hold, with a 15 s
    cap. On timeout the run aborts with `setup-timeout`, an infrastructure
    failure that is never recorded as a mismatch.
@@ -2376,11 +2421,17 @@ reproducible.
    refreshed first through `GuildState.refresh`, so the subject's view of it is a
    function of the setup, fetched when it can see it and unseen when it cannot,
    not of which events earlier scenarios delivered; the offline replay can then
-   rebuild it from the setup): record `required`,
-   `missing`, `missingBeforeMasks`, `masks` and `level` (`view` if the first
-   failure is View-level: View, obfuscated, private-thread, or Connect in
-   voice; `action` if View is present and an error-mode flag is missing;
-   `none` otherwise).
+   rebuild it from the setup). A member operation (M4) resolves at guild level
+   (`ChannelInput` `Guild`: the base permissions and the timeout mask), and the
+   subject reads the target member through `SubjectRaw`, as the library's
+   `Members.get` will, for the hierarchy. Record `required`,
+   `missing`, `missingBeforeMasks`, `masks` and `level` (`view` if the bot cannot
+   see the channel or the target: a blind mask, or no View, no Connect or no
+   `viewLevel` flag on a row that requires it; `action` if it can and preflight
+   found any failure, the timeout, the hierarchy and a thread's state included
+   (M4: M3 counted only missing error-mode flags, so a locked thread was
+   `none`); `none` otherwise). Which code a level answers is
+   `Observed.expectedCode` (§5.13).
 5. **(b) The real public operation** (`channel.send(payload)` and so on) in
    `"enforce"` mode on the live subject GuildState, with `DryRun` set: the
    shared `HttpClient` records the request and answers a canned 2xx body from
@@ -2423,13 +2474,19 @@ outcome: the request may have been applied (§4.10).
 - `level-vs-raw` (H-080 as a checked correspondence): raw 50001 while the
   resolver's `level` is not `view`, or raw 50013 while it is not `action`. If
   the matrix refutes H-080, `Observed.codeForLevel` records the observed mapping
-  and the check uses it;
+  and the check uses it (M3, M4: it did, per operation; `Observed.viewCodeFailures`
+  lists the first failures Discord answers with 50001 at the `action` level,
+  for example a missing SendMessagesInThreads or a locked thread on a thread
+  send, and `Observed.expectedCode` combines the two);
 - `resolver-vs-raw`: the resolver's `missing` is empty for error-mode flags
-  while raw failed with 50013/50001, or a degraded list differs from the
-  resolver's missing degrade-mode flags;
+  while raw failed with 50013/50001 and preflight found no state failure (the
+  timeout, the hierarchy, a thread's state) to explain it, or a degraded list
+  differs from the resolver's missing degrade-mode flags;
 - `recompute-vs-preflight`: (d) is not equal to (b), **tag and categories**;
 - `resolver-vs-oracle`: the oracle's `missing` is not equal to
-  `missingBeforeMasks` when the oracle is available. On rows where the subject
+  `missingBeforeMasks` (with the timeout mask applied, because the oracle
+  applies it, H-241, `Observed.oracleAppliesTimeout`) when the oracle is
+  available. On rows where the subject
   sees the channel as obfuscated or unseen, only ViewChannel is compared (the
   subject knows none of its overwrites); an unseen private thread the subject
   does not belong to is not compared at all, because the oracle's
