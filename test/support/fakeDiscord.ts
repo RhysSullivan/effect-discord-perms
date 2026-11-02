@@ -11,7 +11,9 @@ import * as HttpClientError from "effect/http/HttpClientError"
 import type * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as UrlParams from "effect/http/UrlParams"
+import { ApplicationFlags } from "discord-api-types/v10"
 import { Credentials } from "../../src/config/Credentials.ts"
+import { makeFakeGateway } from "./fakeGateway.ts"
 import { ApplicationId, GuildId } from "../../src/Snowflake.ts"
 
 /** One request as the base client saw it. */
@@ -109,3 +111,35 @@ const answerWith = (request: HttpClientRequest.HttpClientRequest, answer: Script
         return Effect.never
     }
 }
+
+/** The subject's user ID in the fakes. */
+export const fakeSubjectUserId = "200000000000000001"
+
+/**
+ * The answers the subject's bot build needs to start (§4.4 checks 1-3, with GuildMembers and MessageContent
+ * enabled; dfx's `/gateway/bot`, which it tolerates failing), or `undefined` for any other request.
+ */
+export const subjectStartupAnswer = (request: HttpClientRequest.HttpClientRequest, subjectUserId: string = fakeSubjectUserId): Answer | undefined => {
+  if (Option.getOrUndefined(Headers.get(request.headers, "authorization")) !== "Bot fake-subject-token") return undefined
+  const path = new URL(request.url).pathname.replace(/^\/api\/v\d+/, "")
+  if (path === "/users/@me") return { status: 200, body: { id: subjectUserId, username: "Perms Subject" } }
+  if (path === "/applications/@me") return { status: 200, body: { id: "100000000000000002", flags: ApplicationFlags.GatewayGuildMembers | ApplicationFlags.GatewayMessageContent } }
+  if (path === `/guilds/${fakeGuildId}/members/${subjectUserId}`) return { status: 200, body: { user: { id: subjectUserId }, roles: [] } }
+  if (path === "/gateway/bot") return { status: 404, body: { message: "404: Not Found", code: 0 } }
+  return undefined
+}
+
+/** A GUILD_CREATE for the fake guild with only `@everyone` and the subject's member. */
+export const fakeGuildCreate = (subjectUserId: string = fakeSubjectUserId) => ({
+  id: fakeGuildId,
+  name: "Perms Lab",
+  owner_id: "200000000000000099",
+  roles: [{ id: fakeGuildId, name: "@everyone", permissions: "0", position: 0, managed: false, mentionable: false }],
+  channels: [],
+  threads: [],
+  members: [{ user: { id: subjectUserId }, roles: [], communication_disabled_until: null }]
+})
+
+/** A fake gateway where the subject's token identifies as `subjectUserId` and the fake guild arrives. */
+export const fakeSubjectGateway = (subjectUserId: string = fakeSubjectUserId) =>
+  makeFakeGateway({ userFor: (token) => (token === "fake-subject-token" ? subjectUserId : undefined), guildsFor: () => [fakeGuildCreate(subjectUserId)] }, () => 0)

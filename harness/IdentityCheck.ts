@@ -10,13 +10,16 @@
  * - `getGuild(DISCORD_TEST_GUILD_ID)` is named "Perms Lab" and has `#rules` and `#mod-updates`;
  * - the harness's highest role is the highest role in the guild, so it can manage every lab role.
  *
- * The subject's READY `user.id` and the intents its codec sent need the subject's gateway, which arrives with
- * the library's bot layer (M3, codec M7); until then they are reported as not checked.
+ * - the subject's gateway READY named the same user as its `getMyUser()` (the subject is the library's bot build,
+ *   whose startup already ran checks 1-3 and waited for the lab guild's GUILD_CREATE).
+ *
+ * The intents the subject's codec sent in Identify need the codec (M7); until then that check is reported as
+ * not checked.
  *
  * On success the Lab guard is armed with the bots' user IDs and the protected channels, and writes may start.
  */
 import { Duration, Effect, Schema } from "effect"
-import { SubjectRaw } from "../src/bot/Internals.ts"
+import { BotRuntime } from "../src/bot/Bot.ts"
 import { missingPrivilegedIntents, restChecks, type StartupFailed, type StartupIdentity } from "../src/bot/Startup.ts"
 import { Credentials } from "../src/config/Credentials.ts"
 import type { ChannelId } from "../src/Snowflake.ts"
@@ -44,7 +47,7 @@ export interface IdentityReport {
   readonly protectedChannels: ReadonlyArray<{ readonly id: ChannelId; readonly name: string }>
   /** The harness's highest role, the top of the guild. */
   readonly harnessTopRole: Wire.Role
-  /** Checks that need the subject's gateway, which M2 does not have yet. */
+  /** Checks that need parts built in later milestones. */
   readonly notCheckedYet: ReadonlyArray<string>
 }
 
@@ -54,14 +57,22 @@ const fail = (check: string, detail: string) => Effect.fail(new LabCheckFailed({
 export const run: Effect.Effect<
   IdentityReport,
   StartupFailed | LabCheckFailed | LabRequestFailed,
-  HarnessRest | TargetRest | SubjectRaw | Credentials | LabGuard
+  HarnessRest | TargetRest | BotRuntime | Credentials | LabGuard
 > = Effect.gen(function* () {
   const credentials = yield* Credentials
   const harnessRest = yield* HarnessRest
   const options = { guildId: credentials.guildId, requestDeadline }
   const harness = yield* restChecks(harnessRest, { ...options, privilegedIntents: ["GuildMembers"] })
-  const subject = yield* restChecks(yield* SubjectRaw, { ...options, privilegedIntents: ["GuildMembers", "MessageContent"] })
   const target = yield* restChecks(yield* TargetRest, { ...options, privilegedIntents: [] })
+  // the subject's build ran checks 1-3 for its declared intents; the matrix also needs Message Content (M7)
+  const runtime = yield* BotRuntime
+  const subject = runtime.identity
+  const missing = missingPrivilegedIntents(subject.applicationFlags, ["GuildMembers", "MessageContent"])
+  if (missing.length > 0) return yield* fail("identity", `the subject application lacks the portal flag for ${missing.join(", ")}`)
+  const readyUser = (yield* runtime.guildState.snapshot).botUserId
+  if (readyUser !== subject.userId) {
+    return yield* fail("identity", `the subject gateway's READY named ${readyUser ?? "nobody"}, but its token belongs to ${subject.userId}`)
+  }
 
   for (const [name, found, expected] of [
     ["harness", harness, credentials.harness],
@@ -110,6 +121,6 @@ export const run: Effect.Effect<
     harnessHasMessageContent: missingPrivilegedIntents(harness.applicationFlags, ["MessageContent"]).length === 0,
     protectedChannels: protectedChannels.map((channel) => ({ id: channel.id, name: channel.name })),
     harnessTopRole: top,
-    notCheckedYet: ["subject READY user.id (needs the subject gateway, M3)", "intents sent in Identify (needs the codec, M7)"]
+    notCheckedYet: ["intents sent in Identify (needs the codec, M7)"]
   }
 })

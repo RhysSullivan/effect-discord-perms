@@ -8,19 +8,23 @@
  * - **Each identity's dfx stack is wrapped in `Layer.fresh`.** Without it Effect memoises `DiscordRESTLive` by
  *   reference and every identity would send the first token (G1: `auth=["Bot HARNESS","Bot HARNESS"]`). Each
  *   fresh stack leaves its `HttpClient` and `Credentials` requirements open, so both are the shared ones.
- * - `HarnessRest` and `TargetRest` are REST-only. `SubjectRaw` is REST-only too in M2; M3 builds it from the
- *   library's `BotInternals.layerWith`, in the same build as `BotRuntime` (§4.2).
+ * - `HarnessRest` and `TargetRest` are REST-only. The subject is the library's real bot build
+ *   (`BotInternals.layerWith`, §4.2): `BotRuntime` with its gateway and guild state, and `SubjectRaw`, the raw
+ *   dfx client of the same build, for the matrix's step (c). Its declared intents are `subjectBot`'s.
  *
- * `compose` is the single wiring. `live` passes it the Bun HTTP client and `Credentials.layer` (which takes the
- * live lock and reads `.env`); the identity test passes a recording fake client and fake credentials, and
- * nothing else differs.
+ * `compose` is the single wiring. `live` passes it the Bun HTTP client, Bun's WebSocket and `Credentials.layer`
+ * (which takes the live lock and reads `.env`); the identity tests pass a recording fake client, a fake gateway
+ * and fake credentials, and nothing else differs.
  */
-import { BunHttpClient } from "@effect/platform-bun"
+import { BunHttpClient, BunSocket } from "@effect/platform-bun"
 import { DiscordConfig, DiscordRESTMemoryLive } from "dfx"
 import { DiscordREST, type DiscordRestService } from "dfx/DiscordREST"
-import { Context, Effect, Layer } from "effect"
+import { Config, Context, Effect, Layer } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
-import { SubjectRaw } from "../src/bot/Internals.ts"
+import type * as Socket from "effect/socket/Socket"
+import { Bot, type BotRuntime } from "../src/bot/Bot.ts"
+import { BotInternals, type SubjectRaw } from "../src/bot/Internals.ts"
+import type { StartupFailed } from "../src/bot/Startup.ts"
 import { Credentials, type IdentityCredentials, type LabCredentials, layer as credentialsLayer } from "../src/config/Credentials.ts"
 import * as Lab from "./Lab.ts"
 import * as PacingModule from "./Pacing.ts"
@@ -59,30 +63,44 @@ const restIdentity = (pick: (credentials: LabCredentials) => IdentityCredentials
 const as = <I>(tag: Context.Service<I, DiscordRestService>, identity: Layer.Layer<DiscordREST, never, HttpClient.HttpClient | Credentials>) =>
   Layer.effect(tag, Effect.map(Effect.service(DiscordREST), (rest) => tag.of(rest))).pipe(Layer.provide(identity))
 
-/** The three REST identities, each in its own fresh stack. */
-export const identities: Layer.Layer<HarnessRest | TargetRest | SubjectRaw, never, HttpClient.HttpClient | Credentials> = Layer.mergeAll(
+/**
+ * The subject bot's declaration: Guilds for the guild state's events, and GuildMembers (a privileged intent the
+ * subject's application has) so member events about the target reach it too.
+ */
+export const subjectBot = Bot.make({ intents: ["Guilds", "GuildMembers"] })
+
+/** The subject: the library's bot build for the subject token in the lab guild (its own fresh build). */
+export const subject: Layer.Layer<BotRuntime | SubjectRaw, StartupFailed | Config.ConfigError, HttpClient.HttpClient | Socket.WebSocketConstructor | Credentials> = Layer.unwrap(
+  Effect.map(Effect.service(Credentials), (credentials) =>
+    BotInternals.layerWith(subjectBot, { token: Config.succeed(credentials.subject.token), guildId: credentials.guildId })
+  )
+)
+
+/** The harness's and the target's REST identities, each in its own fresh stack. */
+export const restIdentities: Layer.Layer<HarnessRest | TargetRest, never, HttpClient.HttpClient | Credentials> = Layer.mergeAll(
   as(HarnessRest, restIdentity((credentials) => credentials.harness)),
-  as(TargetRest, restIdentity((credentials) => credentials.target)),
-  as(SubjectRaw, restIdentity((credentials) => credentials.subject))
+  as(TargetRest, restIdentity((credentials) => credentials.target))
 )
 
 /** Everything the harness's commands use. */
-export type Services = HarnessRest | TargetRest | SubjectRaw | PacingModule.Pacing | Lab.LabGuard | Credentials
+export type Services = HarnessRest | TargetRest | SubjectRaw | BotRuntime | PacingModule.Pacing | Lab.LabGuard | Credentials
 
 /**
  * The single harness wiring: the identities over the shared client, with pacing and the guard exposed so the
- * commands can read the counters and arm the guard. `base` is the real HTTP client; `credentials` provides
- * the tokens and the lab guild.
+ * commands can read the counters and arm the guard. `base` is the real HTTP client, `socket` the WebSocket the
+ * subject's gateway uses; `credentials` provides the tokens and the lab guild. Building it runs the subject's
+ * startup checks and waits for its GUILD_CREATE (§4.4).
  */
 export const compose = <E1, E2>(
   base: Layer.Layer<HttpClient.HttpClient, E1>,
+  socket: Layer.Layer<Socket.WebSocketConstructor>,
   credentials: Layer.Layer<Credentials, E2>,
   pacing: PacingModule.Options
-): Layer.Layer<Services, E1 | E2> => {
+): Layer.Layer<Services, E1 | E2 | StartupFailed | Config.ConfigError> => {
   const guard = Layer.unwrap(Effect.map(Effect.service(Credentials), (lab) => Lab.layer(lab.guildId)))
   const shared = SharedHttpClient.pipe(Layer.provideMerge(Layer.mergeAll(PacingModule.layer(pacing), guard)), Layer.provide(base))
-  return identities.pipe(Layer.provideMerge(shared), Layer.provideMerge(credentials))
+  return Layer.mergeAll(restIdentities, subject).pipe(Layer.provide(socket), Layer.provideMerge(shared), Layer.provideMerge(credentials))
 }
 
-/** The live wiring: Bun's HTTP client and the real credentials (which take the live lock). */
-export const live = (pacing: PacingModule.Options) => compose(BunHttpClient.layer, credentialsLayer, pacing)
+/** The live wiring: Bun's HTTP client and WebSocket, and the real credentials (which take the live lock). */
+export const live = (pacing: PacingModule.Options) => compose(BunHttpClient.layer, BunSocket.layerWebSocketConstructor, credentialsLayer, pacing)

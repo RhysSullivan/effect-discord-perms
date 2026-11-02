@@ -7,7 +7,8 @@ import { compose, TargetRest } from "../../harness/Identities.ts"
 import * as IdentityCheck from "../../harness/IdentityCheck.ts"
 import { LabCheckFailed, LabGuard } from "../../harness/Lab.ts"
 import { ChannelId } from "../../src/Snowflake.ts"
-import { type Answer, fakeCredentials, fakeGuildId, makeRecordingClient } from "../support/fakeDiscord.ts"
+import { type Answer, fakeCredentials, fakeGuildCreate, fakeGuildId, makeRecordingClient } from "../support/fakeDiscord.ts"
+import { makeFakeGateway } from "../support/fakeGateway.ts"
 
 /**
  * The harness identity checks (DESIGN §4.4), run over the real wiring (`compose`) with a recording fake that
@@ -36,6 +37,8 @@ interface World {
   readonly guildName: string
   readonly channels: ReadonlyArray<{ readonly id: string; readonly name: string }>
   readonly roles: ReadonlyArray<{ readonly id: string; readonly name: string; readonly position: number }>
+  /** The user the subject's gateway READY names (its token's user unless a case breaks it). */
+  readonly readyUser?: string
 }
 
 const harnessRole = "400000000000000050"
@@ -95,6 +98,7 @@ const respond =
 const attempt = (world: World, admitLabText: boolean) =>
   Effect.gen(function* () {
     const client = yield* makeRecordingClient(respond(world))
+    const gateway = yield* makeFakeGateway({ userFor: (token) => (token === "fake-subject-token" ? (world.readyUser ?? world.users.subject) : undefined), guildsFor: (user) => [fakeGuildCreate(user)] }, () => 0)
     return yield* Effect.gen(function* () {
       const checked = yield* Effect.exit(IdentityCheck.run)
       const guard = yield* LabGuard
@@ -104,7 +108,7 @@ const attempt = (world: World, admitLabText: boolean) =>
       const write = yield* Effect.exit((yield* TargetRest).createMessage(labText, { content: "after the identity checks" }))
       const writeSent = (yield* client.recorded).length > sentBefore
       return { checked, admitted, welcomeAdmitted, write, writeSent }
-    }).pipe(Effect.provide(compose(client.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 })))
+    }).pipe(Effect.provide(compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 })))
   })
 
 const failedCheck = <A, E>(exit: Exit.Exit<A, E>): LabCheckFailed | undefined => {
@@ -135,6 +139,7 @@ describe.concurrent("harness identity checks", () => {
   const failures: ReadonlyArray<readonly [what: string, world: World, check: string, detail: string]> = [
     ["a token of another application", { ...baseline, apps: { ...baseline.apps, target: "100000000000000009" } }, "identity", "the target token belongs to application 100000000000000009"],
     ["two tokens of the same bot", { ...baseline, users: { ...baseline.users, subject: baseline.users.harness } }, "identity", "not three distinct bots"],
+    ["a subject gateway READY for another user", { ...baseline, readyUser: "200000000000000055" }, "identity", "READY named 200000000000000055"],
     ["a guild with another name", { ...baseline, guildName: "Rhys's server" }, "guild", `names "Rhys's server", not "Perms Lab"`],
     ["a guild without #rules", { ...baseline, channels: baseline.channels.filter((channel) => channel.name !== "rules") }, "guild", "has no #rules"],
     ["a guild without #mod-updates", { ...baseline, channels: baseline.channels.filter((channel) => channel.name !== "mod-updates") }, "guild", "has no #mod-updates"],

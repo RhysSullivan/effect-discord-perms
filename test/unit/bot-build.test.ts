@@ -1,0 +1,122 @@
+import { describe, expect, it } from "@effect/vitest"
+import { ApplicationFlags } from "discord-api-types/v10"
+import { Cause, Config, Effect, Exit, Fiber, Layer, Option, Redacted } from "effect"
+import * as TestClock from "effect/testing/TestClock"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
+import { Bot, BotRuntime, intentBits } from "../../src/bot/Bot.ts"
+import { BotInternals, SubjectRaw } from "../../src/bot/Internals.ts"
+import { StartupFailed } from "../../src/bot/Startup.ts"
+import { ChannelId, GuildId } from "../../src/Snowflake.ts"
+import { channelUpdate, guildCreate, ids, memberObject, overwrite } from "../support/dispatches.ts"
+import { makeFakeGateway } from "../support/fakeGateway.ts"
+
+/**
+ * The library's bot build (DESIGN §4.2, §4.4): startup checks 1-3 over REST before the gateway starts, the
+ * gateway's dispatches reduced into the guild state by the hook, the configured guild awaited (check 4), and
+ * `SubjectRaw` from the same build. Driven by a fake base client and a fake gateway.
+ */
+const guildId = GuildId.make(ids.guild)
+const bot = Bot.make({ intents: ["Guilds", "GuildMembers"] })
+
+interface World {
+  readonly token: string
+  readonly status: number
+  readonly guildArrives: boolean
+}
+
+const setup = (world: World) =>
+  Effect.gen(function* () {
+    let tick = 0
+    const clock = () => ++tick
+    const requests: Array<{ readonly at: number; readonly path: string }> = []
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        const path = new URL(request.url).pathname.replace(/^\/api\/v\d+/, "")
+        requests.push({ at: clock(), path })
+        const answer = (status: number, body: unknown) =>
+          HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }))
+        if (world.status !== 200) return answer(world.status, { message: "401: Unauthorized", code: 0 })
+        if (path === "/users/@me") return answer(200, { id: ids.bot, username: "Perms Subject" })
+        if (path === "/applications/@me") return answer(200, { id: "100000000000000002", flags: ApplicationFlags.GatewayGuildMembers })
+        if (path === `/guilds/${ids.guild}/members/${ids.bot}`) return answer(200, memberObject(ids.bot, [ids.roleA]))
+        if (path === `/channels/${ids.text}`) return answer(200, channelUpdate(ids.text, 0, []))
+        return answer(404, { message: "404: Not Found", code: 0 })
+      })
+    )
+    const gateway = yield* makeFakeGateway(
+      { userFor: (token) => (token === world.token ? ids.bot : undefined), guildsFor: () => (world.guildArrives ? [guildCreate] : []) },
+      clock
+    )
+    const layer = BotInternals.layerWith(bot, { token: Config.succeed(Redacted.make(world.token)), guildId }).pipe(
+      Layer.provide(Layer.mergeAll(Layer.succeed(HttpClient.HttpClient, client), gateway.layer))
+    )
+    return { layer, gateway, requests }
+  })
+
+const reasonOf = <A, E>(exit: Exit.Exit<A, E>): string | undefined => {
+  if (Exit.isSuccess(exit)) return undefined
+  const error = Cause.findErrorOption(exit.cause)
+  return Option.isSome(error) && error.value instanceof StartupFailed ? error.value.reason : undefined
+}
+
+describe("the bot build", () => {
+  it.live("checks over REST, then starts the gateway, reduces GUILD_CREATE and later dispatches, and shares its REST client", () =>
+    Effect.gen(function* () {
+      const { layer, gateway, requests } = yield* setup({ token: "fake-subject-token", status: 200, guildArrives: true })
+      yield* Effect.gen(function* () {
+        const runtime = yield* BotRuntime
+        expect(runtime.identity.userId).toBe(ids.bot)
+        expect(runtime.intents).toEqual(["Guilds", "GuildMembers"])
+        const snapshot = yield* runtime.guildState.snapshot
+        expect(snapshot.botUserId).toBe(ids.bot)
+        expect(snapshot.guilds.get(guildId)?.botMember?.roleIds).toEqual([ids.roleA, ids.managed])
+
+        // startup checks 1-3 ran before the gateway started (§4.4): dfx's sharder asks for /gateway/bot first
+        const opened = yield* gateway.opened
+        expect(requests.filter((entry) => entry.at < opened).map((entry) => entry.path)).toEqual([
+          "/users/@me",
+          "/applications/@me",
+          `/guilds/${ids.guild}/members/${ids.bot}`,
+          "/gateway/bot"
+        ])
+        expect(yield* gateway.identified).toEqual([{ user: ids.bot, intents: intentBits(["Guilds", "GuildMembers"]) }])
+
+        // a later dispatch reaches the state through the hook
+        yield* gateway.dispatch("CHANNEL_UPDATE", channelUpdate(ids.text, 0, [overwrite(ids.guild, 0, "0", "1024")]))
+        let overwrites = 0
+        for (let attempt = 0; attempt < 200 && overwrites !== 1; attempt++) {
+          yield* Effect.sleep("5 millis")
+          overwrites = (yield* runtime.guildState.snapshot).guilds.get(guildId)?.channels.get(ChannelId.make(ids.text))?.overwrites.length ?? -1
+        }
+        expect(overwrites).toBe(1)
+
+        // SubjectRaw is the build's dfx client, carrying the build's token through the same base client
+        const raw = yield* SubjectRaw
+        yield* raw.getChannel(ids.text)
+        expect(requests.at(-1)?.path).toBe(`/channels/${ids.text}`)
+      }).pipe(Effect.provide(layer), Effect.scoped)
+    })
+  )
+
+  it.live("fails with invalid-token, without opening the gateway", () =>
+    Effect.gen(function* () {
+      const { layer, gateway } = yield* setup({ token: "fake-subject-token", status: 401, guildArrives: true })
+      const exit = yield* Effect.exit(Effect.provide(Effect.service(BotRuntime), layer).pipe(Effect.scoped))
+      expect(reasonOf(exit)).toBe("invalid-token")
+      expect(yield* gateway.opened).toBe(-1)
+    })
+  )
+
+  it.effect("fails with guild-not-ready when GUILD_CREATE does not come within 30 s", () =>
+    Effect.gen(function* () {
+      const { layer } = yield* setup({ token: "fake-subject-token", status: 200, guildArrives: false })
+      const fiber = yield* Effect.provide(Effect.service(BotRuntime), layer).pipe(Effect.scoped, Effect.exit, Effect.forkChild)
+      for (let step = 0; step < 40; step++) {
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 2)))
+        yield* TestClock.adjust("1 second")
+      }
+      expect(reasonOf(yield* Fiber.join(fiber))).toBe("guild-not-ready")
+    })
+  )
+})
