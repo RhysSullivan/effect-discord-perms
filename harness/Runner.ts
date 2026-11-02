@@ -359,8 +359,9 @@ export interface Verdict {
 /** `verify:live` / `run` (§5.1): the matrix, the table, the comparison and the summary. */
 export const run = (report: IdentityReport, options: Options) =>
   Effect.gen(function* () {
-    const scenarios = options.only === undefined ? catalog : catalog.filter((scenario) => globMatches(options.only ?? "", scenario.id))
-    if (scenarios.length === 0) return yield* new LabCheckFailed({ check: "run", detail: `--only ${options.only ?? ""} matches no scenario` })
+    const only = options.only
+    const scenarios = only === undefined ? catalog : catalog.filter((scenario) => globMatches(only, scenario.id))
+    if (scenarios.length === 0) return yield* new LabCheckFailed({ check: "run", detail: `--only ${only ?? "(none)"} matches no scenario` })
     const startedAt = yield* Clock.currentTimeMillis
     const path = logPath(startedAt)
     const fs = yield* FileSystem.FileSystem

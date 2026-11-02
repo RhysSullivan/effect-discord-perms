@@ -147,7 +147,7 @@ export const desired = (setup: Setup, ids: Ids): Desired => {
         everyone |= bits
         break
       case "role":
-        rolePermissions.set("lab-grant", (rolePermissions.get("lab-grant") ?? 0n) | bits)
+        rolePermissions.set("lab-grant", lookup(rolePermissions, "lab-grant", "lab-grant's permissions") | bits)
         held.add("lab-grant")
         break
       case "role-overwrite-allow":
@@ -211,6 +211,12 @@ export const desired = (setup: Setup, ids: Ids): Desired => {
   }
 }
 
+/** A lab role's desired permissions (the desired state holds every lab role's). */
+export const rolePermissionsOf = (state: Desired, name: LabIds.RoleName): bigint => lookup(state.rolePermissions, name, `${name}'s permissions`)
+
+/** A lab role's ID. */
+export const roleIdOf = (ids: Ids, name: LabIds.RoleName): RoleId => lookup(ids.roles, name, name)
+
 // ---- resolver inputs over the desired state -----------------------------------------------------------
 
 const toOverwrite = (overwrite: DesiredOverwrite): Overwrite => ({
@@ -227,7 +233,7 @@ export const guildOf = (state: Desired, ids: Ids): GuildInput => {
   roles.set(everyoneId, { id: everyoneId, permissions: Flags.fromBits(state.everyone), position: 0, managed: false })
   LabIds.roleSpecs.forEach((spec, index) => {
     const id = lookup(ids.roles, spec.name, spec.name)
-    roles.set(id, { id, permissions: Flags.fromBits(state.rolePermissions.get(spec.name) ?? spec.permissions), position: LabIds.roleSpecs.length - index, managed: false })
+    roles.set(id, { id, permissions: Flags.fromBits(rolePermissionsOf(state, spec.name)), position: LabIds.roleSpecs.length - index, managed: false })
   })
   return { id: ids.guildId, ownerId: ids.ownerId, roles }
 }
@@ -242,7 +248,7 @@ export const channelOf = (state: Desired, ids: Ids, name: LabName): ChannelSnap 
     kind,
     parentId: spec === undefined ? (name === "lab" ? undefined : lookup(ids.channels, "lab", "lab")) : lookup(ids.channels, spec.parent, spec.parent),
     obfuscated: false,
-    overwrites: spec === undefined ? (state.overwrites.get(channelName(name)) ?? []).map(toOverwrite) : [],
+    overwrites: spec === undefined ? lookup(state.overwrites, channelName(name), `${name}'s overwrites`).map(toOverwrite) : [],
     thread: spec === undefined ? undefined : { archived: thread?.archived ?? false, locked: thread?.locked ?? false, ownerId: undefined }
   }
 }
@@ -295,7 +301,7 @@ export const subjectSees = (state: Desired, ids: Ids, name: LabName, now: number
 /** The projection of `state` (see the module comment). `now` places the desired timeout in the future. */
 export const project = (state: Desired, ids: Ids, now: number): Projection => {
   const roles = new Map<RoleId, bigint>([[everyoneRoleId(ids.guildId), state.everyone]])
-  for (const spec of LabIds.roleSpecs) roles.set(lookup(ids.roles, spec.name, spec.name), state.rolePermissions.get(spec.name) ?? spec.permissions)
+  for (const spec of LabIds.roleSpecs) roles.set(lookup(ids.roles, spec.name, spec.name), rolePermissionsOf(state, spec.name))
   const channels = new Map<LabIds.ChannelName, ChannelView>()
   for (const [name, overwrites] of state.overwrites) {
     const id = lookup(ids.channels, name, name)

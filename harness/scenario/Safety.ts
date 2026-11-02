@@ -81,9 +81,9 @@ export const checkMaterialized = (scenario: Scenario, state: Materialize.Desired
     const pings = Flags.fromFlags(pingFlags)
     if ((state.everyone & pings) !== 0n) add("no-everyone-ping", "@everyone holds MentionEveryone or Administrator")
     for (const role of state.subjectRoles) {
-      if (((state.rolePermissions.get(role) ?? 0n) & pings) !== 0n) add("no-everyone-ping", `the subject holds ${role}, which has MentionEveryone or Administrator`)
+      if ((Materialize.rolePermissionsOf(state, role) & pings) !== 0n) add("no-everyone-ping", `the subject holds ${role}, which has MentionEveryone or Administrator`)
     }
-    const subjectTargets = new Set<string>([ids.guildId, ids.subjectUserId, ...state.subjectRoles.map((role) => ids.roles.get(role) ?? "")])
+    const subjectTargets = new Set<string>([ids.guildId, ids.subjectUserId, ...state.subjectRoles.map((role) => Materialize.roleIdOf(ids, role))])
     for (const [channel, overwrites] of state.overwrites) {
       for (const overwrite of overwrites) {
         if (subjectTargets.has(overwrite.id) && (overwrite.allow & pings) !== 0n) add("no-everyone-ping", `an overwrite on ${channel} allows MentionEveryone to the subject`)

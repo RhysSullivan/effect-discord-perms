@@ -2843,19 +2843,25 @@ fails if a constant disagrees with the table.
 
 1. **Can bots be timed out, and what code follows (H-022, H-023)?**
    - Yes: `CommunicationDisabled` stays in the unions, and is attributed from
-     state during preflight or recompute.
+     state during preflight or recompute. (M3: yes; a timed-out bot's send
+     answers 403 50013, H-023. Giving a timed-out member Administrator ends the
+     timeout, so "administrator and timed out" is `admin-exempt`.)
    - No: the harness's timeout PATCH fails, the rows record
      `setup-unsupported: bot-not-timeoutable`, `Observed.botsCanBeTimedOut =
      false` removes the tag from every union, and the timed-out dimension
      becomes resolver-only in `LOG.md`.
 2. **50001 vs 50013 for a missing View (H-080).** `level-vs-raw` checks the
    correspondence. If refuted, `Observed.codeForLevel` records the observed
-   mapping; the recompute and our order still decide the tag.
+   mapping; the recompute and our order still decide the tag. (M3: View and
+   voice Connect answer 50001 and SendMessages 50013 as expected, but in a
+   thread a missing SendMessagesInThreads, and a locked thread, answer 50001.)
 3. **20016 for bots (H-053, C9).** `Observed.slowmodeAppliesToBots` defaults to
    false. If a slowmode row shows 20016, set it true; the interceptor already
    surfaces it.
 4. **Embeds without EmbedLinks and TTS without SendTTS: error or silent drop
-   (H-102, H-103)?** This decides `PayloadRules.mode`. The types move the flag
+   (H-102, H-103)?** This decides `PayloadRules.mode`. (M3: embeds are refused
+   with 50013; TTS is dropped, the message sent with `tts: false`, so M4 sets
+   `tts` to `degrade`.) The types move the flag
    between the error union and `degraded`, with no other change: limit tags
    key on presence (`[sd:probe2/q4/use.ts]`).
 5. **Inner 50035 codes: strings or numbers (H-084)?** `FieldError.code`
@@ -2878,8 +2884,11 @@ fails if a constant disagrees with the table.
    the timeout mask to the comparison. If it is unavailable, the header says so
    and flip controls carry the blame check. M2: the route exists; it answered
    for every lab channel and thread, and a positive control (the target in
-   `lab-text`) returned exactly `lab-target`'s overwrite allow. The timeout
-   question (H-241) is still open.
+   `lab-text`) returned exactly `lab-target`'s overwrite allow. M3: it **does**
+   apply the timeout mask (H-241: a timed-out subject reads only View and
+   ReadMessageHistory of what it is granted), so M4 adds
+   `OracleScope.includesTimeout`; ten send rows are `resolver-vs-oracle` until
+   then.
 10. **Do rejected command creates count toward 200 per day (H-205)?** Negative
     tests use one command name, a local daily counter aborts at 150, and
     `LOG.md` records the before/after GET counts.

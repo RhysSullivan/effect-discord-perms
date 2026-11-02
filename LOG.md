@@ -66,6 +66,68 @@ Where live Discord differed from the docs, each citing its H-id.
   single `PATCH /channels/{thread}` with `rate_limit_per_user: 0, archived: false, locked: false` was accepted,
   and the read-back showed slowmode 0, unarchived and unlocked.
 
+M3, the send catalog (103 rows; the rows behind each finding are in the M3 milestone notes and the subset truth
+table). Findings marked **M4** are the mismatches M3 leaves for M4's fixes:
+
+- **M3, H-241 (oracle and timeouts): the permission endpoint applies the timeout mask.** For a timed-out subject,
+  `GET /channels/{c}/permissions/member/{subject}?implicit=false` reports every granted flag but ViewChannel and
+  ReadMessageHistory as missing (for example `send/text/mention-everyone/everyone/none/absent/timed-out`: the
+  oracle's missing set is MentionEveryone and SendMessages, though `@everyone` grants SendMessages). The ten
+  timed-out rows whose required flags include a granted one the timeout removes are `resolver-vs-oracle`
+  mismatches. **M4**: §8 item 9's
+  `OracleScope.includesTimeout` (compare the oracle with the timeout mask applied).
+- **M3, H-080 refined: in a thread, a missing SendMessagesInThreads answers 403 50001, not 50013**, in public,
+  private, announcement and archived threads and forum posts (`send/targeted/thread-send-without-smit`,
+  `send/forum-post/*/base/*`, ...). Outside threads a missing SendMessages answers 50013 as H-080 says
+  (`send/text/file/role-overwrite-allow/base/member-overwrite-deny/normal`). **M4**: `level-vs-raw` on these rows;
+  `Observed.codeForLevel` (or the row's level) must say that SMIT is a 50001 flag.
+- **M3, H-036 refuted for bots: a locked thread answers 403 50001, not 160005**, to a member without
+  ManageThreads (`send/locked-thread/plain/everyone/none/absent/normal`, `send/targeted/archived-locked-thread`,
+  `send/targeted/order-smit-locked`); with ManageThreads the send succeeds (`send/targeted/locked-thread-moderator`).
+  **M4**: `level-vs-raw` on the locked rows (preflight's ThreadLocked is right; the code is 50001).
+- **M3, H-102: TTS without SendTTSMessages degrades instead of failing.** The message is sent with `tts: false`
+  (`send/forum-post/tts/member-overwrite-allow/payload/member-overwrite-deny/normal`,
+  `send/public-thread/tts/...`). **M4**: `PayloadRules.tts.mode = "degrade"` (`preflight-vs-raw` on 2 rows).
+- **M3, H-103: embeds without EmbedLinks are refused (403 50013)**, not dropped
+  (`send/announcement/embed/everyone/payload/absent/normal`), so `PayloadRules.embeds.mode = "error"` holds.
+- **M3, H-100 confirmed: `@everyone` without MentionEveryone is sent and pings nobody** (`mention_everyone: false`
+  in the create response, recorded as degraded MentionEveryone), in text, voice and every thread kind. Safety's
+  oracle check showed the subject without MentionEveryone and Administrator before each such send.
+- **M3, H-135/§3.2: a reply without ReadMessageHistory and without SendMessages answers 403 160002**, Discord's
+  dedicated reply code, where our order ranks SendMessages first (`send/targeted/order-send-reply-history`). As
+  §3.2 decided, agreement accepts the mapped tag because it is in the row's `preflightSet`.
+- **M3, H-022 and H-023 confirmed: a bot can be timed out, and a timed-out bot's send answers 403 50013**
+  (`send/targeted/order-timeout-send`, `send/announcement/plain/role/base/everyone-overwrite-deny/timed-out`).
+  `Observed.botsCanBeTimedOut` stays `true`.
+- **M3, H-021: giving a timed-out member Administrator ends its timeout.** Probed directly (a throwaway script,
+  the lab reset after): after the timeout PATCH the subject read `communication_disabled_until` ten minutes ahead;
+  right after `lab-admin` was added it read `null`, and still `null` two seconds later. So "administrator and timed
+  out" cannot exist; the targeted row `send/targeted/administrator-timed-out` records `setup-unsupported:
+  admin-exempt`. (Timing out a member that already holds Administrator answers 403 50013, the documented H-021.)
+- **M3: Discord refuses to add a member to a private thread when that member cannot view the parent** (403 50001
+  on `PUT /channels/{thread}/thread-members/{subject}`, while the subject had no View on `lab-text`). Converge
+  and cleanup now change the subject's membership with View granted to it on the parent (a member overwrite),
+  then restore the parent's overwrites.
+- **M3, H-031 and H-014 confirmed:** in a thread, SendMessages without SendMessagesInThreads fails and SMIT
+  without SendMessages succeeds; an embed in a thread needs no SendMessages (no implicit Send mask in threads,
+  `send/targeted/thread-embed-without-send`).
+- **M3, H-033 and H-047 confirmed:** a private thread the subject is not in answers 50001
+  (`send/targeted/private-thread-non-member`), and ManageThreads makes it visible
+  (`send/targeted/private-thread-moderator`). H-035: sending in an archived thread succeeds (it unarchives it).
+- **M3, H-152 and H-153: voice and stage text chat without Connect answer 403 50001** (View-level, as §3.2 ranks
+  Connect), with View and SendMessages granted (`send/voice/*/connect/*`, `send/stage/reply/everyone/connect/...`).
+- **M3, H-006 and H-008 confirmed:** a role overwrite allow beats another role's deny
+  (`send/voice/plain/role-overwrite-allow/connect/role-overwrite-deny/normal` succeeds), and a member overwrite
+  allow beats a role deny (`send/stage/plain/member-overwrite-allow/view/role-overwrite-deny/normal`). H-003: an
+  Administrator sends past an `@everyone` View deny.
+- **M3 (gateway, before obfuscation becomes mandatory on 2026-11-16, without the M7 codec): the subject's
+  GUILD_CREATE lists every guild channel with its real overwrites**, including the lab channels it cannot view,
+  none obfuscated; its `threads` hold only threads it can view (at baseline none of the four lab threads). The
+  projection accepts both shapes for a hidden channel (§5.8).
+- **M3: `GET /guilds/{id}/channels` answered 429 several times a run** (once every ~8 scenarios, each costing
+  30-65 s of dfx's retry wait) while Converge and the wait's read-back each listed the guild's channels. They
+  now read single channels with `getChannel`; the next full run had no 429 at all.
+
 ## dfx deviations
 
 Where dfx got in the way and we wrapped or adapted it, and why.
@@ -84,6 +146,12 @@ Where dfx got in the way and we wrapped or adapted it, and why.
   user, application and member it reads; a mismatch is a defect.
 - **M2: dfx's `DiscordRestError.code` is never read** (it is `undefined` at run time, dfx.md §3);
   `src/rest/ErrorMap.ts`'s `classify` reads `e.data.code` and decodes the body with Schema.
+- **M3: the bot build re-composes nothing in dfx, but orders its layers.** `BotInternals.layerWith` builds dfx's
+  `DiscordRESTMemoryLive` first, runs the startup checks and builds `GuildState` over it, and only then
+  `DiscordLive` with our `DispatchHook`; dfx's own `DiscordRESTLive` inside `DiscordLive` is the same memoised
+  instance within the build's `Layer.fresh` (probed: the client the checks used and the one `SubjectRaw` exposes
+  are the same object), so the gateway, the library and step (c) share one client. dfx has no ready signal, so
+  the build waits for GUILD_CREATE in the state the hook feeds (check 4).
 
 ## Design deviations
 
@@ -272,6 +340,58 @@ the same commit.
   - the host-local lock limit is recorded under "Notes for every milestone";
   - the registry item was done by the orchestrator, outside the rift.
 
+- **M3: `--only` writes and compares a subset table, never `fixtures/truth-table.json`** (§5.1 updated). §5.1 said
+  `--only` never writes the table, but M3's exit runs `--only 'send/**' --write` in two processes, the second with
+  `--compare`. With `--only`, `--write` writes `/tmp/effect-discord-perms-truth-table.only-<glob slug>.json` and
+  `--compare` compares with that file from a previous process; a missing previous table fails the comparison.
+  The committed table is written only by a full run (M4).
+- **M3: a fourth mask, `unseen`** (§4.5, §4.6, §5.10, §5.12 updated): a channel the subject's state lacks and a
+  refresh could not fetch (`getChannel` 50001 or 10003), or a thread whose parent is unknown. §3.1 already said
+  such a channel has no View; the mask names it, because "obfuscated" means Discord delivered the channel with
+  flag `1 << 17`, which is not what happened. Agreement compares nothing with the oracle on an unseen row: the
+  subject knows none of its overwrites, and the oracle's `implicit=false` ignores thread membership (the private
+  thread a non-member cannot see reads as fully granted there).
+- **M3: step (a) refreshes a scenario thread first** (§5.10 updated): so the subject's view of it is a function of
+  the setup (fetched when visible, unseen when not), not of which events earlier scenarios delivered, and M4's
+  replay can rebuild it from the setup. Without it the same setup could resolve with `implicit-view` (a thread
+  the state kept from an earlier scenario) or `unseen` (one it never had).
+- **M3: preflight lists independent problems** (§4.7 updated): a flag an implicit mask removes only because of
+  another problem (no View, no Send, no Connect) is not a separate failure, so a flip control's next-ranked
+  failure is real; `CommunicationDisabled` is a failure whenever the timeout applies and the request needs a
+  flag it does not keep.
+- **M3: the snapshot's generations are one per-guild map, and thread membership is its own map** (§4.5 updated):
+  the map keeps a deleted entity's generation, so a refresh racing a delete and a re-create cannot commit; the
+  membership map exists because THREAD_MEMBERS_UPDATE can arrive before its thread. A private thread the bot is
+  removed from is dropped. The refresh reads the roles from `getGuild` (which carries them) instead of also
+  calling `listGuildRoles`.
+- **M3: `harness-message`, a new fixture** (§5.8 updated): a reply's target, posted by the harness, which can post
+  in voice text chat where the target cannot without Connect.
+- **M3: the send family's validity also excludes `missing=payload` for a guild sticker** (§5.9 updated): a guild
+  sticker needs no flag (H-138), so the prototype's predicate let through rows with nothing to remove; the
+  fixed family selects 89 rows instead of 88. With 14 targeted rows the send catalog has 103.
+- **M3: Converge reads only the channels that may be off baseline, and changes thread membership with View**
+  (§5.8, §5.10 updated): see the two live findings above (the channel-list 429s, the 50001 on adding a member who
+  cannot view the parent). An administrator is never timed out: lab-admin is taken while the timeout is applied
+  and given back after (§5.8's order), and when the role ends the timeout the row is `admin-exempt`.
+- **M3: the harness's subject is the library's bot build** with intents Guilds and GuildMembers (Message Content
+  waits for M7's intent catalog); `harness/IdentityCheck.ts` takes the subject's identity from that build's
+  startup checks and now checks the READY user. The identity test (`test/unit/identities.test.ts`) and the
+  identity-check test run over the real build with a fake gateway (`test/support/fakeGateway.ts`), which M7 had
+  planned; `test/unit/bot-build.test.ts` covers the build's order (checks before the gateway), the hook, and
+  `invalid-token` and `guild-not-ready`.
+- **M3: modules the design did not name** (§1.2 updated): `src/state/Snapshot.ts` (the snapshot types and channel
+  kinds), `src/rest/Request.ts` (one bounded dfx call, classified; M5's `DiscordApi` builds on it),
+  `harness/Runner.ts` (the `run` command), and `src/bot/Bot.ts` with only `Bot.make` and `BotRuntime` (M7 adds the
+  rest). `src/payload/PayloadRules.ts` arrives with the table and its flag lookups only (M6 adds the types), its
+  keys in §3.2 order. `src/rest/ErrorMap.ts` gains `dedicatedCodeTags` (the start of M5's table) for the raw
+  outcome's `mappedTag`, and `Observed.codeForLevel` arrives for `level-vs-raw`.
+- **M3: setup groups are ordered by their canonical setup JSON**, which clusters equal channels and grant
+  sources; §5.10 asked for an order that minimises writes, and this is a deterministic proxy for it, not an
+  optimiser. The full send run made 563 writes for 103 scenarios.
+- **M3: the dry-run stub is built but step (b) does not use it yet** (§6 M3 says (b) is `decide` until M6): the
+  shared client applies the Lab guard, then answers a canned body (`fixtures/canned/create-message.json`) and
+  sends nothing, unit-tested in `test/unit/dry-run.test.ts`.
+
 ## Escalated rules
 
 Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria. None yet.
@@ -296,6 +416,13 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   `bun --no-env-file harness/main.ts inventory` lists the lab guild read-only.
   The lab's object IDs are in `.lab-state.json` (git-ignored). Deleting it makes the next reset delete every
   `lab-*` object and the next provision recreate them.
+- **The matrix:** `bun --no-env-file harness/main.ts run [--only glob] [--write] [--compare] [--repeat N]`
+  (`bun run verify:live` is `run --write --compare`). It runs the identity checks, reset and provisioning, Safety
+  over every scenario's materialized state, the catalog in setup groups, and a closing reset, and prints one line
+  per scenario (its raw class and any mismatch) and a summary. Per-scenario detail (message IDs, the oracle,
+  step timings, 429s) goes to `/tmp/effect-discord-perms-live-<start ms>.log`. With `--only`, `--write` and
+  `--compare` use `/tmp/effect-discord-perms-truth-table.only-<glob slug>.json`. The send catalog (103 rows) takes
+  about 10 minutes and some 2,200 requests; it exits 1 while any mismatch remains.
 - **Reset self-test: re-run `bun run harness:selftest` whenever `Reset.ts` (or `LabIds.ts`'s baseline) changes.**
   The smoke and reset exit checks run on a clean lab, where a reset that wrote nothing would pass too. The
   self-test dirties the lab (role permissions and mentionability, a leftover role the target holds and the
@@ -459,3 +586,65 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
     requests, 0 writes, 0 invalid); `harness:reset` reported `writes: 0` twice; the lock was gone afterwards.
     `bun run verify:offline` is green (291 unit tests in 21 files).
 
+### M3 State store, resolver, preflight, matrix runner
+
+- `src/permissions/`: `Flags.ts` (branded `PermissionSet`, the 2FA-starred set), `ResolverRules.ts` (13 switches
+  with their H-ids, all "docs"), `Resolver.ts` (base, overwrites, the seven masks, hierarchy, `inputFromSnapshot`),
+  `Order.ts` (§3.2), `Preflight.ts` (`decide`, `toError` through `errorFor`, `tagOf`, the internal `Mode`);
+  `Observed.codeForLevel`; `src/payload/PayloadRules.ts` (the table and its flag lookups).
+- `src/state/`: `Snapshot.ts`, `Reducer.ts` (READY, GUILD_*, roles, channels, threads, thread members, the bot's
+  member; obfuscated channels; malformed payloads marked stale), `Hook.ts`, `GuildState.ts` (`apply`,
+  `awaitGuild`, `refresh` with generations). `src/rest/Request.ts`, `ErrorMap.dedicatedCodeTags`.
+- `src/bot/Bot.ts` (`Bot.make`, `BotRuntime`) and `src/bot/Internals.ts` (`BotInternals.layerWith`: checks, state,
+  gateway with the hook, the guild awaited, `SubjectRaw` from the same build); the harness's subject is that build.
+- `harness/`: `Materialize.ts` (desired state, resolver inputs over it, projection and its comparison),
+  `Converge.ts`, `Wait.ts`, `DryRun.ts` (and `fixtures/canned/create-message.json`), `Outcome.ts`, `Agreement.ts`,
+  `TruthTable.ts`, `Runner.ts`, `scenario/{Dsl,Pairwise,Safety}.ts`, `scenario/catalog/send.ts` (89 pairwise and 14
+  targeted rows), and `run` in `harness/main.ts`. Pacing now counts 429s per route.
+- Unit tests (381 in 30 files): `resolver.test.ts` (4,000 seeded random guilds against a literal transcription of
+  the documented algorithm, stage by stage, plus each mask and the hierarchy), `preflight.test.ts`,
+  `flags.test.ts`, `state.test.ts` (dispatches in Discord's shapes, a replay leaving every value unchanged, the
+  refresh racing a CHANNEL_UPDATE under `Deferred`s, unseen channels), `bot-build.test.ts` (fake base client and
+  fake gateway: checks before the socket opens, the hook, `invalid-token`, `guild-not-ready` under `TestClock`),
+  `catalog.test.ts` (pairwise validity, coverage of every valid pair, determinism, counts; Safety over the catalog
+  and every materialized state; Safety's refusals), `materialize.test.ts`, `agreement.test.ts` (each mismatch kind,
+  the readback, canonical bytes), `dry-run.test.ts`; the identity tests run over the real subject build.
+- Mutation checks (each reverted, each failed its test): role overwrites applied one by one instead of aggregated
+  (the random comparison failed on case 29), refresh committing whatever the generations say, no timeout failure
+  in preflight, no `level-vs-raw` check, the guild sticker allowed `missing=payload` (the catalog no longer
+  builds), a member-overwrite removal that leaves the flag in `allow`.
+- Live, in order (each alone under the lock): a 10-row trial (`--only 'send/text/**'`); two development runs of
+  the send catalog, which found the channel-list 429s, the thread-membership 50001 and the administrator timeout
+  (all fixed, see "Design deviations"); a run of the two administrator rows; then the exit runs on commit
+  `e0a4d53`:
+  - **A**: `bun run verify:live -- --only 'send/**'` finished and printed its summary: 103 scenarios in 585 s,
+    2,174 requests, 565 writes, 64 invalid (the raw 403s), no 429, oracle available, 28 mismatches; compared with
+    the second development run's table it differed only in `send/targeted/administrator-timed-out` (the fix made
+    between them); exit 1 (mismatches).
+  - **B**: `bun --no-env-file harness/main.ts run --only 'send/**' --write --compare`, a fresh process: 103
+    scenarios in 605 s, the same counts and the same 28 mismatches, `compare: identical to the previous table`;
+    the two tables are byte-identical (sha256 `4458a2ba...8b39aa`, 131,537 bytes). Exit 1 (mismatches).
+  - then `bun run harness:selftest` (the guard now reads channel PATCH bodies): 13 dirt steps, 34 problems seen,
+    reset 28 writes, at baseline, second reset 0 writes.
+- The table's raw classes: 46 `50001`, 39 `success`, 9 `50013`, 7 `degraded` (MentionEveryone 5, SendTTSMessages 2),
+  1 `other-error` (160002), 1 `setup-unsupported` (`admin-exempt`). Agreement: 75 agree, 28 mismatches.
+- **Mismatches left for M4** (all genuine, see "Live findings"):
+  - `level-vs-raw` (16): a missing SendMessagesInThreads answers 50001 (H-080), and so does a locked thread
+    (H-036): `send/announcement-thread/file/role-overwrite-allow/base/member-overwrite-deny/normal`,
+    `send/archived-thread/file/role-overwrite-allow/base/member-overwrite-deny/normal`,
+    `send/forum-post/{file/role/base/role-overwrite-deny, mention-everyone/everyone/base/role-overwrite-deny,
+    poll/member-overwrite-allow/base/absent, reply/role-overwrite-allow/base/absent}/normal`,
+    `send/locked-thread/{file/role-overwrite-allow/base/member-overwrite-deny, guild-sticker/everyone/none/absent,
+    mention-everyone/everyone/none/absent, plain/everyone/none/absent, poll/everyone/none/absent,
+    reply/member-overwrite-allow/payload/everyone-overwrite-deny}/normal`,
+    `send/private-thread/reply/role-overwrite-allow/base/member-overwrite-deny/normal`,
+    `send/targeted/{archived-locked-thread, order-smit-locked, thread-send-without-smit}`;
+  - `resolver-vs-oracle` (10): the oracle applies the timeout (H-241):
+    `send/announcement/{file/member-overwrite-allow/none/absent, reply/role-overwrite-allow/view/absent}/timed-out`,
+    `send/stage/{embed/role-overwrite-allow/none/absent, guild-sticker/role-overwrite-allow/view/member-overwrite-deny}/timed-out`,
+    `send/text/{embed/role/view/role-overwrite-deny, mention-everyone/everyone/none/absent,
+    poll/everyone/view/member-overwrite-deny}/timed-out`,
+    `send/voice/{embed/member-overwrite-allow/base/member-overwrite-deny, poll/role/connect/everyone-overwrite-deny,
+    tts/role/payload/role-overwrite-deny}/timed-out`;
+  - `preflight-vs-raw` (2): TTS degrades (H-102):
+    `send/{forum-post,public-thread}/tts/member-overwrite-allow/payload/member-overwrite-deny/normal`.
