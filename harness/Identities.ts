@@ -19,13 +19,15 @@
 import { BunHttpClient, BunSocket } from "@effect/platform-bun"
 import { DiscordConfig, DiscordRESTMemoryLive } from "dfx"
 import { DiscordREST, type DiscordRestService } from "dfx/DiscordREST"
-import { Config, Context, Effect, Layer } from "effect"
+import { Config, Context, Effect, Layer, Option } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import type * as Socket from "effect/socket/Socket"
 import { Bot, type BotRuntime } from "../src/bot/Bot.ts"
 import { BotInternals, type SubjectRaw } from "../src/bot/Internals.ts"
 import type { StartupFailed } from "../src/bot/Startup.ts"
 import { Credentials, type IdentityCredentials, type LabCredentials, layer as credentialsLayer } from "../src/config/Credentials.ts"
+import { DryRun } from "./DryRun.ts"
 import * as Lab from "./Lab.ts"
 import * as PacingModule from "./Pacing.ts"
 
@@ -37,7 +39,8 @@ export class TargetRest extends Context.Service<TargetRest, DiscordRestService>(
 
 /**
  * The base client every identity's dfx sees: guarded, paced and counted. It requires the real base client,
- * the pacing service and the guard, all from outside every identity's fresh boundary.
+ * the pacing service and the guard, all from outside every identity's fresh boundary. Under a dry run
+ * (`DryRun.ts`) a request passes the guard and is answered with its canned body instead of being sent.
  */
 export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpClient.HttpClient | PacingModule.Pacing | Lab.LabGuard> = Layer.effect(
   HttpClient.HttpClient,
@@ -45,9 +48,21 @@ export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpCli
     const base = yield* HttpClient.HttpClient
     const pacing = yield* PacingModule.Pacing
     const guard = yield* Lab.LabGuard
-    return base.pipe(
-      HttpClient.tapRequest((request) => Effect.andThen(guard.check(request), pacing.take(request.method, request.url))),
+    const sent = base.pipe(
+      HttpClient.tapRequest((request) => pacing.take(request.method, request.url)),
       HttpClient.transformResponse(Effect.tap((response) => pacing.recordStatus(response.status)))
+    )
+    return HttpClient.make((request) =>
+      Effect.gen(function* () {
+        yield* guard.check(request)
+        const dry = yield* DryRun
+        if (Option.isNone(dry)) return yield* sent.execute(request)
+        const route = PacingModule.routeKey(request.method, request.url)
+        const body = dry.value.canned(route)
+        if (Option.isNone(body)) return yield* Effect.die(new Error(`dry run: no canned body for ${route}`))
+        yield* dry.value.record(request)
+        return HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body.value), { status: 200, headers: { "content-type": "application/json" } }))
+      })
     )
   })
 )

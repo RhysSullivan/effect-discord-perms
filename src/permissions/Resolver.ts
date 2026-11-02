@@ -21,9 +21,9 @@
  * Every switch is an entry of `ResolverRules.ts`.
  */
 import type { PermissionFlag } from "../errors/Missing.generated.ts"
-import type { ChannelSnap, RoleSnap } from "../state/Snapshot.ts"
-import { everyoneRoleId, isThreadKind, isVoiceKind } from "../state/Snapshot.ts"
-import type { GuildId, RoleId, UserId } from "../Snowflake.ts"
+import type { ChannelSnap, RoleSnap, Snapshot } from "../state/Snapshot.ts"
+import { botIsThreadMember, everyoneRoleId, isThreadKind, isVoiceKind } from "../state/Snapshot.ts"
+import type { ChannelId, GuildId, RoleId, UserId } from "../Snowflake.ts"
 import * as Flags from "./Flags.ts"
 import { ResolverRules } from "./ResolverRules.ts"
 
@@ -237,4 +237,34 @@ export const roleBelow = (guild: GuildInput, bot: MemberInput, role: RoleSnap): 
   if (bot.userId === guild.ownerId) return true
   const botTop = highestRole(guild, bot.roleIds)
   return botTop !== undefined && outranks(botTop, role)
+}
+
+// ---- from the guild state -----------------------------------------------------------------------------
+
+/** What the guild state can give the resolver for one channel: an input, or the need for a refresh first. */
+export type FromSnapshot = { readonly _tag: "Ready"; readonly input: ResolveInput } | { readonly _tag: "NeedsRefresh"; readonly reason: string }
+
+/**
+ * The resolver input for the bot in `channel` of `guild`, from the guild state. A channel (or a thread's parent)
+ * the state does not hold, or a missing bot member, needs a refresh first (`GuildState.refresh`); a channel a
+ * refresh found unseen resolves as `Unseen` (no View, §3.1).
+ */
+export const inputFromSnapshot = (snapshot: Snapshot, guildId: GuildId, channelId: ChannelId, now: number): FromSnapshot => {
+  const guild = snapshot.guilds.get(guildId)
+  if (guild === undefined) return { _tag: "NeedsRefresh", reason: "the guild is not in the state" }
+  const botUserId = snapshot.botUserId
+  const botMember = guild.botMember
+  if (botUserId === undefined || botMember === undefined) return { _tag: "NeedsRefresh", reason: "the bot's member is not in the state" }
+  const guildInput: GuildInput = { id: guild.id, ownerId: guild.ownerId, roles: guild.roles }
+  const member: MemberInput = { userId: botUserId, roleIds: botMember.roleIds, timedOutUntil: botMember.timedOutUntil }
+  const ready = (channel: ChannelInput): FromSnapshot => ({ _tag: "Ready", input: { guild: guildInput, channel, member, now } })
+  if (guild.unseen.has(channelId)) return ready({ _tag: "Unseen" })
+  const channel = guild.channels.get(channelId)
+  if (channel === undefined) return { _tag: "NeedsRefresh", reason: `channel ${channelId} is not in the state` }
+  if (!isThreadKind(channel.kind)) return ready({ _tag: "Known", channel, parent: undefined, threadMember: false })
+  const parentId = channel.parentId
+  if (parentId === undefined || guild.unseen.has(parentId)) return ready({ _tag: "Unseen" })
+  const parent = guild.channels.get(parentId)
+  if (parent === undefined) return { _tag: "NeedsRefresh", reason: `thread ${channelId}'s parent ${parentId} is not in the state` }
+  return ready({ _tag: "Known", channel, parent, threadMember: botIsThreadMember(guild, channelId) })
 }

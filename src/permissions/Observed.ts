@@ -11,8 +11,14 @@ import type { CommunicationDisabled, SlowmodeActive } from "../errors/State.ts"
  * - `slowmodeAppliesToBots`: whether a bot without BypassSlowmode gets 20016 (§8, question 3; H-053). Default
  *   `false`: the docs say slowmode does not apply to bots.
  * - `botsCanBeTimedOut`: whether a bot member can be timed out at all (§8, question 1; H-022). Default `true`.
+ * - `codeForLevel`: the Discord code for each failing level (§8, question 2; H-080): no View answers 50001, View
+ *   with an action flag missing answers 50013. The matrix's `level-vs-raw` check reads it.
  */
-export const Observed = { slowmodeAppliesToBots: false, botsCanBeTimedOut: true } as const
+export const Observed = {
+  slowmodeAppliesToBots: false,
+  botsCanBeTimedOut: true,
+  codeForLevel: { view: 50001, action: 50013 }
+} as const
 
 type Constants = typeof Observed
 

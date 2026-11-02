@@ -125,3 +125,13 @@ export const catchCategory: {
     return caught
   }
 )
+
+/**
+ * The sorted category names an error carries at run time, read from its marker (inherited through the
+ * prototype chain); none for a value without one. The matrix records these next to each tag, so same-tag D5
+ * variants are told apart (§5.12).
+ */
+export const categoriesOf = (value: object): ReadonlyArray<string> => {
+  const marker = Predicate.hasProperty(value, CategoryTypeId) ? value[CategoryTypeId] : undefined
+  return Predicate.isObject(marker) ? Object.keys(marker).sort() : []
+}

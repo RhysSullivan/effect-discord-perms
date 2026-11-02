@@ -6,7 +6,11 @@
  *                            prints counts, and fails if an available oracle disagrees with the baseline
  *   bun run harness:selftest identity checks, then the reset self-test (`SelfTest.ts`): reset, dirt, a read-back
  *                            that must see it, reset, a read-back at baseline, and a second reset with 0 writes
- *   bun run verify:live      the matrix (`run`), built in M3
+ *   bun run verify:live      the matrix (`run --write --compare`): reset, provision, the catalog, the truth table
+ *
+ * `run [--repeat N] [--only glob] [--write] [--compare]` (§5.1): `--only` runs the matching scenarios and
+ * writes and compares a subset table under /tmp, never `fixtures/truth-table.json`; `--compare` fails when the
+ * new table differs from the one a previous process wrote; `--repeat N` runs the matrix N times in one process.
  *
  * `inventory` (no package script) runs the identity checks and lists the lab guild's channels and roles,
  * read-only, for inspecting the lab by hand.
@@ -15,18 +19,20 @@
  * `Identities.ts` (guarded, paced, counted). Failures are printed as their tag and safe fields; tokens are
  * `Redacted` and never reach the output.
  */
-import { BunRuntime } from "@effect/platform-bun"
+import { BunFileSystem, BunRuntime } from "@effect/platform-bun"
 import { Cause, Duration, Effect, Exit, Option } from "effect"
 import * as Identities from "./Identities.ts"
 import * as IdentityCheck from "./IdentityCheck.ts"
+import { LabCheckFailed } from "./Lab.ts"
 import { Pacing, defaults as pacingDefaults } from "./Pacing.ts"
 import * as Provision from "./Provision.ts"
 import * as Reset from "./Reset.ts"
+import * as Runner from "./Runner.ts"
 import * as SelfTest from "./SelfTest.ts"
 import * as Smoke from "./Smoke.ts"
 
-/** Every live command is an infrastructure abort after this long. */
-const commandDeadline = Duration.minutes(30)
+/** Every live command is an infrastructure abort after this long; the matrix gets 60 minutes (§5.11). */
+const commandDeadline = (name: string) => (name === "run" ? Duration.minutes(60) : Duration.minutes(30))
 
 const usage = "usage: bun harness/main.ts reset | smoke | selftest | inventory | run [--repeat N] [--only glob] [--write] [--compare]"
 
@@ -38,9 +44,42 @@ const printIdentities = (report: IdentityCheck.IdentityReport) => {
   for (const item of report.notCheckedYet) console.log(`  not checked yet: ${item}`)
 }
 
-const command = (name: string) =>
+/** The options of `run`, or a usage error. */
+const runOptions = (args: ReadonlyArray<string>): Runner.Options | string => {
+  let only: string | undefined
+  let repeat = 1
+  let write = false
+  let compare = false
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]
+    if (arg === "--write") write = true
+    else if (arg === "--compare") compare = true
+    else if (arg === "--only" || arg === "--repeat") {
+      const value = args[index + 1]
+      if (value === undefined) return `${arg} needs a value`
+      index++
+      if (arg === "--only") only = value
+      else {
+        repeat = Number(value)
+        if (!Number.isInteger(repeat) || repeat < 1) return "--repeat needs a positive integer"
+      }
+    } else return `unknown argument ${arg ?? ""}`
+  }
+  return { only, write, compare, repeat }
+}
+
+const command = (name: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     switch (name) {
+      case "run": {
+        const options = runOptions(args)
+        if (typeof options === "string") return yield* Effect.die(new Error(`${options}\n${usage}`))
+        const report = yield* IdentityCheck.run
+        printIdentities(report)
+        const verdict = yield* Runner.run(report, options).pipe(Effect.provide(BunFileSystem.layer))
+        if (!verdict.ok) return yield* new LabCheckFailed({ check: "run", detail: "the run has mismatches, or its table differs from the previous one (see above)" })
+        return
+      }
       case "reset": {
         const report = yield* IdentityCheck.run
         printIdentities(report)
@@ -110,17 +149,16 @@ const describeFailure = (cause: Cause.Cause<unknown>): string => {
 }
 
 const name = process.argv[2]
-if (name === "run") {
-  console.error("verify:live: the matrix runner is not built yet (it arrives in M3)")
-  process.exit(1)
-}
 if (name === undefined) {
   console.error(usage)
   process.exit(2)
 }
 
-const program = command(name).pipe(
-  Effect.timeoutOrElse({ duration: commandDeadline, orElse: () => Effect.die(new Error(`infrastructure abort: ${name} ran longer than ${Duration.format(commandDeadline)}`)) }),
+const program = command(name, process.argv.slice(3)).pipe(
+  Effect.timeoutOrElse({
+    duration: commandDeadline(name),
+    orElse: () => Effect.die(new Error(`infrastructure abort: ${name} ran longer than ${Duration.format(commandDeadline(name))}`))
+  }),
   Effect.provide(Identities.live(pacingDefaults)),
   Effect.exit,
   Effect.flatMap((exit) =>

@@ -112,3 +112,28 @@ export const classify = (error: DiscordRESTError, route: string, afterMs: number
       }
     }
   })
+
+/**
+ * The tags of the Discord codes that name their failure (§3.1, §3.2): the start of M5's
+ * `(operation, status, code, inner path) -> tag` table. 50013 and 50001 have none: they go through the
+ * recompute. The matrix records this tag as `raw.mappedTag`, and agreement accepts it when it is in the row's
+ * `preflightSet`.
+ */
+export const dedicatedCodeTags: ReadonlyMap<number, string> = new Map([
+  [10003, "UnknownChannel"],
+  [10007, "UnknownMember"],
+  [10008, "UnknownMessage"],
+  [10011, "UnknownRole"],
+  [10014, "UnknownEmoji"],
+  [20016, "SlowmodeActive"],
+  [30003, "MaximumPinsReached"],
+  [30010, "MaximumReactionsReached"],
+  [40033, "AlreadyCrossposted"],
+  [40067, "TagRequired"],
+  [50083, "ThreadArchived"],
+  [60003, "TwoFactorRequired"],
+  [160002, "MissingReadMessageHistory"],
+  [160004, "ThreadAlreadyExists"],
+  [160005, "ThreadLocked"],
+  [160006, "MaximumActiveThreads"]
+])
