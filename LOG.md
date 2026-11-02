@@ -1069,3 +1069,8 @@ Live, in order (each alone under the lock):
   160005), 12 degraded, 2 `setup-unsupported` (`kind-not-available`, `admin-exempt`). The table
   (`e835d554...6242f4`, 442,175 bytes) adds the nine new rows to the previous one and changes no other row; it is
   committed. `bun run verify:offline` is green with it.
+- **exit run A**, after the bucket refilled, same code (`6568745`, only LOG.md changed since W): `bun run
+  verify:live` (`run --write --compare`) exited 0: role budget 79 left, 363 scenarios in 2,199 s, 7,517 requests,
+  1,676 writes, 225 invalid, no 429, **0 mismatches**, `compare: identical to the previous table` (W's, committed);
+  it wrote the same bytes (`e835d554...6242f4`). It passed the bulk delete in voice text chat where the verifier's
+  first run had aborted (`flip/message/voice/bulk-delete/op-flag/normal`).
