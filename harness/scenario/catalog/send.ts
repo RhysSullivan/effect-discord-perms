@@ -311,8 +311,9 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     removals: [],
     memberState: "timed-out"
   }),
-  // ordering (§3.2 tiers 5 and 6, M4 verifier): a locked thread and a payload flag; the lock answers 50001
-  // (H-036), a missing EmbedLinks alone 50013 (H-103), so the code shows which Discord checked first
+  // ordering (§3.2, M4 verifier): a locked thread and a payload flag; the lock alone answers 50001 (H-036), a
+  // missing EmbedLinks alone 50013 (H-103), so the code shows which Discord checks first (M4 live: the payload
+  // flag, so ThreadLocked ranks after the payload flags)
   targeted("order-locked-embed", ["H-036", "H-103"], "embed", {
     channel: "public-thread",
     threadState: "locked",
