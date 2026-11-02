@@ -1,5 +1,5 @@
 export const pinned = pin
-const pinned: Effect.Effect<void, CommunicationDisabled | MaximumPinsReached | MissingPinMessages | MissingViewChannel | PermissionDeniedUnattributed | ThreadArchived | UnknownMessage | Transient, never>
+const pinned: Effect.Effect<void, CommunicationDisabled | MaximumPinsReached | MissingPinMessages | MissingReadMessageHistory | MissingViewChannel | PermissionDeniedUnattributed | ThreadArchived | UnknownMessage | Transient, never>
 
 export const reacted = react
-const reacted: Effect.Effect<void, CommunicationDisabled | MaximumReactionsReached | MissingReadMessageHistoryForReaction | MissingViewChannel | PermissionDeniedUnattributed | PermissionRevokedSinceCheck | UnknownEmoji | UnknownMessage | Transient, never>
+const reacted: Effect.Effect<void, CommunicationDisabled | MaximumReactionsReached | MissingViewChannel | PermissionDeniedUnattributed | PermissionRevokedSinceCheck | UnknownEmoji | UnknownMessage | Transient, never>

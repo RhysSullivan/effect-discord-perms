@@ -5,8 +5,8 @@ import type { OpErrors } from "../../src/permissions/Operations.ts"
 
 declare const pin: Effect.Effect<void, OpErrors<never>["message.pin.thread"]>
 export const pinned = pin
-//           ^? names: Effect.Effect, MissingViewChannel, MissingPinMessages, PermissionDeniedUnattributed, CommunicationDisabled, MaximumPinsReached, ThreadArchived, UnknownMessage, Transient; no-object
+//           ^? names: Effect.Effect, MissingViewChannel, MissingReadMessageHistory, MissingPinMessages, PermissionDeniedUnattributed, CommunicationDisabled, MaximumPinsReached, ThreadArchived, UnknownMessage, Transient; no-object
 
 declare const react: Effect.Effect<void, OpErrors<"AddReactions">["message.react.channel"]>
 export const reacted = react
-//           ^? names: Effect.Effect, MissingReadMessageHistoryForReaction, PermissionRevokedSinceCheck, MaximumReactionsReached; no-object
+//           ^? names: Effect.Effect, MissingViewChannel, PermissionRevokedSinceCheck, MaximumReactionsReached; no-object
