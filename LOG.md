@@ -950,3 +950,8 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
     --compare`) exited 0: role budget 86 left, 354 scenarios in 2,061 s, 7,320 requests, 1,625 writes, 221
     invalid, no 429, **0 mismatches**, `compare: identical to the previous table` (the committed one); it wrote the
     same bytes (`b726e638...d26480`).
+  - **exit run 3**, after the bucket refilled again, same code: `bun --no-env-file harness/main.ts run --compare`
+    in a fresh process exited 0: role budget 84 left, 354 scenarios in 2,051 s, 7,322 requests, 1,625 writes, 221
+    invalid, no 429, **0 mismatches**, `compare: identical to the previous table`. The lock was gone afterwards.
+    `bun run verify:offline` is green after it (gen:errors, typecheck, 799 tests with the replay, test:types,
+    hover, rules, budget).
