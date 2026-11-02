@@ -37,6 +37,7 @@ export const channel = (kind: ChannelKind, overwrites: ReadonlyArray<Overwrite> 
   obfuscated: false,
   overwrites,
   thread: undefined,
+  requireTag: false,
   ...options
 })
 
@@ -46,7 +47,8 @@ export const thread = (kind: "public-thread" | "private-thread" | "announcement-
   parentId: textId,
   obfuscated: false,
   overwrites: [],
-  thread: { archived: false, locked: false, ownerId: otherId, ...meta }
+  thread: { archived: false, locked: false, ownerId: otherId, ...meta },
+  requireTag: false
 })
 
 export const known = (target: ChannelSnap, parent?: ChannelSnap, threadMember = false): ChannelInput => ({ _tag: "Known", channel: target, parent, threadMember })

@@ -90,6 +90,23 @@ export interface OpSpec {
   readonly flags: ReadonlyArray<PermissionFlag>
   readonly variant: Variant
   readonly tags: ReadonlyArray<TagName>
+  /**
+   * Flags whose absence makes a read return less instead of failing: the pins list is empty without
+   * ReadMessageHistory (H-107), which the operation reports as `degraded`, never as an error.
+   */
+  readonly degrades?: ReadonlyArray<PermissionFlag>
+  /**
+   * The timeout blocks the operation itself, although every flag it requires survives the timeout mask (an own
+   * message's edit, §4.7 "State checks": timeout; a reaction with an emoji already on the message, which needs
+   * no AddReactions, M4 live, H-024). Other rows fail under a timeout only through their flags.
+   */
+  readonly blockedByTimeout?: true
+  /**
+   * Flags of the row that Discord checks as access to the target, before anything else, like View (§3.2 tier 1;
+   * M4 live): ReadMessageHistory for pinning, unpinning and crossposting a message, whose absence answers 50001
+   * even under a timeout.
+   */
+  readonly viewLevel?: ReadonlyArray<PermissionFlag>
 }
 
 /** Every operation that can return 50013 or 50001 lists it: the recompute may find nothing (§4.9). */
@@ -129,7 +146,7 @@ export const Operations = {
     tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "UnknownChannel"]
   },
   "thread.edit": {
-    flags: ["ViewChannel", "ManageThreads"],
+    flags: ["ViewChannel", "SendMessagesInThreads", "ManageThreads"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "ThreadLocked", "UnknownChannel"]
   },
@@ -148,26 +165,51 @@ export const Operations = {
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "MaximumActiveThreads", "UnknownChannel"]
   },
-  "channel.pins": { flags: ["ViewChannel"], variant: "default", tags: [...unattributed, "UnknownChannel"] },
-  "voice.pins": { flags: ["ViewChannel", "Connect"], variant: "default", tags: [...unattributed, "CommunicationDisabled", "UnknownChannel"] },
+  "channel.pins": { flags: ["ViewChannel"], variant: "default", tags: [...unattributed, "UnknownChannel"], degrades: ["ReadMessageHistory"] },
+  "voice.pins": {
+    flags: ["ViewChannel", "Connect"],
+    variant: "default",
+    tags: [...unattributed, "CommunicationDisabled", "UnknownChannel"],
+    degrades: ["ReadMessageHistory"]
+  },
   "channel.bulkDelete": {
     flags: ["ViewChannel", "ManageMessages"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "MessagesTooOld", "TooManyMessagesToDelete", "UnknownChannel"]
   },
-  "thread.join": { flags: ["ViewChannel"], variant: "default", tags: [...unattributed, "ThreadArchived", "UnknownChannel"] },
-  "thread.leave": { flags: ["ViewChannel"], variant: "default", tags: [...unattributed, "ThreadArchived", "UnknownChannel"] },
+  "thread.bulkDelete": {
+    flags: ["ViewChannel", "ManageMessages"],
+    variant: "default",
+    tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "MessagesTooOld", "ThreadArchived", "TooManyMessagesToDelete", "UnknownChannel"]
+  },
+  "voice.bulkDelete": {
+    flags: ["ViewChannel", "Connect", "ManageMessages"],
+    variant: "default",
+    tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "MessagesTooOld", "TooManyMessagesToDelete", "UnknownChannel"]
+  },
+  "thread.join": { flags: ["ViewChannel"], variant: "default", tags: [...unattributed, "UnknownChannel"] },
+  "thread.leave": { flags: [], variant: "default", tags: [...unattributed, "UnknownChannel"] },
   "thread.addMember": {
     flags: ["ViewChannel", "SendMessagesInThreads"],
     variant: "default",
-    tags: [...unattributed, "CommunicationDisabled", "ThreadArchived", "UnknownChannel", "UnknownMember"]
+    tags: [...unattributed, "CommunicationDisabled", "UnknownChannel", "UnknownMember"]
   },
   "thread.setArchived": {
-    flags: ["ViewChannel", "ManageThreads"],
+    flags: ["ViewChannel", "SendMessagesInThreads", "ManageThreads"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "ThreadLocked", "UnknownChannel"]
   },
+  "thread.unarchive": {
+    flags: ["ViewChannel", "SendMessagesInThreads"],
+    variant: "default",
+    tags: [...unattributed, "CommunicationDisabled", "ThreadLocked", "UnknownChannel"]
+  },
   "thread.setLocked": {
+    flags: ["ViewChannel", "SendMessagesInThreads", "ManageThreads"],
+    variant: "default",
+    tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "UnknownChannel"]
+  },
+  "thread.delete": {
     flags: ["ViewChannel", "ManageThreads"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "UnknownChannel"]
@@ -175,71 +217,90 @@ export const Operations = {
   "message.edit.channel": {
     flags: ["ViewChannel"],
     variant: "default",
-    tags: [...unattributed, "CommunicationDisabled", "RateLimited", "UnknownMessage"]
+    tags: [...unattributed, "CommunicationDisabled", "RateLimited", "UnknownMessage"],
+    blockedByTimeout: true
   },
   "message.edit.thread": {
     flags: ["ViewChannel"],
     variant: "default",
-    tags: [...unattributed, "CommunicationDisabled", "RateLimited", "ThreadArchived", "ThreadLocked", "UnknownMessage"]
+    tags: [...unattributed, "CommunicationDisabled", "RateLimited", "ThreadArchived", "UnknownMessage"],
+    blockedByTimeout: true
+  },
+  "message.edit.voice": {
+    flags: ["ViewChannel", "Connect"],
+    variant: "default",
+    tags: [...unattributed, "CommunicationDisabled", "RateLimited", "UnknownMessage"],
+    blockedByTimeout: true
   },
   "message.deleteOwn": { flags: ["ViewChannel"], variant: "default", tags: [...unattributed, "UnknownMessage"] },
+  "message.deleteOwn.thread": { flags: ["ViewChannel"], variant: "default", tags: [...unattributed, "ThreadArchived", "UnknownMessage"] },
+  "message.deleteOwn.voice": { flags: ["ViewChannel", "Connect"], variant: "default", tags: [...unattributed, "CommunicationDisabled", "UnknownMessage"] },
   "message.deleteForeign": {
     flags: ["ViewChannel", "ManageMessages"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "UnknownMessage"]
   },
+  "message.deleteForeign.thread": {
+    flags: ["ViewChannel", "ManageMessages"],
+    variant: "default",
+    tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "ThreadArchived", "UnknownMessage"]
+  },
+  "message.deleteForeign.voice": {
+    flags: ["ViewChannel", "Connect", "ManageMessages"],
+    variant: "default",
+    tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "UnknownMessage"]
+  },
   "message.react.channel": {
-    flags: ["ViewChannel", "ReadMessageHistory", "AddReactions"],
+    flags: ["ViewChannel", "AddReactions"],
     variant: "reaction",
-    tags: [...unattributed, "CommunicationDisabled", "MaximumReactionsReached", "UnknownEmoji", "UnknownMessage"]
+    tags: [...unattributed, "CommunicationDisabled", "MaximumReactionsReached", "UnknownEmoji", "UnknownMessage"],
+    blockedByTimeout: true
   },
   "message.react.thread": {
-    flags: ["ViewChannel", "ReadMessageHistory", "AddReactions"],
+    flags: ["ViewChannel", "AddReactions"],
     variant: "reaction",
-    tags: [...unattributed, "CommunicationDisabled", "MaximumReactionsReached", "ThreadArchived", "UnknownEmoji", "UnknownMessage"]
+    tags: [...unattributed, "CommunicationDisabled", "MaximumReactionsReached", "ThreadArchived", "UnknownEmoji", "UnknownMessage"],
+    blockedByTimeout: true
   },
   "message.react.voice": {
-    flags: ["ViewChannel", "Connect", "ReadMessageHistory", "AddReactions"],
+    flags: ["ViewChannel", "Connect", "AddReactions"],
     variant: "reaction",
-    tags: [...unattributed, "CommunicationDisabled", "MaximumReactionsReached", "UnknownEmoji", "UnknownMessage"]
+    tags: [...unattributed, "CommunicationDisabled", "MaximumReactionsReached", "UnknownEmoji", "UnknownMessage"],
+    blockedByTimeout: true
   },
   "message.pin.channel": {
-    flags: ["ViewChannel", "PinMessages"],
+    flags: ["ViewChannel", "ReadMessageHistory", "PinMessages"],
+    viewLevel: ["ReadMessageHistory"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "MaximumPinsReached", "UnknownMessage"]
   },
   "message.pin.thread": {
-    flags: ["ViewChannel", "PinMessages"],
+    flags: ["ViewChannel", "ReadMessageHistory", "PinMessages"],
+    viewLevel: ["ReadMessageHistory"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "MaximumPinsReached", "ThreadArchived", "UnknownMessage"]
   },
-  "message.pin.voice": {
-    flags: ["ViewChannel", "Connect", "PinMessages"],
-    variant: "default",
-    tags: [...unattributed, "CommunicationDisabled", "MaximumPinsReached", "UnknownMessage"]
-  },
   "message.unpin.channel": {
-    flags: ["ViewChannel", "PinMessages"],
+    flags: ["ViewChannel", "ReadMessageHistory", "PinMessages"],
+    viewLevel: ["ReadMessageHistory"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "UnknownMessage"]
   },
   "message.unpin.thread": {
-    flags: ["ViewChannel", "PinMessages"],
+    flags: ["ViewChannel", "ReadMessageHistory", "PinMessages"],
+    viewLevel: ["ReadMessageHistory"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "ThreadArchived", "UnknownMessage"]
   },
-  "message.unpin.voice": {
-    flags: ["ViewChannel", "Connect", "PinMessages"],
-    variant: "default",
-    tags: [...unattributed, "CommunicationDisabled", "UnknownMessage"]
-  },
   "message.crosspostOwn": {
-    flags: ["ViewChannel", "SendMessages"],
+    flags: ["ViewChannel", "ReadMessageHistory", "SendMessages"],
+    viewLevel: ["ReadMessageHistory"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "AlreadyCrossposted", "RateLimited", "UnknownMessage"]
   },
   "message.crosspostForeign": {
-    flags: ["ViewChannel", "SendMessages", "ManageMessages"],
+    flags: ["ViewChannel", "ReadMessageHistory", "SendMessages", "ManageMessages"],
+    viewLevel: ["ReadMessageHistory"],
     variant: "default",
     tags: [...unattributed, "CommunicationDisabled", "TwoFactorRequired", "AlreadyCrossposted", "RateLimited", "UnknownMessage"]
   },

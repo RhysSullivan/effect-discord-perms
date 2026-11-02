@@ -21,7 +21,7 @@ export const PayloadRules = {
   reply: { flag: "ReadMessageHistory", mode: "error" },
   embeds: { flag: "EmbedLinks", mode: "error" },
   files: { flag: "AttachFiles", mode: "error" },
-  tts: { flag: "SendTTSMessages", mode: "error" },
+  tts: { flag: "SendTTSMessages", mode: "degrade" },
   poll: { flag: "SendPolls", mode: "error" },
   externalSticker: { flag: "UseExternalStickers", mode: "error" },
   externalEmojiInContent: { flag: "UseExternalEmojis", mode: "degrade" },

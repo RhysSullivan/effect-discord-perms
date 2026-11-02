@@ -104,6 +104,7 @@ expectTypeOf<OpErrors<never>["channel.edit"]>().toEqualTypeOf<
 >()
 expectTypeOf<OpErrors<never>["thread.edit"]>().toEqualTypeOf<
   | MissingViewChannel
+  | MissingSendMessagesInThreads
   | MissingManageThreads
   | PermissionDeniedUnattributed
   | CommunicationDisabled
@@ -145,22 +146,55 @@ expectTypeOf<OpErrors<never>["channel.bulkDelete"]>().toEqualTypeOf<
   | UnknownChannel
   | Transient
 >()
+expectTypeOf<OpErrors<never>["thread.bulkDelete"]>().toEqualTypeOf<
+  | MissingViewChannel
+  | MissingManageMessages
+  | PermissionDeniedUnattributed
+  | CommunicationDisabled
+  | TwoFactorRequired
+  | MessagesTooOld
+  | ThreadArchived
+  | TooManyMessagesToDelete
+  | UnknownChannel
+  | Transient
+>()
+expectTypeOf<OpErrors<never>["voice.bulkDelete"]>().toEqualTypeOf<
+  | MissingViewChannel
+  | MissingConnect
+  | MissingManageMessages
+  | PermissionDeniedUnattributed
+  | CommunicationDisabled
+  | TwoFactorRequired
+  | MessagesTooOld
+  | TooManyMessagesToDelete
+  | UnknownChannel
+  | Transient
+>()
 
 // Thread operations
-expectTypeOf<OpErrors<never>["thread.join"]>().toEqualTypeOf<MissingViewChannel | PermissionDeniedUnattributed | ThreadArchived | UnknownChannel | Transient>()
-expectTypeOf<OpErrors<never>["thread.leave"]>().toEqualTypeOf<MissingViewChannel | PermissionDeniedUnattributed | ThreadArchived | UnknownChannel | Transient>()
+expectTypeOf<OpErrors<never>["thread.join"]>().toEqualTypeOf<
+  | MissingViewChannel
+  | PermissionDeniedUnattributed
+  | UnknownChannel
+  | Transient
+>()
+expectTypeOf<OpErrors<never>["thread.leave"]>().toEqualTypeOf<
+  | PermissionDeniedUnattributed
+  | UnknownChannel
+  | Transient
+>()
 expectTypeOf<OpErrors<never>["thread.addMember"]>().toEqualTypeOf<
   | MissingViewChannel
   | MissingSendMessagesInThreads
   | PermissionDeniedUnattributed
   | CommunicationDisabled
-  | ThreadArchived
   | UnknownChannel
   | UnknownMember
   | Transient
 >()
 expectTypeOf<OpErrors<never>["thread.setArchived"]>().toEqualTypeOf<
   | MissingViewChannel
+  | MissingSendMessagesInThreads
   | MissingManageThreads
   | PermissionDeniedUnattributed
   | CommunicationDisabled
@@ -169,7 +203,26 @@ expectTypeOf<OpErrors<never>["thread.setArchived"]>().toEqualTypeOf<
   | UnknownChannel
   | Transient
 >()
+expectTypeOf<OpErrors<never>["thread.unarchive"]>().toEqualTypeOf<
+  | MissingViewChannel
+  | MissingSendMessagesInThreads
+  | PermissionDeniedUnattributed
+  | CommunicationDisabled
+  | ThreadLocked
+  | UnknownChannel
+  | Transient
+>()
 expectTypeOf<OpErrors<never>["thread.setLocked"]>().toEqualTypeOf<
+  | MissingViewChannel
+  | MissingSendMessagesInThreads
+  | MissingManageThreads
+  | PermissionDeniedUnattributed
+  | CommunicationDisabled
+  | TwoFactorRequired
+  | UnknownChannel
+  | Transient
+>()
+expectTypeOf<OpErrors<never>["thread.delete"]>().toEqualTypeOf<
   MissingViewChannel | MissingManageThreads | PermissionDeniedUnattributed | CommunicationDisabled | TwoFactorRequired | UnknownChannel | Transient
 >()
 
@@ -183,19 +236,61 @@ expectTypeOf<OpErrors<never>["message.edit.thread"]>().toEqualTypeOf<
   | CommunicationDisabled
   | RateLimited
   | ThreadArchived
-  | ThreadLocked
+  | UnknownMessage
+  | Transient
+>()
+expectTypeOf<OpErrors<never>["message.edit.voice"]>().toEqualTypeOf<
+  | MissingViewChannel
+  | MissingConnect
+  | PermissionDeniedUnattributed
+  | CommunicationDisabled
+  | RateLimited
   | UnknownMessage
   | Transient
 >()
 expectTypeOf<OpErrors<never>["message.deleteOwn"]>().toEqualTypeOf<MissingViewChannel | PermissionDeniedUnattributed | UnknownMessage | Transient>()
+expectTypeOf<OpErrors<never>["message.deleteOwn.thread"]>().toEqualTypeOf<
+  | MissingViewChannel
+  | PermissionDeniedUnattributed
+  | ThreadArchived
+  | UnknownMessage
+  | Transient
+>()
+expectTypeOf<OpErrors<never>["message.deleteOwn.voice"]>().toEqualTypeOf<
+  | MissingViewChannel
+  | MissingConnect
+  | PermissionDeniedUnattributed
+  | CommunicationDisabled
+  | UnknownMessage
+  | Transient
+>()
 expectTypeOf<OpErrors<never>["message.deleteForeign"]>().toEqualTypeOf<
   MissingViewChannel | MissingManageMessages | PermissionDeniedUnattributed | CommunicationDisabled | TwoFactorRequired | UnknownMessage | Transient
 >()
+expectTypeOf<OpErrors<never>["message.deleteForeign.thread"]>().toEqualTypeOf<
+  | MissingViewChannel
+  | MissingManageMessages
+  | PermissionDeniedUnattributed
+  | CommunicationDisabled
+  | TwoFactorRequired
+  | ThreadArchived
+  | UnknownMessage
+  | Transient
+>()
+expectTypeOf<OpErrors<never>["message.deleteForeign.voice"]>().toEqualTypeOf<
+  | MissingViewChannel
+  | MissingConnect
+  | MissingManageMessages
+  | PermissionDeniedUnattributed
+  | CommunicationDisabled
+  | TwoFactorRequired
+  | UnknownMessage
+  | Transient
+>()
 
-// Reactions: ReadMessageHistory is the `access` variant
+// Reactions need no ReadMessageHistory (M4 live, H-144); the `reaction` variant is kept for the rows
 expectTypeOf<OpErrors<never>["message.react.channel"]>().toEqualTypeOf<
   | MissingViewChannel
-  | MissingReadMessageHistoryForReaction
   | MissingAddReactions
   | PermissionDeniedUnattributed
   | CommunicationDisabled
@@ -206,7 +301,6 @@ expectTypeOf<OpErrors<never>["message.react.channel"]>().toEqualTypeOf<
 >()
 expectTypeOf<OpErrors<never>["message.react.thread"]>().toEqualTypeOf<
   | MissingViewChannel
-  | MissingReadMessageHistoryForReaction
   | MissingAddReactions
   | PermissionDeniedUnattributed
   | CommunicationDisabled
@@ -219,7 +313,6 @@ expectTypeOf<OpErrors<never>["message.react.thread"]>().toEqualTypeOf<
 expectTypeOf<OpErrors<never>["message.react.voice"]>().toEqualTypeOf<
   | MissingViewChannel
   | MissingConnect
-  | MissingReadMessageHistoryForReaction
   | MissingAddReactions
   | PermissionDeniedUnattributed
   | CommunicationDisabled
@@ -231,10 +324,18 @@ expectTypeOf<OpErrors<never>["message.react.voice"]>().toEqualTypeOf<
 
 // Pins
 expectTypeOf<OpErrors<never>["message.pin.channel"]>().toEqualTypeOf<
-  MissingViewChannel | MissingPinMessages | PermissionDeniedUnattributed | CommunicationDisabled | MaximumPinsReached | UnknownMessage | Transient
+  | MissingViewChannel
+  | MissingReadMessageHistory
+  | MissingPinMessages
+  | PermissionDeniedUnattributed
+  | CommunicationDisabled
+  | MaximumPinsReached
+  | UnknownMessage
+  | Transient
 >()
 expectTypeOf<OpErrors<never>["message.pin.thread"]>().toEqualTypeOf<
   | MissingViewChannel
+  | MissingReadMessageHistory
   | MissingPinMessages
   | PermissionDeniedUnattributed
   | CommunicationDisabled
@@ -243,29 +344,30 @@ expectTypeOf<OpErrors<never>["message.pin.thread"]>().toEqualTypeOf<
   | UnknownMessage
   | Transient
 >()
-expectTypeOf<OpErrors<never>["message.pin.voice"]>().toEqualTypeOf<
+expectTypeOf<OpErrors<never>["message.unpin.channel"]>().toEqualTypeOf<
   | MissingViewChannel
-  | MissingConnect
+  | MissingReadMessageHistory
   | MissingPinMessages
   | PermissionDeniedUnattributed
   | CommunicationDisabled
-  | MaximumPinsReached
   | UnknownMessage
   | Transient
 >()
-expectTypeOf<OpErrors<never>["message.unpin.channel"]>().toEqualTypeOf<
-  MissingViewChannel | MissingPinMessages | PermissionDeniedUnattributed | CommunicationDisabled | UnknownMessage | Transient
->()
 expectTypeOf<OpErrors<never>["message.unpin.thread"]>().toEqualTypeOf<
-  MissingViewChannel | MissingPinMessages | PermissionDeniedUnattributed | CommunicationDisabled | ThreadArchived | UnknownMessage | Transient
->()
-expectTypeOf<OpErrors<never>["message.unpin.voice"]>().toEqualTypeOf<
-  MissingViewChannel | MissingConnect | MissingPinMessages | PermissionDeniedUnattributed | CommunicationDisabled | UnknownMessage | Transient
+  | MissingViewChannel
+  | MissingReadMessageHistory
+  | MissingPinMessages
+  | PermissionDeniedUnattributed
+  | CommunicationDisabled
+  | ThreadArchived
+  | UnknownMessage
+  | Transient
 >()
 
 // Crossposts
 expectTypeOf<OpErrors<never>["message.crosspostOwn"]>().toEqualTypeOf<
   | MissingViewChannel
+  | MissingReadMessageHistory
   | MissingSendMessages
   | PermissionDeniedUnattributed
   | CommunicationDisabled
@@ -276,6 +378,7 @@ expectTypeOf<OpErrors<never>["message.crosspostOwn"]>().toEqualTypeOf<
 >()
 expectTypeOf<OpErrors<never>["message.crosspostForeign"]>().toEqualTypeOf<
   | MissingViewChannel
+  | MissingReadMessageHistory
   | MissingSendMessages
   | MissingManageMessages
   | PermissionDeniedUnattributed

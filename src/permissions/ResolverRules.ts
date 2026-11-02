@@ -44,6 +44,12 @@ export interface Rules {
   readonly lockedThreadNeedsManageThreads: ResolverRule<boolean>
   /** Role assignment compares the role with the bot's highest role only; the target's rank does not matter (H-060, H-061). */
   readonly roleAssignmentIgnoresTargetRank: ResolverRule<boolean>
+  /** A thread's creator may archive it without ManageThreads (H-045, TH "Editing & Deleting Threads"). Read by preflight. */
+  readonly threadCreatorMayArchive: ResolverRule<boolean>
+  /** A thread's creator may delete it without ManageThreads (H-045 says ManageThreads always; M4 live refutes it). Read by preflight. */
+  readonly threadCreatorMayDelete: ResolverRule<boolean>
+  /** A thread's creator may lock it without ManageThreads (H-045 and CH say ManageThreads; M4 live refutes it). Read by preflight. */
+  readonly threadCreatorMayLock: ResolverRule<boolean>
 }
 
 /** The current values. Edit only from a live finding, with a `LOG.md` line. */
@@ -60,5 +66,8 @@ export const ResolverRules: Rules = {
   timeoutKeeps: { hypotheses: ["H-020", "H-029"], source: "docs", value: ["ViewChannel", "ReadMessageHistory"] },
   timeoutExemptsOwnerAndAdministrator: { hypotheses: ["H-021"], source: "docs", value: true },
   lockedThreadNeedsManageThreads: { hypotheses: ["H-036"], source: "docs", value: true },
-  roleAssignmentIgnoresTargetRank: { hypotheses: ["H-060", "H-061"], source: "docs", value: true }
+  roleAssignmentIgnoresTargetRank: { hypotheses: ["H-060", "H-061"], source: "docs", value: true },
+  threadCreatorMayArchive: { hypotheses: ["H-038", "H-039", "H-045"], source: "docs", value: true },
+  threadCreatorMayDelete: { hypotheses: ["H-045"], source: "live", value: true },
+  threadCreatorMayLock: { hypotheses: ["H-045"], source: "live", value: true }
 }

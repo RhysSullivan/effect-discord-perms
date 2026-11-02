@@ -107,6 +107,9 @@ const IdOnly = Schema.Struct({ id: GuildId })
 /** The channel flag Discord sets on a channel the bot cannot view (H-160). */
 export const obfuscatedFlag = 1 << 17
 
+/** The channel flag that makes a forum or media channel's posts require a tag (H-044). */
+export const requireTagFlag = 1 << 4
+
 const bits = (decimal: string): Flags.PermissionSet => Flags.fromBits(BigInt(decimal))
 
 /** A wire role as a snapshot role. */
@@ -141,7 +144,8 @@ export const toChannel = (channel: WireChannel): Converted => {
       parentId: channel.parent_id ?? undefined,
       obfuscated,
       overwrites,
-      thread: isThreadKind(kind) && metadata !== undefined ? { archived: metadata.archived, locked: metadata.locked, ownerId: channel.owner_id } : undefined
+      thread: isThreadKind(kind) && metadata !== undefined ? { archived: metadata.archived, locked: metadata.locked, ownerId: channel.owner_id } : undefined,
+      requireTag: (kind === "forum" || kind === "media") && ((channel.flags ?? 0) & requireTagFlag) !== 0
     }
   }
 }

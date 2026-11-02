@@ -7,22 +7,38 @@
  * What counts as a problem:
  *
  * - **A blind channel** (obfuscated, unseen, or a private thread the bot neither belongs to nor moderates):
- *   ViewChannel, and nothing else, because nothing else about the channel is known.
+ *   ViewChannel, and nothing else, because nothing else about the channel is known; nothing at all for a row
+ *   that needs no View (leaving a thread).
  * - **A required flag missing after overwrites**: the row's flags and the payload's error-mode flags.
  *   Flags removed only by an implicit mask follow from another problem (no View, no Send, no Connect) and are
  *   not listed separately; granting the first problem's flag brings them back.
  * - **The timeout**: `CommunicationDisabled` when the timeout mask applies and the request needs a flag it
- *   does not keep (anything but View and ReadMessageHistory, H-020).
+ *   does not keep (anything but View and ReadMessageHistory, H-020), or the row is `blockedByTimeout` (an own
+ *   message's edit).
  * - **Thread state**, where the row lists the tag: a locked thread without ManageThreads (H-036), an archived
  *   thread (H-037). Send rows do not list `ThreadArchived`: sending unarchives (H-035).
+ * - **Hierarchy**, for member operations: a target not below the bot (H-064, H-066), an Administrator target of a
+ *   timeout (H-067), a role not below the bot's highest role (H-060) or a managed one (H-068).
+ * - **A required tag** on a forum or media post (H-044).
  *
- * Payload degrade-mode flags never fail a request; when they are missing from the effective set they are
- * reported in `degraded`.
+ * The row's flags are adjusted to the request: AddReactions only for a new emoji (H-144), and no ManageThreads
+ * for the creator archiving, locking or deleting its thread (H-045, M4 live). Degrade-mode flags (the payload's, and the row's `degrades`,
+ * such as ReadMessageHistory for the pins list, H-107) never fail a request; when they are missing from the
+ * effective set they are reported in `degraded`.
  */
 import { Context } from "effect"
 import { PreflightDecision } from "../errors/Cause.ts"
 import type { PermissionFlag } from "../errors/Missing.generated.ts"
-import { CommunicationDisabled, RoleAboveInHierarchy, RoleIsManaged, TargetAboveInHierarchy, TargetIsAdministrator, ThreadArchived, ThreadLocked } from "../errors/State.ts"
+import {
+  CommunicationDisabled,
+  RoleAboveInHierarchy,
+  RoleIsManaged,
+  TagRequired,
+  TargetAboveInHierarchy,
+  TargetIsAdministrator,
+  ThreadArchived,
+  ThreadLocked
+} from "../errors/State.ts"
 import { degradeFlags, errorFlags, type PayloadRuleName } from "../payload/PayloadRules.ts"
 import * as Flags from "./Flags.ts"
 import { errorFor, type OpName, Operations, type OpPermissionErrors, type OpSpec } from "./Operations.ts"
@@ -36,6 +52,23 @@ export type { Failure } from "./Order.ts"
 export interface DecideArgs {
   /** The payload features present (§2.3), for operations that send a payload; empty otherwise. */
   readonly payload: ReadonlyArray<PayloadRuleName>
+  /**
+   * For a reaction: whether the emoji is on the message already. AddReactions is needed only for an emoji
+   * nobody has reacted with yet (H-144); when that is not known (`unknown`) it is not checked, and a 50013 goes
+   * to the recompute, which fetches the message (§4.7).
+   */
+  readonly reaction?: "new" | "existing" | "unknown"
+  /**
+   * For a member operation on a target: whether the target ranks below the bot (`Resolver.targetBelow`, H-064,
+   * H-066) and whether it holds Administrator (a timeout cannot apply to it, H-067).
+   */
+  readonly target?: { readonly below: boolean; readonly administrator: boolean }
+  /** For role assignment: whether the role is below the bot's highest role (`Resolver.roleBelow`, H-060) and managed (H-068). */
+  readonly role?: { readonly below: boolean; readonly managed: boolean }
+  /** For `thread.setArchived`, `thread.setLocked` and `thread.delete`: whether the bot created the thread, which they do not need ManageThreads for (H-045, M4 live). */
+  readonly creator?: boolean
+  /** For a forum or media post: whether it carries a tag, which a channel with `REQUIRE_TAG` demands (H-044). */
+  readonly tagged?: boolean
 }
 
 /** Preflight's verdict. */
@@ -44,31 +77,52 @@ export interface Decision {
   readonly required: ReadonlyArray<PermissionFlag>
   /** Every problem, most fundamental first (§3.2). Empty means the request may be sent. */
   readonly failures: ReadonlyArray<Failure>
-  /** Degrade-mode payload flags missing from the effective permissions: features Discord will drop. */
+  /**
+   * Degrade-mode flags missing from the effective permissions: payload features Discord will drop, or a read
+   * that returns less (the row's `degrades`, H-107).
+   */
   readonly degraded: ReadonlyArray<PermissionFlag>
 }
 
-/** The flags an operation with this payload needs, in order: the row's, the payload's error-mode, then degrade-mode. */
+/**
+ * The row's flags this request needs: AddReactions only for a new emoji (H-144), and ManageThreads not for the
+ * creator archiving its thread (H-045).
+ */
+const rowFlags = (op: OpName, args: DecideArgs): ReadonlyArray<PermissionFlag> => {
+  const row: OpSpec = Operations[op]
+  const creatorExempt =
+    args.creator === true &&
+    ((op === "thread.setArchived" && ResolverRules.threadCreatorMayArchive.value) ||
+      (op === "thread.setLocked" && ResolverRules.threadCreatorMayLock.value) ||
+      (op === "thread.delete" && ResolverRules.threadCreatorMayDelete.value))
+  return row.flags.filter((flag) => !(flag === "AddReactions" && row.variant === "reaction" && args.reaction !== "new") && !(flag === "ManageThreads" && creatorExempt))
+}
+
+/** The flags whose absence degrades the request instead of failing it: the payload's degrade-mode flags and the row's `degrades`. */
+export const degradableFlags = (op: OpName, args: DecideArgs): ReadonlyArray<PermissionFlag> => {
+  const row: OpSpec = Operations[op]
+  return [...new Set([...degradeFlags(args.payload), ...(row.degrades ?? [])])]
+}
+
+/** The flags an operation with this request needs, in order: the row's, the payload's error-mode, then the degradable ones. */
 export const requiredFlags = (op: OpName, args: DecideArgs): ReadonlyArray<PermissionFlag> => {
   const out: Array<PermissionFlag> = []
-  const row: OpSpec = Operations[op]
-  for (const flag of [...row.flags, ...errorFlags(args.payload), ...degradeFlags(args.payload)]) if (!out.includes(flag)) out.push(flag)
+  for (const flag of [...rowFlags(op, args), ...errorFlags(args.payload), ...degradableFlags(op, args)]) if (!out.includes(flag)) out.push(flag)
   return out
 }
 
-/** The flags whose absence fails the request (the row's and the payload's error-mode flags). */
-export const errorModeFlags = (op: OpName, args: DecideArgs): ReadonlyArray<PermissionFlag> => {
-  const row: OpSpec = Operations[op]
-  return [...new Set([...row.flags, ...errorFlags(args.payload)])]
-}
+/** The flags whose absence fails the request (the row's, as this request needs them, and the payload's error-mode flags). */
+export const errorModeFlags = (op: OpName, args: DecideArgs): ReadonlyArray<PermissionFlag> => [...new Set([...rowFlags(op, args), ...errorFlags(args.payload)])]
 
 /** Decides `op` over `resolution` (see the module comment). Pure. */
 export const decide = (op: OpName, resolution: Resolution, args: DecideArgs): Decision => {
   const required = requiredFlags(op, args)
   const needed = errorModeFlags(op, args)
-  const degraded = degradeFlags(args.payload).filter((flag) => !Flags.has(resolution.effective, flag))
+  const degraded = degradableFlags(op, args).filter((flag) => !Flags.has(resolution.effective, flag))
+  const row: OpSpec = Operations[op]
   if (resolution.masks.some((mask) => blindMasks.has(mask))) {
-    return { required, failures: [{ _tag: "MissingFlag", flag: "ViewChannel" }], degraded }
+    // a row that needs no View (leaving a thread, M4 live) still runs on a channel the bot cannot see
+    return { required, failures: row.flags.includes("ViewChannel") ? [{ _tag: "MissingFlag", flag: "ViewChannel" }] : [], degraded }
   }
   const held = resolution.afterOverwrites
   const failures: Array<Failure> = needed.filter((flag) => !Flags.has(held, flag)).map((flag) => ({ _tag: "MissingFlag", flag }))
@@ -76,16 +130,25 @@ export const decide = (op: OpName, resolution: Resolution, args: DecideArgs): De
   // so it is its own problem (ranked above SendMessages, §3.2).
   const timeout = resolution.timeout
   const kept = ResolverRules.timeoutKeeps.value
-  if (timeout !== undefined && needed.some((flag) => !kept.includes(flag))) failures.push({ _tag: "CommunicationDisabled", until: timeout.until })
-  const row: OpSpec = Operations[op]
+  if (timeout !== undefined && (row.blockedByTimeout === true || needed.some((flag) => !kept.includes(flag)))) failures.push({ _tag: "CommunicationDisabled", until: timeout.until })
+  const lists = (tag: OpSpec["tags"][number]): boolean => row.tags.includes(tag)
   const thread = resolution.thread
   if (thread !== undefined) {
     const moderates = Flags.has(held, "ManageThreads")
-    if (row.tags.includes("ThreadLocked") && thread.locked && !(ResolverRules.lockedThreadNeedsManageThreads.value && moderates)) {
-      failures.push({ _tag: "ThreadLocked" })
-    }
-    if (row.tags.includes("ThreadArchived") && thread.archived) failures.push({ _tag: "ThreadArchived" })
+    if (lists("ThreadLocked") && thread.locked && !(ResolverRules.lockedThreadNeedsManageThreads.value && moderates)) failures.push({ _tag: "ThreadLocked" })
+    if (lists("ThreadArchived") && thread.archived) failures.push({ _tag: "ThreadArchived" })
   }
+  const target = args.target
+  if (target !== undefined) {
+    if (lists("TargetAboveInHierarchy") && !target.below) failures.push({ _tag: "TargetAboveInHierarchy" })
+    if (lists("TargetIsAdministrator") && target.administrator) failures.push({ _tag: "TargetIsAdministrator" })
+  }
+  const role = args.role
+  if (role !== undefined) {
+    if (lists("RoleAboveInHierarchy") && !role.below) failures.push({ _tag: "RoleAboveInHierarchy" })
+    if (lists("RoleIsManaged") && role.managed) failures.push({ _tag: "RoleIsManaged" })
+  }
+  if (lists("TagRequired") && resolution.requireTag && args.tagged !== true) failures.push({ _tag: "TagRequired" })
   return { required, failures: sortFailures(op, failures), degraded }
 }
 
@@ -99,6 +162,7 @@ export type PreflightError =
   | ThreadLocked
   | ThreadArchived
   | RoleIsManaged
+  | TagRequired
 
 /** The error a failure becomes for `op`, with `cause`. Permission errors go through `errorFor` (D5 variants). */
 export const toError = (op: OpName, failure: Failure, cause: PreflightDecision): PreflightError => {
@@ -119,6 +183,8 @@ export const toError = (op: OpName, failure: Failure, cause: PreflightDecision):
       return new ThreadArchived({ cause })
     case "RoleIsManaged":
       return new RoleIsManaged({ cause })
+    case "TagRequired":
+      return new TagRequired({ cause })
   }
 }
 

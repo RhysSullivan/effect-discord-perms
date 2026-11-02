@@ -27,8 +27,8 @@ const twoFactorFlags: ReadonlySet<string> = new Set([
 const keptByTimeout: ReadonlySet<string> = new Set(["ViewChannel", "ReadMessageHistory"])
 
 describe("the operation table", () => {
-  it("has 40 rows, each with known flags and tags and no duplicates", () => {
-    expect(rows).toHaveLength(40)
+  it("has 47 rows, each with known flags and tags and no duplicates", () => {
+    expect(rows).toHaveLength(47)
     const flags: ReadonlySet<string> = new Set(PermissionFlags)
     const classes: ReadonlySet<string> = new Set(Object.keys(ErrorClasses))
     for (const [op, row] of rows) {
@@ -53,9 +53,9 @@ describe("the operation table", () => {
     }
   })
 
-  it("leaves CommunicationDisabled out only of channel pins, join, leave, own delete and DMs (§2.4)", () => {
+  it("leaves CommunicationDisabled out only of channel pins, join, leave, own delete outside voice and DMs (§2.4)", () => {
     const without = rows.filter(([, row]) => !row.tags.includes("CommunicationDisabled")).map(([op]) => op)
-    expect(without.sort()).toEqual(["channel.pins", "dm.send", "message.deleteOwn", "thread.join", "thread.leave"])
+    expect(without.sort()).toEqual(["channel.pins", "dm.send", "message.deleteOwn", "message.deleteOwn.thread", "thread.join", "thread.leave"])
   })
 
   it("lists PermissionDeniedUnattributed in every row that sends a guild request, because a 50013 or 50001 recompute may find nothing (§3.1, §4.9)", () => {
@@ -67,7 +67,8 @@ describe("the operation table", () => {
 
   it("requires ViewChannel first in every channel row, and Connect second in every voice row (§3.2; H-015, H-152)", () => {
     for (const [op, row] of rows) {
-      if (op.startsWith("member.") || op === "dm.send") continue
+      // leaving a thread needs no View (M4 live: it succeeds with View denied on the parent)
+      if (op.startsWith("member.") || op === "dm.send" || op === "thread.leave") continue
       expect({ op, first: row.flags[0] }).toEqual({ op, first: "ViewChannel" })
       if (op.startsWith("voice.") || op.endsWith(".voice")) expect({ op, second: row.flags[1] }).toEqual({ op, second: "Connect" })
     }
@@ -79,12 +80,16 @@ describe("the operation table", () => {
     expect(byVariant("reaction")).toEqual(["message.react.channel", "message.react.thread", "message.react.voice"])
   })
 
-  it("never lists ThreadArchived on a send (C16, H-035), and lists it on the thread variants of edit, react, pin and unpin", () => {
+  it("never lists ThreadArchived on a send (C16, H-035), join, leave or addMember (M4 live), and lists it on the thread variants of edit, delete, bulk delete, react, pin and unpin", () => {
     for (const [op, row] of rows) {
       if (op.endsWith(".send") || op === "forum.createPost") expect({ op, archived: row.tags.includes("ThreadArchived") }).toEqual({ op, archived: false })
     }
-    for (const op of ["message.edit.thread", "message.react.thread", "message.pin.thread", "message.unpin.thread", "thread.join", "thread.leave", "thread.addMember"] as const) {
+    for (const op of ["message.edit.thread", "message.deleteOwn.thread", "message.deleteForeign.thread", "thread.bulkDelete", "message.react.thread", "message.pin.thread", "message.unpin.thread"] as const) {
       expect({ op, archived: Operations[op].tags.some((tag) => tag === "ThreadArchived") }).toEqual({ op, archived: true })
+    }
+    for (const op of ["thread.join", "thread.leave", "thread.addMember"] as const) {
+      const tags: ReadonlyArray<string> = Operations[op].tags
+      expect({ op, archived: tags.includes("ThreadArchived") }).toEqual({ op, archived: false })
     }
   })
 })

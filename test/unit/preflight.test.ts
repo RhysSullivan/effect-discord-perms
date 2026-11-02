@@ -8,6 +8,7 @@ import { decide, requiredFlags, tagOf, toError } from "../../src/permissions/Pre
 import { type ChannelInput, resolve } from "../../src/permissions/Resolver.ts"
 import type { PayloadRuleName } from "../../src/payload/PayloadRules.ts"
 import { categoriesOf } from "../support/categories.ts"
+import { UserId } from "../../src/Snowflake.ts"
 import { channel, everyone, guild, guildId, known, later, member, memberOverwrite, now, role, roleOverwrite, set, thread } from "../support/guild.ts"
 
 /**
@@ -119,8 +120,83 @@ describe("Order", () => {
     ])
   })
 
-  it("puts ReadMessageHistory with the access flags for a reaction, and the row's own flags in row order", () => {
-    const failures: ReadonlyArray<Failure> = [{ _tag: "MissingFlag", flag: "AddReactions" }, { _tag: "MissingFlag", flag: "ReadMessageHistory" }, { _tag: "MissingFlag", flag: "Connect" }]
-    expect(sortFailures("message.react.voice", failures).map((failure) => (failure._tag === "MissingFlag" ? failure.flag : failure._tag))).toEqual(["Connect", "ReadMessageHistory", "AddReactions"])
+  it("ranks a row's viewLevel flag with View, above the timeout, and the row's own flags in row order (M4 live)", () => {
+    const failures: ReadonlyArray<Failure> = [
+      { _tag: "MissingFlag", flag: "PinMessages" },
+      { _tag: "CommunicationDisabled", until: later },
+      { _tag: "MissingFlag", flag: "ReadMessageHistory" },
+      { _tag: "MissingFlag", flag: "ViewChannel" }
+    ]
+    expect(sortFailures("message.pin.thread", failures).map((failure) => (failure._tag === "MissingFlag" ? failure.flag : failure._tag))).toEqual([
+      "ViewChannel",
+      "ReadMessageHistory",
+      "CommunicationDisabled",
+      "PinMessages"
+    ])
+    // outside a row's viewLevel, ReadMessageHistory is a payload flag (a reply), ranked last
+    expect(sortFailures("channel.send", [{ _tag: "MissingFlag", flag: "ReadMessageHistory" }, { _tag: "CommunicationDisabled", until: later }]).map((failure) => (failure._tag === "MissingFlag" ? failure.flag : failure._tag))).toEqual([
+      "CommunicationDisabled",
+      "ReadMessageHistory"
+    ])
+    // a reaction's own flag after Connect; ReadMessageHistory is not a reaction's flag (M4 live, H-144)
+    expect(sortFailures("message.react.voice", [{ _tag: "MissingFlag", flag: "AddReactions" }, { _tag: "MissingFlag", flag: "Connect" }]).map((failure) => (failure._tag === "MissingFlag" ? failure.flag : failure._tag))).toEqual(["Connect", "AddReactions"])
+  })
+})
+
+describe("Preflight.decide for the M4 operations", () => {
+  const granted = (...flags: ReadonlyArray<PermissionFlag>) => guild([role(everyone, set(...flags))])
+  const at = (op: OpName, target: ChannelInput, flags: ReadonlyArray<PermissionFlag>, args: Omit<Parameters<typeof decide>[2], "payload"> = {}, timedOutUntil: string | null = null) =>
+    decide(op, resolve({ guild: granted(...flags), channel: target, member: member([], timedOutUntil), now }), { payload: [], ...args }).failures.map((failure) => tagOf(op, failure))
+
+  it("needs AddReactions only for an emoji nobody reacted with (H-144)", () => {
+    expect(at("message.react.channel", known(channel("text")), ["ViewChannel"], { reaction: "new" })).toEqual(["MissingAddReactions"])
+    expect(at("message.react.channel", known(channel("text")), ["ViewChannel"], { reaction: "existing" })).toEqual([])
+    expect(at("message.react.channel", known(channel("text")), ["ViewChannel"], { reaction: "unknown" })).toEqual([])
+    expect(requiredFlags("message.react.channel", { payload: [], reaction: "existing" })).toEqual(["ViewChannel"])
+  })
+
+  it("exempts a thread's creator from ManageThreads to archive, lock or delete it (H-045 refuted for lock and delete, M4 live)", () => {
+    const own = known(thread("public-thread", { ownerId: UserId.make("200000000000000001") }), channel("text"), true)
+    const flags: ReadonlyArray<PermissionFlag> = ["ViewChannel", "SendMessagesInThreads"]
+    expect(at("thread.setArchived", own, flags, { creator: true })).toEqual([])
+    expect(at("thread.setArchived", own, flags, { creator: false })).toEqual(["MissingManageThreads"])
+    expect(at("thread.delete", own, flags, { creator: true })).toEqual([])
+    expect(at("thread.setLocked", own, flags, { creator: true })).toEqual([])
+    expect(at("thread.setLocked", own, flags, { creator: false })).toEqual(["MissingManageThreads"])
+    // unarchiving needs no ManageThreads at all, only SendMessagesInThreads, and fails on a locked thread
+    expect(at("thread.unarchive", own, ["ViewChannel"])).toEqual(["MissingSendMessagesInThreads"])
+    expect(at("thread.unarchive", known(thread("public-thread", { locked: true }), channel("text")), flags)).toEqual(["ThreadLocked"])
+  })
+
+  it("lets a row that needs no View run on a channel the bot cannot see: leaving a thread (M4 live)", () => {
+    expect(at("thread.leave", { _tag: "Unseen" }, [])).toEqual([])
+    expect(at("thread.join", { _tag: "Unseen" }, ["ViewChannel"])).toEqual(["MissingViewChannel"])
+  })
+
+  it("checks the hierarchy for member operations: the target's rank, an Administrator target of a timeout, the role's rank and management", () => {
+    const scope: ChannelInput = { _tag: "Guild" }
+    expect(at("member.kick", scope, ["KickMembers"], { target: { below: false, administrator: false } })).toEqual(["TargetAboveInHierarchy"])
+    expect(at("member.kick", scope, ["KickMembers"], { target: { below: true, administrator: true } })).toEqual([])
+    expect(at("member.timeout", scope, ["ModerateMembers"], { target: { below: false, administrator: true } })).toEqual(["TargetAboveInHierarchy", "TargetIsAdministrator"])
+    expect(at("member.addRole", scope, ["ManageRoles"], { role: { below: false, managed: true } })).toEqual(["RoleAboveInHierarchy", "RoleIsManaged"])
+    expect(at("member.addRole", scope, [], { role: { below: true, managed: false } })).toEqual(["MissingManageRoles"])
+    // at guild level the timeout removes ManageRoles too
+    expect(at("member.addRole", scope, ["ManageRoles"], { role: { below: true, managed: false } }, later)).toEqual(["CommunicationDisabled"])
+  })
+
+  it("requires a tag on a post in a forum with REQUIRE_TAG (H-044), and blocks an own edit under a timeout although View survives it", () => {
+    const forum = known(channel("forum", [], { requireTag: true }))
+    expect(at("forum.createPost", forum, ["ViewChannel", "SendMessages"], { tagged: false })).toEqual(["TagRequired"])
+    expect(at("forum.createPost", forum, ["ViewChannel", "SendMessages"], { tagged: true })).toEqual([])
+    expect(at("forum.createPost", known(channel("forum")), ["ViewChannel", "SendMessages"], { tagged: false })).toEqual([])
+    expect(at("message.edit.channel", known(channel("text")), ["ViewChannel"], {}, later)).toEqual(["CommunicationDisabled"])
+    expect(at("message.deleteOwn", known(channel("text")), ["ViewChannel"], {}, later)).toEqual([])
+    // the timeout blocks a reaction even with an emoji already there, which needs only View (M4 live, H-024)
+    expect(at("message.react.channel", known(channel("text")), ["ViewChannel"], { reaction: "existing" }, later)).toEqual(["CommunicationDisabled"])
+  })
+
+  it("reports a read's degradation: the pins list without ReadMessageHistory (H-107)", () => {
+    const resolution = resolve({ guild: granted("ViewChannel"), channel: known(channel("text")), member: member([]), now })
+    expect(decide("channel.pins", resolution, { payload: [] })).toMatchObject({ failures: [], degraded: ["ReadMessageHistory"], required: ["ViewChannel", "ReadMessageHistory"] })
   })
 })

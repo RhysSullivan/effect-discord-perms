@@ -2,12 +2,13 @@
  * "Most fundamental first" (DESIGN §3.2, D7 generalised). When preflight or the recompute finds several
  * problems, they are sorted into this order, and the operation fails with the first:
  *
- * 1. ViewChannel, then Connect in voice and stage rows (H-015, H-152);
+ * 1. ViewChannel, then Connect in voice and stage rows (H-015, H-152), then the row's `viewLevel` flags
+ *    (ReadMessageHistory for a pin or a crosspost, M4 live);
  * 2. CommunicationDisabled (the timeout mask, H-020);
  * 3. the action's access flags: SendMessages or SendMessagesInThreads, or ReadMessageHistory for a reaction;
  * 4. the action's own flags, in the row's order;
  * 5. hierarchy (TargetAboveInHierarchy, RoleAboveInHierarchy, TargetIsAdministrator), then other state
- *    (ThreadLocked, ThreadArchived, RoleIsManaged);
+ *    (ThreadLocked, ThreadArchived, RoleIsManaged, TagRequired);
  * 6. payload flags, in `payloadRuleNames` order (ReadMessageHistory for a reply, EmbedLinks, AttachFiles,
  *    SendTTSMessages, SendPolls, UseExternalStickers, ...).
  *
@@ -30,9 +31,11 @@ export type Failure =
   | { readonly _tag: "ThreadLocked" }
   | { readonly _tag: "ThreadArchived" }
   | { readonly _tag: "RoleIsManaged" }
+  /** A forum or media post without a tag where the channel requires one (H-044). */
+  | { readonly _tag: "TagRequired" }
 
 /** Tier 5's order. */
-const stateOrder: ReadonlyArray<Failure["_tag"]> = ["TargetAboveInHierarchy", "RoleAboveInHierarchy", "TargetIsAdministrator", "ThreadLocked", "ThreadArchived", "RoleIsManaged"]
+const stateOrder: ReadonlyArray<Failure["_tag"]> = ["TargetAboveInHierarchy", "RoleAboveInHierarchy", "TargetIsAdministrator", "ThreadLocked", "ThreadArchived", "RoleIsManaged", "TagRequired"]
 
 const payloadIndex = (flag: PermissionFlag): number => payloadRuleNames.findIndex((name) => PayloadRules[name].flag === flag)
 
@@ -45,6 +48,7 @@ export const rank = (op: OpName, failure: Failure): readonly [tier: number, posi
       const inRow = row.flags.includes(flag)
       if (flag === "ViewChannel") return [1, 0]
       if (flag === "Connect" && inRow) return [1, 1]
+      if (inRow && (row.viewLevel ?? []).includes(flag)) return [1, 2]
       if ((flag === "SendMessages" || flag === "SendMessagesInThreads") && inRow) return [3, 0]
       if (flag === "ReadMessageHistory" && inRow && row.variant === "reaction") return [3, 1]
       if (inRow) return [4, row.flags.indexOf(flag)]
@@ -59,6 +63,7 @@ export const rank = (op: OpName, failure: Failure): readonly [tier: number, posi
     case "ThreadLocked":
     case "ThreadArchived":
     case "RoleIsManaged":
+    case "TagRequired":
       return [5, stateOrder.indexOf(failure._tag)]
   }
 }

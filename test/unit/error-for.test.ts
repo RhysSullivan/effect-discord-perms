@@ -46,7 +46,7 @@ describe("ErrorCategories", () => {
 
 describe("errorFor", () => {
   it("covers every operation of the table", () => {
-    expect(operations).toHaveLength(40)
+    expect(operations).toHaveLength(47)
   })
 
   it("builds the promised class, tag, flag and categories for every (operation, flag)", () => {
@@ -64,7 +64,7 @@ describe("errorFor", () => {
         checked++
       }
     }
-    expect(checked).toBe(40 * PermissionFlags.length)
+    expect(checked).toBe(47 * PermissionFlags.length)
   })
 
   it("builds the payload variant for a reply, the access variant for a reaction and the base class otherwise", () => {

@@ -93,6 +93,8 @@ export interface ChannelSnap {
   readonly obfuscated: boolean
   readonly overwrites: ReadonlyArray<Overwrite>
   readonly thread: ThreadMeta | undefined
+  /** A forum or media channel whose posts must carry a tag (channel flag `REQUIRE_TAG`, `1 << 4`; H-044). */
+  readonly requireTag: boolean
 }
 
 /** A role. */

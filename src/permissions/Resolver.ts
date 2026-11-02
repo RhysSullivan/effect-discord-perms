@@ -18,6 +18,9 @@
  *    ManageChannels, H-015), and `timeout` (a timed-out member keeps only View and ReadMessageHistory, unless
  *    owner or Administrator, after overwrites; H-020, H-021, H-029).
  *
+ * At guild level (the member operations) there are no overwrites and no implicit masks: the base permissions,
+ * then the timeout mask (H-020 says nothing of channels; the matrix's timed-out member rows check it).
+ *
  * Every switch is an entry of `ResolverRules.ts`.
  */
 import type { PermissionFlag } from "../errors/Missing.generated.ts"
@@ -52,9 +55,12 @@ export interface MemberInput {
 }
 
 /**
- * The channel, as the bot knows it:
- * - `Known`: the channel (and, for a thread, its parent, which must be known too);
- * - `Unseen`: the bot cannot see it (a refresh got 50001 or 10003, or a thread's parent cannot be fetched).
+ * Where the permissions are resolved:
+ * - `Known`: in the channel (and, for a thread, its parent, which must be known too);
+ * - `Unseen`: in a channel the bot cannot see (a refresh got 50001 or 10003, or a thread's parent cannot be
+ *   fetched);
+ * - `Guild`: at guild level, for the member operations (role assignment, nicknames, timeouts, kick and ban),
+ *   which no channel's overwrites or implicit rules touch: the base permissions, then the timeout mask.
  */
 export type ChannelInput =
   | {
@@ -65,6 +71,7 @@ export type ChannelInput =
     readonly threadMember: boolean
   }
   | { readonly _tag: "Unseen" }
+  | { readonly _tag: "Guild" }
 
 /** Everything one resolution reads. */
 export interface ResolveInput {
@@ -104,6 +111,8 @@ export interface Resolution {
   readonly thread: ThreadFacts | undefined
   /** Whether the channel is a voice or stage channel (Connect is View-level there, §3.2). */
   readonly voice: boolean
+  /** Whether the channel is a forum or media channel whose posts need a tag (H-044). */
+  readonly requireTag: boolean
 }
 
 const administrator = (set: Flags.PermissionSet): boolean => Flags.has(set, "Administrator")
@@ -148,7 +157,11 @@ export const resolve = (input: ResolveInput): Resolution => {
   const timeout = until !== null && Date.parse(until) > input.now && !(ResolverRules.timeoutExemptsOwnerAndAdministrator.value && ownerOrAdmin) ? { until } : undefined
 
   if (input.channel._tag === "Unseen") {
-    return { base, afterOverwrites: base, beforeTimeout: Flags.empty, effective: Flags.empty, masks: ["unseen"], timeout: undefined, thread: undefined, voice: false }
+    return { base, afterOverwrites: base, beforeTimeout: Flags.empty, effective: Flags.empty, masks: ["unseen"], timeout: undefined, thread: undefined, voice: false, requireTag: false }
+  }
+  if (input.channel._tag === "Guild") {
+    const effective = timeout === undefined ? base : Flags.intersect(base, flagsOf(ResolverRules.timeoutKeeps.value))
+    return { base, afterOverwrites: base, beforeTimeout: base, effective, masks: timeout === undefined ? [] : ["timeout"], timeout, thread: undefined, voice: false, requireTag: false }
   }
   const { channel, parent, threadMember } = input.channel
   const thread = isThreadKind(channel.kind)
@@ -160,11 +173,11 @@ export const resolve = (input: ResolveInput): Resolution => {
       : { archived: channel.thread.archived, locked: channel.thread.locked, creatorIsMember: channel.thread.ownerId === member.userId, memberIsInThread: threadMember }
 
   if (ResolverRules.obfuscatedMeansNoView.value && (channel.obfuscated || (thread && parent?.obfuscated === true))) {
-    return { base, afterOverwrites: base, beforeTimeout: Flags.empty, effective: Flags.empty, masks: ["obfuscated"], timeout: undefined, thread: undefined, voice }
+    return { base, afterOverwrites: base, beforeTimeout: Flags.empty, effective: Flags.empty, masks: ["obfuscated"], timeout: undefined, thread: undefined, voice, requireTag: false }
   }
   if (overwriteSource === undefined) {
     // a thread whose parent is not known is treated as having no View (§3.1)
-    return { base, afterOverwrites: base, beforeTimeout: Flags.empty, effective: Flags.empty, masks: ["unseen"], timeout: undefined, thread: undefined, voice }
+    return { base, afterOverwrites: base, beforeTimeout: Flags.empty, effective: Flags.empty, masks: ["unseen"], timeout: undefined, thread: undefined, voice, requireTag: false }
   }
   const afterOverwrites = applyOverwrites(guild, member, overwriteSource, base)
 
@@ -176,7 +189,7 @@ export const resolve = (input: ResolveInput): Resolution => {
     !threadMember &&
     !Flags.has(afterOverwrites, "ManageThreads")
   if (hidden) {
-    return { base, afterOverwrites, beforeTimeout: Flags.empty, effective: Flags.empty, masks: ["private-thread"], timeout: undefined, thread: facts, voice }
+    return { base, afterOverwrites, beforeTimeout: Flags.empty, effective: Flags.empty, masks: ["private-thread"], timeout: undefined, thread: facts, voice, requireTag: false }
   }
   // An Administrator in the base already holds every flag, so no implicit mask's condition can hold for it;
   // an Administrator bit from an overwrite exempts nothing (H-004).
@@ -198,7 +211,7 @@ export const resolve = (input: ResolveInput): Resolution => {
     applied.push("timeout")
     current = Flags.intersect(current, flagsOf(ResolverRules.timeoutKeeps.value))
   }
-  return { base, afterOverwrites, beforeTimeout, effective: current, masks: applied, timeout, thread: facts, voice }
+  return { base, afterOverwrites, beforeTimeout, effective: current, masks: applied, timeout, thread: facts, voice, requireTag: channel.requireTag }
 }
 
 // ---- hierarchy (H-060..H-073) -------------------------------------------------------------------------
@@ -240,6 +253,22 @@ export const roleBelow = (guild: GuildInput, bot: MemberInput, role: RoleSnap): 
 }
 
 // ---- from the guild state -----------------------------------------------------------------------------
+
+/**
+ * The guild-level resolver input for the bot in `guild` (the member operations), from the guild state, or the
+ * need for a refresh first when the state lacks the guild or the bot's member.
+ */
+export const guildInputFromSnapshot = (snapshot: Snapshot, guildId: GuildId, now: number): FromSnapshot => {
+  const guild = snapshot.guilds.get(guildId)
+  if (guild === undefined) return { _tag: "NeedsRefresh", reason: "the guild is not in the state" }
+  const botUserId = snapshot.botUserId
+  const botMember = guild.botMember
+  if (botUserId === undefined || botMember === undefined) return { _tag: "NeedsRefresh", reason: "the bot's member is not in the state" }
+  return {
+    _tag: "Ready",
+    input: { guild: { id: guild.id, ownerId: guild.ownerId, roles: guild.roles }, channel: { _tag: "Guild" }, member: { userId: botUserId, roleIds: botMember.roleIds, timedOutUntil: botMember.timedOutUntil }, now }
+  }
+}
 
 /** What the guild state can give the resolver for one channel: an input, or the need for a refresh first. */
 export type FromSnapshot = { readonly _tag: "Ready"; readonly input: ResolveInput } | { readonly _tag: "NeedsRefresh"; readonly reason: string }
