@@ -556,8 +556,9 @@ export const Operations = {
   "voice.send":   { flags: ["ViewChannel", "Connect", "SendMessages"], variant: "reply", tags: [/* as channel.send */] },
   "message.pin.thread": { flags: ["ViewChannel", "PinMessages"], variant: "default",
     tags: ["PermissionDeniedUnattributed", "CommunicationDisabled", "MaximumPinsReached", "ThreadArchived", "UnknownMessage"] },
-  // ... 48 rows in total (40 in [sd:src/ops.ts]; M4 added thread.delete, thread.unarchive and the
-  //     .thread/.voice variants of edit, delete and bulk delete from live findings)
+  // ... 47 rows in total (40 in [sd:src/ops.ts]; M4 added thread.delete, thread.unarchive and the
+  //     .thread/.voice variants of edit, delete and bulk delete from live findings, and removed
+  //     message.pin.voice and message.unpin.voice: voice text chat has no pins)
 } as const satisfies Record<string, OpSpec>
 export type OpFlags = { readonly [Op in OpName]: Ops[Op]["flags"][number] }
 export type OpTags = { readonly [Op in OpName]: TagClasses[Ops[Op]["tags"][number]] }      // tag name -> class
@@ -1237,11 +1238,16 @@ the first, in this order (`src/permissions/Order.ts`):
    `PinMessages`, `AddReactions`, `ManageThreads`, `CreatePublicThreads`,
    `ManageRoles`.
 5. Hierarchy (`TargetAboveInHierarchy`, `RoleAboveInHierarchy`,
-   `TargetIsAdministrator`), then other state (`ThreadLocked`, `ThreadArchived`,
-   `RoleIsManaged`).
+   `TargetIsAdministrator`), then other state (`ThreadArchived`,
+   `RoleIsManaged`, `TagRequired`).
 6. Payload flags in `PayloadRules` order: `ReadMessageHistory` (ForReply),
    `EmbedLinks`, `AttachFiles`, `SendTTSMessages`, `SendPolls`,
-   `UseExternalStickers`.
+   `UseExternalStickers`; then `ThreadLocked`. (M4 live, the verifier's
+   ordering row: a locked thread whose send also lacks EmbedLinks answered
+   403 50013, the payload flag's code, where the lock alone answers 50001
+   (H-036), so Discord checks the payload's flags before the lock; revision 2
+   ranked the lock in tier 5. Whether `ThreadArchived` and `TagRequired` also
+   come after the payload is untested; no operation has both yet in M4.)
 7. Local limits (`MessageEmpty`, `ContentTooLong`, `EmbedTooLarge`,
    `PollTooLarge`, `NameTooLong`, ...). These are checked first in time because
    they need no state, but they rank last.
@@ -1502,8 +1508,8 @@ hypotheses the matrix confirms:
 | `message.deleteOwn`, `deleteForeign` (each with `.thread` and `.voice`, M4) | message kinds | View, (Connect) / View, (Connect), ManageMessages | 2FA (foreign); archived thread (M4) |
 | `message.crosspostOwn` / `Foreign` | announcement | View, ReadMessageHistory (`viewLevel`, M4), Send / + ManageMessages | already crossposted |
 | `message.react.*` | message kinds | View, (Connect), AddReactions **conditional**, + UseExternalEmojis if external (no ReadMessageHistory, M4) | timeout; archived thread |
-| `message.pin.*` | message kinds | View, (Connect), ReadMessageHistory (`viewLevel`, M4), PinMessages (H-050) | archived thread |
-| `message.unpin.*` | message kinds | View, (Connect), PinMessages | archived thread |
+| `message.pin.channel` / `.thread` | text/announcement; threads (not voice or stage text chat, which has no pins: M4, H-159 refuted) | View, ReadMessageHistory (`viewLevel`, M4), PinMessages (H-050) | timeout; archived thread |
+| `message.unpin.channel` / `.thread` | as pin | View, ReadMessageHistory (`viewLevel`, M4), PinMessages | timeout; archived thread |
 | `channel.pins`, `voice.pins` | message kinds | View, (Connect) (RMH missing means degraded: the row's `degrades`) | |
 | `channel.bulkDelete`, `voice.bulkDelete` (M4) | message kinds | View, (Connect), ManageMessages | 2FA; age; count |
 | `channel.createThread.public` / `.private` | text (both), announcement (public) | View, CreatePublicThreads / CreatePrivateThreads | timeout; already exists |
@@ -2225,12 +2231,14 @@ export class Setup extends Schema.Class<Setup>("Setup")({
   targetRank: Schema.optionalKey(Rank), roleRank: Schema.optionalKey(Rank), targetAdmin: Schema.optionalKey(Schema.Boolean),
   channelSettings: Schema.optionalKey(Schema.Struct({ nameVariant: Schema.Literals(["a", "b"]), slowmode: Schema.Int, requireTag: Schema.Boolean })),
   fixtures: Schema.Array(Schema.Literals(["subject-message", "harness-message", "second-harness-message", "existing-reaction",
-    "pinned-harness-message", "guild-sticker", "subject-thread", "target-role"]))
+    "pinned-harness-message", "guild-sticker", "subject-thread", "target-role", "subject-prior-send"]))
 }) {}
 // M4: the fixtures the catalogs use. A foreign message, a reaction and a pin are the harness's (it can post,
 // react and pin in voice text chat, where the target cannot without Connect); `subject-thread` makes the
 // scenario thread one the subject created (`lab-subject-<kind>`); `target-role` gives the target the role a
 // removal takes away. M3's "target-message" and "crossposted-subject-message" had no row and were dropped.
+// `subject-prior-send` (M4 verifier, H-053) is a plain message the subject sends after Converge, under the
+// setup's own permissions and slowmode, so the send that follows is its second in a row.
 interface Scenario {
   readonly id: string                         // "<family>/<channel>/<dims...>", stable, unique
   readonly hypotheses: ReadonlyArray<`H-${number}`>
@@ -2355,13 +2363,22 @@ Validity predicates (in `[sd:pairwise.ts]`):
 
 - overwrite algebra H-003..H-011: Administrator bypass, both array orders and
   both role orders, a role allow beating a role deny, the member overwrite last,
-  and an overwrite for a role not held;
+  and an overwrite for a role not held; (M4) the Setup has one role per grant
+  source and one array order, so the rows cover H-003, H-005 (an `@everyone`
+  overwrite allow as the grant, and its deny as a removal), H-006, H-007 (a role
+  deny beating the `@everyone` allow), H-008 and H-011's allow side (every lab
+  channel carries `lab-target`'s allow, for a role the subject does not hold);
+  H-004, H-009 and H-010 are offline only (LOG.md);
 - implicit H-012..H-017, voice and stage Connect H-152, H-153, H-159;
 - timeout H-020..H-029, including H-021 (admin and timeout, fixed order);
 - threads H-031..H-048, including private-thread visibility H-033, H-047 and
   auto-join H-034;
 - createPost on forum and media, with and without `REQUIRE_TAG` (H-031, H-044);
-- pins H-050, H-052; slowmode H-053, H-054;
+- pins H-050, H-052; slowmode H-053, H-054 (M4: H-053 is a send right after the
+  subject's own `subject-prior-send` in `lab-text` with a 60 s slowmode, without
+  and with BypassSlowmode; the slowmode outlasts the raw call's 30 s deadline,
+  so a slowmode 429, which dfx retries, aborts the run instead of passing as a
+  late success);
 - hierarchy H-060..H-073: role below/equal/above with the target above (H-060,
   H-061), both managed roles placed (H-073);
 - messages H-141, H-143, H-146, H-147;
@@ -2370,7 +2387,12 @@ Validity predicates (in `[sd:pairwise.ts]`):
 - rename and topic rows, one per lab channel;
 - ordering: two failures at once for each adjacent pair in §3.2, and the
   non-adjacent pairs with dedicated codes (Send + reply RMH, SMIT + locked,
-  View + archived);
+  View + archived); (M4) a locked thread with a missing EmbedLinks
+  (`send/targeted/order-locked-embed`, which moved `ThreadLocked` after the
+  payload flags, and its flip control, which grants EmbedLinks and meets the
+  lock), and `TargetIsAdministrator` on its own
+  (`member/targeted/timeout-admin-below`: `lab-admin` sits below the subject's
+  `lab-mid`); tier 7 (local limits) arrives with M6's limit rows;
 - obfuscation H-160..H-161.
 
 **Flip controls** (`catalog/flips.ts`). For every row where exactly one flag F
@@ -2388,8 +2410,8 @@ judged after the run against its original's live row (`Agreement.flipAgreement`)
 
 The expected total is 234 pairwise rows, about 110 targeted rows, about 45
 flip rows, about 95 rule rows and about 16 intent sessions, roughly **500
-scenarios**. (M4 has 236 pairwise rows, 58 targeted rows and 58 flip controls,
-352 scenarios in all; the rule rows and intent sessions come in M6-M8.)
+scenarios**. (M4 has 229 pairwise rows, 72 targeted rows and 62 flip controls,
+363 scenarios in all; the rule rows and intent sessions come in M6-M8.)
 
 ### 5.10 Executing one scenario
 
@@ -2412,8 +2434,10 @@ setup alone made 216.)
    harness lifts a leftover timeout and gives the subject a member overwrite on
    the overwrite channel, and Converge then replaces it with the desired state.
    After Converge the harness posts its messages, reacts and pins (a pin Discord
-   refuses makes the row `rejected-by-discord`), and then sets the thread's
-   archived and locked state (`harness/Fixtures.ts`).
+   refuses makes the row `rejected-by-discord`), the subject sends its
+   `subject-prior-send` under the setup (refused: `rejected-by-discord` with the
+   code), and then the harness sets the thread's archived and locked state
+   (`harness/Fixtures.ts`).
 3. **Consistency wait** (`Wait.ts`, G9). All of these must hold, with a 15 s
    cap. On timeout the run aborts with `setup-timeout`, an infrastructure
    failure that is never recorded as a mismatch.
@@ -2464,7 +2488,10 @@ setup alone made 216.)
 9. **Cleanup.** The harness deletes what the scenario created (messages,
    threads, reactions, pins) and lists lab-channel messages by author to catch
    untracked ones, and restores channel settings and the target's member state
-   when the scenario changed them.
+   when the scenario changed them. Deletes are idempotent: a listed message that
+   is already gone (404 10008) is skipped, and a bulk delete refused with 10008
+   falls back to single deletes (M4 verifier: right after the subject's bulk
+   delete, the listing still returned a deleted message, and the run aborted).
 10. **Record** the row, with the `agreement` from `Agreement.ts`.
 
 A timeout of the (c) or (d) call is an **infrastructure abort**, never a row
@@ -2597,6 +2624,13 @@ The replay also asserts:
 - every `Observed.ts` constant equals what the table shows, using only rows
   with the matching reason: `botsCanBeTimedOut` against
   `setup-unsupported: bot-not-timeoutable`, never `admin-exempt`;
+  `slowmodeAppliesToBots` against witness rows (M4 verifier), which must exist: a
+  send after the subject's `subject-prior-send` under slowmode, without
+  BypassSlowmode or Administrator, answers 20016 exactly when the constant is
+  true (and succeeds when it is false), and no other row answers 20016 unless it
+  is true;
+- no 50013 or 50001 row carries inner errors (H-081: Discord's refusal never
+  names the permission);
 - `PayloadRules.mode` against the degraded rows;
 - the `Limits` values against the limit rows (from M6, when the limit probes
   arrive as rule rows; M4 has none);
@@ -2939,7 +2973,10 @@ fails if a constant disagrees with the table.
    assignment; `Observed.expectedCode` applies it.)
 3. **20016 for bots (H-053, C9).** `Observed.slowmodeAppliesToBots` defaults to
    false. If a slowmode row shows 20016, set it true; the interceptor already
-   surfaces it.
+   surfaces it. (M4: no. The subject without BypassSlowmode sent twice in a row,
+   under three seconds apart, in `lab-text` under a 60 s slowmode, both 200 with
+   no 429 (`send/targeted/slowmode-second-send`), so the constant stays false and
+   `SlowmodeActive` stays out of the unions.)
 4. **Embeds without EmbedLinks and TTS without SendTTS: error or silent drop
    (H-102, H-103)?** This decides `PayloadRules.mode`. (M3: embeds are refused
    with 50013; TTS is dropped, the message sent with `tts: false`, so M4 sets

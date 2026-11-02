@@ -54,6 +54,8 @@ describe("the operation table", () => {
   })
 
   it("leaves CommunicationDisabled out only of channel pins, join, leave, own delete outside voice and DMs (§2.4)", () => {
+    // own deletes: a timed-out subject that sees the channel deletes its own message, in a text channel and in a
+    // thread (M4 live, `message/targeted/delete-own-timed-out` and `...-thread`)
     const without = rows.filter(([, row]) => !row.tags.includes("CommunicationDisabled")).map(([op]) => op)
     expect(without.sort()).toEqual(["channel.pins", "dm.send", "message.deleteOwn", "message.deleteOwn.thread", "thread.join", "thread.leave"])
   })

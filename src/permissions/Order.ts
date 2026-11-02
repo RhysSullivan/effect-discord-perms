@@ -9,9 +9,11 @@
  *    `reaction` variant that lists it (none does since M4 live showed a reaction needs none);
  * 4. the action's own flags, in the row's order;
  * 5. hierarchy (TargetAboveInHierarchy, RoleAboveInHierarchy, TargetIsAdministrator), then other state
- *    (ThreadLocked, ThreadArchived, RoleIsManaged, TagRequired);
+ *    (ThreadArchived, RoleIsManaged, TagRequired);
  * 6. payload flags, in `payloadRuleNames` order (ReadMessageHistory for a reply, EmbedLinks, AttachFiles,
- *    SendTTSMessages, SendPolls, UseExternalStickers, ...).
+ *    SendTTSMessages, SendPolls, UseExternalStickers, ...), then ThreadLocked: M4 live, a locked thread whose
+ *    send also lacks EmbedLinks answered 50013, the payload flag's code, where the lock alone answers 50001
+ *    (H-036), so Discord checks the payload's flags before the lock.
  *
  * Local limits rank last (7); they are checked by the payload modules, not here. The order is never loosened
  * row by row: a dedicated Discord code that disagrees goes through the recompute (§3.2, §4.9).
@@ -35,8 +37,8 @@ export type Failure =
   /** A forum or media post without a tag where the channel requires one (H-044). */
   | { readonly _tag: "TagRequired" }
 
-/** Tier 5's order. */
-const stateOrder: ReadonlyArray<Failure["_tag"]> = ["TargetAboveInHierarchy", "RoleAboveInHierarchy", "TargetIsAdministrator", "ThreadLocked", "ThreadArchived", "RoleIsManaged", "TagRequired"]
+/** Tier 5's order (ThreadLocked ranks in tier 6, after every payload flag; see the module comment). */
+const stateOrder: ReadonlyArray<Failure["_tag"]> = ["TargetAboveInHierarchy", "RoleAboveInHierarchy", "TargetIsAdministrator", "ThreadArchived", "RoleIsManaged", "TagRequired"]
 
 const payloadIndex = (flag: PermissionFlag): number => payloadRuleNames.findIndex((name) => PayloadRules[name].flag === flag)
 
@@ -58,10 +60,12 @@ export const rank = (op: OpName, failure: Failure): readonly [tier: number, posi
     }
     case "CommunicationDisabled":
       return [2, 0]
+    case "ThreadLocked":
+      // after every payload flag, the unknown ones (`payloadRuleNames.length`) included
+      return [6, payloadRuleNames.length + 1]
     case "TargetAboveInHierarchy":
     case "RoleAboveInHierarchy":
     case "TargetIsAdministrator":
-    case "ThreadLocked":
     case "ThreadArchived":
     case "RoleIsManaged":
     case "TagRequired":

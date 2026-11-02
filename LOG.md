@@ -576,9 +576,9 @@ the same commit.
   where exactly one flag is the first missing flag" would flip nearly every failing row; the flag-coverage check
   of §5.5 needs one per (row, flag). The first family row in ID order whose prediction has the flag first and is not
   blind is flipped; the flip drops the flag from every removal and adds it to the first non-administrator grant.
-  57 flips. `flip-control` is judged after the run against the original's live row (`Agreement.flipAgreement`),
-  and `test/unit/facts.test.ts` checks offline that every flip's predicted failures are its original's minus the
-  first.
+  61 flips (this note said 57 until the M4 verifier caught it). `flip-control` is judged after the run against the
+  original's live row (`Agreement.flipAgreement`), and `test/unit/facts.test.ts` checks offline that every flip's
+  predicted failures are its original's minus the first.
 - **M4: Converge also sets the target's roles and clears its nickname and timeout, and sets the scenario channel's
   slowmode and required tag** (§5.8). Cleanup restores the scenario thread before deleting messages, because an
   archived thread refuses message deletes (400 50083; the first trial run aborted on it).
@@ -612,6 +612,42 @@ the same commit.
   fails fast with the wait instead of stalling.
 - **M4: the truth table is committed by the implementer**, not the orchestrator (§6 M4), because the task requires
   a clean tree and the replay in `verify:offline` reads the committed file.
+
+- **M4 (verifier): cleanup's message deletes are idempotent** (§5.10 step 9 updated). The verifier's first
+  `bun run verify:live` exited 1 in its 198th scenario (`flip/message/voice/bulk-delete/op-flag/normal`) with
+  `run FAILED: LabRequestFailed: Unknown Message {"step":"cleanup: delete in lab-voice","status":404,"code":10008}`:
+  the subject's bulk delete had succeeded, and the harness's message listing right after it still returned one of
+  the deleted messages, whose single delete answered 404 10008. The 195 rows before it matched the committed table,
+  and the verifier's retry passed, so this is Discord's list catching up, not a state the setup controls. Cleanup
+  and reset now share `Reset.deletePlanned`: a delete answered 10008 is skipped (the message is gone, which is what
+  the delete wants), a bulk delete answered 10008 falls back to single deletes of its chunk, and every other refusal
+  still aborts the run. Nothing is retried, and no row's outcome depends on it (cleanup runs after the raw call).
+  `test/unit/cleanup.test.ts` covers the three cases; with either half of the fix reverted, its cases fail.
+- **M4 (verifier): a `subject-prior-send` fixture and the H-053 rows** (§5.8, §5.9, §5.10 step 2, §5.13 updated).
+  No M4 row sent twice under slowmode, so the replay's check (no row answered 20016) could not fail. The new
+  fixture is a plain message the subject sends after Converge, under the setup's own permissions and slowmode (a
+  refusal records `rejected-by-discord` with its code), and `send/targeted/slowmode-second-send` and
+  `...-bypass` send again in `lab-text` with a 60 s slowmode, without and with BypassSlowmode. The slowmode is
+  longer than the raw call's 30 s deadline on purpose: dfx retries every 429 after its `retry_after`, so a slowmode
+  429 (20016) cannot come back as a late success; it would abort the run (a unit test holds the two constants
+  apart). The replay now requires at least one witness (a send right after the prior send, under slowmode, without
+  BypassSlowmode or Administrator, not timed out) and holds `Observed.slowmodeAppliesToBots` to it.
+- **M4 (verifier): targeted rows for the gaps it found** (§5.9 updated): the §3.2 pair of tiers 5 and 6
+  (`send/targeted/order-locked-embed`), `TargetIsAdministrator` on its own (`member/targeted/timeout-admin-below`),
+  an `@everyone` overwrite allow as the grant (`send/targeted/overwrite-everyone-allow`, and with a role overwrite
+  deny, `...-role-deny`; named `overwrite-*` so the reply flip control stays on `order-send-reply-history`, the
+  first row in ID order for its key), and an own delete under a timeout with View, in a text channel and in a
+  thread (`message/targeted/delete-own-timed-out`, `...-thread`). With the flip control the reordered row gained
+  (next entry), 363 scenarios: 229 pairwise, 72 targeted, 62 flips; a run makes 68 role edits. The replay also
+  asserts H-081 now (no 50013 or 50001 row carries inner errors).
+- **M4 (verifier): `ThreadLocked` ranks after the payload flags** (§3.2, `Order.ts`). Revision 2 put it in tier 5,
+  before the payload's flags. `send/targeted/order-locked-embed` (a member of a locked thread with View and SMIT
+  sending an embed without EmbedLinks) answered 403 50013, EmbedLinks' code, where the lock alone answers 50001
+  (`send/targeted/locked-thread-member`) and a missing EmbedLinks alone 50013, so Discord checks the payload's flags
+  first: the row was a `level-vs-raw` mismatch under the old order. The lock now ranks last in tier 6. No committed
+  row's prediction changed (re-judged offline), and the row gained a flip control (`flip/send/targeted/
+  order-locked-embed`, EmbedLinks granted), which must then meet the lock. Whether `ThreadArchived` and
+  `TagRequired` also come after the payload is untested: no M4 operation has both.
 
 ## Escalated rules
 
@@ -912,14 +948,15 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   consumption, target and prediction (including its ID tie-break), the rename check, Converge's settings and target
   read-back, the pins degradation's fixture condition, Safety's kick and ban check, the flips' blind rule, the
   target's Administrator, the rebuilt unseen thread, and the reducer's REQUIRE_TAG flag.
-- **Not covered by M4's rows** (§5.9's targeted families, with the reason; none is claimed as verified):
-  - overwrite algebra H-004 (an Administrator bit inside an overwrite), H-009 (array order), H-010 (role
-    positions), H-011 (an overwrite for a role not held): the Setup cannot express them (one role per grant
-    source, one array order). The resolver's 4,000-case comparison with the documented algorithm covers them
-    offline only. H-005 and H-007 have no row with an `@everyone` overwrite allow as the grant (the send family's
-    grant sources do not include it);
-  - H-053 (bots ignore slowmode): no row sends twice in a slowmode channel, so `Observed.slowmodeAppliesToBots`
-    stays the documented `false`, unconfirmed (the replay only checks that no row answered 20016);
+- **Not covered by M4's rows** (§5.9's targeted families and the other hypotheses of discord-semantics.md, with
+  the reason or the owning milestone; none is claimed as verified). Corrected after the M4 verifier: the first
+  version of this list said the Setup could express no overwrite-algebra row and left out several hypotheses.
+  - overwrite algebra: H-004 (an Administrator bit inside an overwrite): a grant's flags could carry the bit, but
+    H-004 itself says the API may refuse the overwrite, and Converge treats a refused setup write as an
+    infrastructure abort; a row needs a Converge path that records the refusal, which M4 does not add. H-009
+    (array order) and H-010 (role positions): the Setup has one role per grant source and Converge writes one
+    array order. The resolver's 4,000-case comparison with the documented algorithm covers the three offline
+    only. H-011 is covered on its allow side only (below); its deny side (a deny for a role not held) has no row;
   - H-043 (`ThreadAlreadyExists`, 160004) and H-141's `AlreadyCrossposted` (40033): preflight cannot know a
     message already has a thread or was crossposted from what it holds, so these stay recompute-only tags;
   - H-048, H-051 (250 pins, cost), H-052 (a message from another channel), H-062, H-063 (role edits, no such
@@ -928,6 +965,20 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   - the type rules' live pairs (H-041 private threads in announcement channels, H-054 announcement slowmode,
     H-086, H-088, H-092, H-101, H-120..H-131 limits, H-143), which are M6's rule rows, and a voice message's
     missing `pin`, now a type rule too; H-104 and external stickers need a second guild;
+  - error codes and payloads without a matrix row: H-016 (other undocumented implicit rules) is a standing
+    question, answered row by row: any resolver/raw disagreement would be a mismatch, and the matrix has none;
+    H-017 (`implicit=true` masks only View and Connect): the oracle reads `implicit=false` only and nothing
+    depends on `implicit=true`, so it is not tested; H-025 (a timeout over 28 days, `TimeoutTooLong`): M6's
+    limit rows; H-081 needs no row of its own: the replay now asserts that no 50013 or 50001 row carries inner
+    errors; H-082: every failing row records its status and code, and M5's ErrorMap test holds each pair to its
+    tag; H-083 (empty messages, 50006, `MessageEmpty`), H-084 (inner 50035 codes are strings, the first 50035s
+    come with the limit rows), H-085 (a channel of the wrong type, 50024), H-105, H-106 (message flags outside
+    their contexts), H-109 (`fail_if_not_exists: false`), H-110 and H-111 (`allowed_mentions` on send and edit):
+    M6's payload and rule rows; H-087 (unknown IDs answer 10xxx with 404): M5's ErrorMap and M6's rows (cleanup
+    met a live 404 10008, the flake under "Design deviations"); H-108 (content without MESSAGE_CONTENT): M7;
+    H-112 (`enforce_nonce`): the library sends no nonce in phase 1, so M6 decides whether it needs a row. H-090
+    does not exist in discord-semantics.md (its numbering skips it), and H-107 is covered (the pins list rows
+    cite it: `pins/announcement/list/read-history/role-overwrite-deny/normal`);
   - H-160, H-161 (obfuscation): M7, with the codec.
 - Live, in order (each alone under the lock), after the M3 verifier's fixes:
   - a trial of the 48 targeted rows (it found the cleanup order bug and the first findings), then one run per

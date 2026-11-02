@@ -114,10 +114,15 @@ describe("Order", () => {
       "ViewChannel",
       "CommunicationDisabled",
       "SendMessagesInThreads",
-      "ThreadLocked",
       "ReadMessageHistory",
-      "SendPolls"
+      "SendPolls",
+      "ThreadLocked"
     ])
+  })
+
+  it("ranks a locked thread after the payload's flags, as Discord checks them (M4 live: `send/targeted/order-locked-embed` answered EmbedLinks' 50013, not the lock's 50001)", () => {
+    const failures: ReadonlyArray<Failure> = [{ _tag: "ThreadLocked" }, { _tag: "MissingFlag", flag: "EmbedLinks" }, { _tag: "ThreadArchived" }]
+    expect(sortFailures("thread.send", failures).map((failure) => (failure._tag === "MissingFlag" ? failure.flag : failure._tag))).toEqual(["ThreadArchived", "EmbedLinks", "ThreadLocked"])
   })
 
   it("ranks a row's viewLevel flag with View, above the timeout, and the row's own flags in row order (M4 live)", () => {
