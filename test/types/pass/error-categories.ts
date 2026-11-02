@@ -25,6 +25,7 @@ import {
   type RequestTimedOut,
   type ThreadLocked
 } from "../../../src/errors/index.ts"
+import type { DiscordResponse, NoResponse } from "../../../src/errors/Cause.ts"
 
 type Mirror = typeof ErrorCategories
 type Classes = typeof PermissionErrorClasses
@@ -62,3 +63,10 @@ expectTypeOf<Categories<AllErrors>>().toEqualTypeOf<"access" | "payload" | "perm
 // D6: the transient errors are exactly these four, and they are in no other category.
 expectTypeOf<ExtractCategory<AllErrors, "transient">>().toEqualTypeOf<DiscordUnavailable | RequestTimedOut | NetworkError | RateLimited>()
 expectTypeOf<Categories<ExtractCategory<AllErrors, "transient">>>().toEqualTypeOf<"transient">()
+
+// The transient classes type their cause as exactly the member of ErrorCause that can produce them (§2.2, M1):
+// a missing response for the timeout and the transport failure, a Discord response for 5xx and coded 429s.
+expectTypeOf<RequestTimedOut["cause"]>().toEqualTypeOf<NoResponse>()
+expectTypeOf<NetworkError["cause"]>().toEqualTypeOf<NoResponse>()
+expectTypeOf<DiscordUnavailable["cause"]>().toEqualTypeOf<DiscordResponse>()
+expectTypeOf<RateLimited["cause"]>().toEqualTypeOf<DiscordResponse>()

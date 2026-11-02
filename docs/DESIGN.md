@@ -1768,7 +1768,8 @@ in one process with a reset between, a quick in-process check only. `--only
 The runner is `[type-testing scripts/type-tests.ts]`, adapted; its gate is
 prototyped in `[sd:check-fail.ts]`:
 
-- One `tsc -p test/types/tsconfig.json --pretty false` per run.
+- One `tsc -p test/types/tsconfig.json --pretty false --listFiles` per run. Every pass and fail fixture must
+  be in the program it lists, so a fixture the tsconfig drops fails instead of passing silently.
 - The root tsconfig excludes `test/types/fail`, and `test/types/tsconfig.json`
   sets `"exclude": []`.
 - Pass fixtures use `expectTypeOf` or `Equals` and must have no diagnostics.
@@ -1778,7 +1779,8 @@ prototyped in `[sd:check-fail.ts]`:
   order (a select next to a button marks both elements).
 - Every fail fixture has at least one `// @valid` block that must produce no
   diagnostic: the **pass twin**, in the same program and with the same imports,
-  which proves the fixture's setup is sound.
+  which proves the fixture's setup is sound. A `@valid` block with no code line before the next
+  directive is rejected.
 - Snapshots live in a sibling `<fixture>.diagnostics.txt`:
 
   ```
@@ -2003,7 +2005,9 @@ The registry (`test/rules.ts`). IDs use the `R-` prefix; "raw" means through
     `lab`/`lab-*` name, and a new channel's parent is a lab channel; a new
     guild sticker has a `lab-*` name (read from its multipart form), and
     stickers are never edited or deleted; the guild's channel-list PATCH
-    (positions and parents of any channel) is refused;
+    (positions and parents of any channel) is refused; a channel PATCH sets
+    overwrites only for lab roles, `@everyone` and the two bots (the
+    per-overwrite route's rule) and a parent only from the lab;
   - member edits target only the subject or the target bot, and change only
     `nick` and `communication_disabled_until` (roles change through the
     per-role routes, with lab roles only; `channel_id`, `mute`, `deaf` and

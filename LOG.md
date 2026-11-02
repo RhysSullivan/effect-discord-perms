@@ -255,6 +255,23 @@ the same commit.
   unarmed, so the next write is refused unsent. `test/unit/identities.test.ts` answers a 403 and a 429 (which
   dfx retries) through `compose` and sees `invalid: 2`.
 
+- **Before M3 (the M0-M2 verifiers' minor findings):**
+  - the type-test gate rejects an empty `@valid` block (no code line before the next directive), and runs tsc
+    with `--listFiles` so a fixture missing from the program fails (§5.2 updated); each was mutated once: a
+    tsconfig without `pass` now fails with `not in the compiled program` for every pass fixture;
+  - `env-isolation.test.ts` asserts the resolved `envDir` is `test/env` holding only `.gitkeep` (Vite exposes
+    only `VITE_` names, so the old `import.meta.env` check could not see an `envDir` regression);
+  - `test/types/pass/error-categories.ts` pins the transient classes' `cause` types (M1's narrowing); widening
+    `NetworkError`'s cause back to `ErrorCause` now fails `test:types`;
+  - the self-test read-back has offline cases for a missing stored role and thread, `@everyone` absent,
+    managed-role permissions, and a bot's type-6 pin notice as the only leftover (adding 6 to the system types
+    now fails the test);
+  - the guard reads a channel PATCH body (§5.6 updated): its `permission_overwrites` may name only lab roles,
+    `@everyone` and the two bots (the per-overwrite route's rule), and its `parent_id` only a lab channel. M3's
+    Converge sets overwrites through that PATCH;
+  - the host-local lock limit is recorded under "Notes for every milestone";
+  - the registry item was done by the orchestrator, outside the rift.
+
 ## Escalated rules
 
 Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria. None yet.
@@ -270,6 +287,9 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   `bun --no-env-file` keeps it out of the process (probed with a throwaway `.env` in `/tmp`, counting names
   only).
 
+- **The live lock is host-local** (`/tmp/effect-discord-perms-live.lock` on minisforum). There is no cross-host
+  fencing (DESIGN §8 item 20): a process on the MacBook would take its own lock and could drive Perms Lab at the
+  same time as one on minisforum. So live commands must only ever be run on minisforum.
 - **Live commands** (minisforum only, one at a time; each takes the live lock through `Credentials`):
   `bun run harness:reset` prints `writes: N`; `bun run harness:smoke` runs the identity checks, reset,
   provision and the oracle reads; `bun run harness:selftest` is the reset self-test (below);

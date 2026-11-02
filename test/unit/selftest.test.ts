@@ -163,6 +163,26 @@ const cases: ReadonlyArray<readonly [what: string, edit: Edit, expected: Readonl
     }),
     [["lab-text", "bot message"]]
   ],
+  [
+    "a bot's pin notice (type 6) as the only leftover message",
+    (snapshot) => ({ ...snapshot, messages: { ...snapshot.messages, "lab-voice": [message(6, context.harnessUserId, 6)] } }),
+    [["lab-voice", "bot message"]]
+  ],
+  ["a missing stored role", view((current) => ({ roles: current.roles.filter((entry) => entry.name !== "lab-mid") })), [["lab-mid", "missing"]]],
+  ["a missing stored thread", view((current) => ({ threads: current.threads.filter((entry) => entry.name !== "lab-announcement-thread") })), [["lab-announcement-thread", "missing"]]],
+  ["@everyone absent from the role list", view((current) => ({ roles: current.roles.filter((entry) => entry.name !== "@everyone") })), [["@everyone", "missing"]]],
+  [
+    "permissions on the subject's and the target's managed roles",
+    view((current) => ({
+      roles: [
+        ...current.roles,
+        { id: RoleId.make("400000000000000060"), name: "Perms Subject", permissions: "2048", position: 2, managed: true, mentionable: false, tags: { bot_id: context.subjectUserId } },
+        { id: RoleId.make("400000000000000061"), name: "Perms Target", permissions: "1", position: 1, managed: true, mentionable: false, tags: { bot_id: context.targetUserId } },
+        { id: RoleId.make("400000000000000062"), name: "Perms Other", permissions: "8", position: 1, managed: true, mentionable: false, tags: { bot_id: human } }
+      ]
+    })),
+    [["Perms Subject", "managed role permissions"], ["Perms Target", "managed role permissions"]]
+  ],
   ["pins", (snapshot) => ({ ...snapshot, pins: { "lab-forum-post": [id("lab-forum-post")], "lab-stage": [] } }), [["lab-forum-post", "pins"]]],
   ["subject commands", (snapshot) => ({ ...snapshot, commands: ["labselftest"] }), [["subject", "commands"]]],
   ["a lab AutoMod rule", (snapshot) => ({ ...snapshot, autoModRules: [...snapshot.autoModRules, "lab-keyword"] }), [["lab-keyword", "automod"]]]

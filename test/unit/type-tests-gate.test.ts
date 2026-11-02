@@ -34,6 +34,8 @@ describe("parseTscOutput", () => {
       "    Deeper.",
       "test/types/fail/a.ts(3,7): error TS2345: Argument.",
       "error TS5112: tsconfig.json is present but will not be loaded.",
+      "/repo/node_modules/typescript/lib/lib.es2023.d.ts",
+      "/repo/test/types/pass/p.ts",
       ""
     ].join("\n")
     const parsed = parseTscOutput(output, root)
@@ -48,6 +50,7 @@ describe("parseTscOutput", () => {
       }
     ])
     expect(parsed.unlocated).toEqual(["error TS5112: tsconfig.json is present but will not be loaded."])
+    expect(parsed.listed).toEqual(["/repo/node_modules/typescript/lib/lib.es2023.d.ts", "/repo/test/types/pass/p.ts"])
   })
 })
 
@@ -82,6 +85,16 @@ describe("parseDirectives", () => {
         'L4: malformed @valid marker; write "// @valid" on its own line'
       ]
     })
+  })
+
+  it("rejects an empty @valid block: no code before the next directive or the end of the file", () => {
+    const empty = ["import x from 'y'", "// @valid", "", "// a comment is not code", "// @expect-error TS2345 Beta", "bad()", "// @valid"].join("\n")
+    expect(parseDirectives(empty).problems).toEqual([
+      "L2: the @valid block has no code before the next directive; its pass twin must exercise the fixture's setup",
+      "L7: the @valid block has no code before the next directive; its pass twin must exercise the fixture's setup"
+    ])
+    const sound = ["import x from 'y'", "// @valid", "ok()", "// @expect-error TS2345 Beta", "bad()"].join("\n")
+    expect(parseDirectives(sound).problems).toEqual([])
   })
 
   it("leaves prose that mentions the markers alone", () => {
@@ -163,7 +176,11 @@ describe("checkRun", () => {
   const passSource = "import { expectTypeOf } from 'vitest'\nexpectTypeOf<1>().toEqualTypeOf<1>()"
   const own = diagnostic({ line: 7, column: 3 })
   const snapshot = renderSnapshot([own])
-  const tsc = (diagnostics: ReadonlyArray<Diagnostic>, unlocated: ReadonlyArray<string> = []): TscOutput => ({ diagnostics, unlocated })
+  const tsc = (diagnostics: ReadonlyArray<Diagnostic>, unlocated: ReadonlyArray<string> = [], listed: ReadonlyArray<string> = [passFile, failFile]): TscOutput => ({
+    diagnostics,
+    listed,
+    unlocated
+  })
   const run = (output: TscOutput, overrides: { failSource?: string; passSource?: string; snapshot?: string | undefined } = {}) =>
     checkRun(
       output,
@@ -226,6 +243,21 @@ describe("checkRun", () => {
     expect(run(tsc([own, elsewhere], ["error TS18003: No inputs were found."])).problems).toEqual([
       "tsc printed output that is not a located diagnostic:\nerror TS18003: No inputs were found.",
       `src/x.ts:1:1 diagnostic outside the fixtures (TS2345)\n${elsewhere.text}`
+    ])
+  })
+
+  it("fails a fixture the compiled program does not include", () => {
+    expect(run(tsc([own], [], [failFile])).problems).toEqual(["test/types/pass/p.ts: not in the compiled program (check the include list of test/types/tsconfig.json)"])
+    expect(run(tsc([own], [], [])).problems).toEqual([
+      "test/types/pass/p.ts: not in the compiled program (check the include list of test/types/tsconfig.json)",
+      "test/types/fail/f.ts: not in the compiled program (check the include list of test/types/tsconfig.json)"
+    ])
+  })
+
+  it("fails an empty pass twin", () => {
+    const source = failSource.replace("x.ok()", "")
+    expect(run(tsc([own]), { failSource: source }).problems).toEqual([
+      "test/types/fail/f.ts: L3: the @valid block has no code before the next directive; its pass twin must exercise the fixture's setup"
     ])
   })
 

@@ -54,7 +54,7 @@ describe("the guard's verdict", () => {
 
   it("allows writes to admitted lab channels only, never to protected or other channels", () => {
     expect(decide("POST", `/channels/${labChannel}/messages`)).toBe("Allow")
-    expect(decide("PATCH", `/channels/${labChannel}`)).toBe("Allow")
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ rate_limit_per_user: 0 }))).toBe("Allow")
     expect(decide("DELETE", `/channels/${labChannel}/messages/1`)).toBe("Allow")
     expect(decide("POST", `/channels/${elsewhere}/messages`)).toBe("Refuse")
     expect(decide("POST", `/channels/${rules}/messages`)).toBe("Refuse")
@@ -107,6 +107,20 @@ describe("the guard's verdict", () => {
     expect(decide("PUT", `/channels/${labChannel}/permissions/${foreignRole}`)).toBe("Refuse")
     expect(decide("PUT", `/channels/${labChannel}/permissions/${labRole}/x`)).toBe("Refuse")
     expect(decide("PUT", `/channels/${labChannel}/permissions`)).toBe("Refuse")
+  })
+
+  it("reads a channel PATCH: overwrites only for lab roles, @everyone and the bots; parents only in the lab", () => {
+    const overwrite = (id: string) => ({ id, type: 0, allow: "1024", deny: "0" })
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ permission_overwrites: [overwrite(labRole), overwrite(guild), overwrite(subject), overwrite(target)] }))).toBe("Allow")
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ archived: false, locked: false }))).toBe("Allow")
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ parent_id: labChannel }))).toBe("Allow")
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ parent_id: null }))).toBe("Allow")
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ permission_overwrites: [overwrite(labRole), overwrite(rhys)] }))).toBe("Refuse")
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ permission_overwrites: [overwrite(foreignRole)] }))).toBe("Refuse")
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ parent_id: elsewhere }))).toBe("Refuse")
+    expect(decide("PATCH", `/channels/${labChannel}`, json({ parent_id: rules }))).toBe("Refuse")
+    expect(decide("PATCH", `/channels/${labChannel}`)).toBe("Refuse")
+    expect(decide("PATCH", `/channels/${labChannel}`, "not json")).toBe("Refuse")
   })
 
   it("refuses kick and ban outright, and member edits of anyone but the two bots", () => {

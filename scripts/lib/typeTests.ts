@@ -24,22 +24,30 @@ export interface Diagnostic {
   readonly text: string
 }
 
-/** Parsed compiler output: located diagnostics, and every other non-blank line (config errors, crashes). */
+/**
+ * Parsed compiler output: located diagnostics, the files `--listFiles` printed (the program), and every other
+ * non-blank line (config errors, crashes).
+ */
 export interface TscOutput {
   readonly diagnostics: ReadonlyArray<Diagnostic>
+  /** Absolute paths of the files in the compiled program, as `--listFiles` printed them. */
+  readonly listed: ReadonlyArray<string>
   readonly unlocated: ReadonlyArray<string>
 }
 
 const locatedLine = /^(.+)\((\d+),(\d+)\): error (TS\d+): (.*)$/
+/** A `--listFiles` line: an absolute path to a TypeScript source or declaration file, alone on its line. */
+const listedLine = /^(?:\/|[A-Za-z]:[\\/])\S.*\.(?:d\.)?[cm]?tsx?$/
 
 /**
- * Parses `tsc --pretty false` output. A located head line starts a diagnostic, lines starting with a space
- * continue its chain, and anything else is unlocated output, which the runner treats as a failure.
- * Paths are resolved against `cwd`, the directory tsc ran in. Diagnostics are returned sorted by
- * file, line and column.
+ * Parses `tsc --pretty false --listFiles` output. A located head line starts a diagnostic, lines starting with
+ * a space continue its chain, an absolute path alone on its line is a file of the program, and anything else
+ * is unlocated output, which the runner treats as a failure. Paths are resolved against `cwd`, the directory
+ * tsc ran in. Diagnostics are returned sorted by file, line and column.
  */
 export const parseTscOutput = (output: string, cwd: string): TscOutput => {
   const diagnostics: Array<{ file: string; line: number; column: number; code: string; text: string }> = []
+  const listed: Array<string> = []
   const unlocated: Array<string> = []
   for (const raw of output.split("\n")) {
     const line = raw.replace(/\r$/, "")
@@ -50,11 +58,13 @@ export const parseTscOutput = (output: string, cwd: string): TscOutput => {
       diagnostics.push({ file: path.resolve(cwd, file), line: Number(lineNumber), column: Number(column), code, text: head })
     } else if (line.startsWith(" ") && last !== undefined) {
       last.text += `\n${line}`
+    } else if (listedLine.test(line)) {
+      listed.push(path.resolve(cwd, line))
     } else if (line.trim() !== "") {
       unlocated.push(line)
     }
   }
-  return { diagnostics: [...diagnostics].sort(compareDiagnostics), unlocated }
+  return { diagnostics: [...diagnostics].sort(compareDiagnostics), listed, unlocated }
 }
 
 const compareDiagnostics = (a: Diagnostic, b: Diagnostic): number =>
@@ -90,11 +100,22 @@ const validAttempt = /\/\/\s*@valid/
 /** Compiler suppression comments hide the very text the snapshots exist to show. */
 const suppression = /@ts-(?:expect-error|ignore|nocheck)\b/
 
-/** Parses the directive blocks of a fail fixture's source. Line numbers are 1-based. */
+/** A line that is code: not blank and not only a comment. */
+const isCodeLine = (text: string): boolean => {
+  const trimmed = text.trim()
+  return trimmed !== "" && !trimmed.startsWith("//") && !trimmed.startsWith("/*") && !trimmed.startsWith("*")
+}
+
+/**
+ * Parses the directive blocks of a fail fixture's source. Line numbers are 1-based. A `// @valid` block with no
+ * code line before the next directive (or the end of the file) is a problem: an empty pass twin proves nothing
+ * about the fixture's setup.
+ */
 export const parseDirectives = (source: string): FixtureDirectives => {
   const blocks: Array<Block> = []
   const problems: Array<string> = []
-  source.split("\n").forEach((text, index) => {
+  const lines = source.split("\n")
+  lines.forEach((text, index) => {
     const line = index + 1
     const directive = directiveLine.exec(text)
     if (directive !== null) {
@@ -112,6 +133,13 @@ export const parseDirectives = (source: string): FixtureDirectives => {
       blocks.push({ kind: "valid", line })
     } else if (validAttempt.test(text)) {
       problems.push(`L${line}: malformed @valid marker; write "// @valid" on its own line`)
+    }
+  })
+  blocks.forEach((block, index) => {
+    if (block.kind !== "valid") return
+    const end = blocks[index + 1]?.line ?? lines.length + 1
+    if (!lines.slice(block.line, end - 1).some(isCodeLine)) {
+      problems.push(`L${block.line}: the @valid block has no code before the next directive; its pass twin must exercise the fixture's setup`)
     }
   })
   return { blocks, problems }
@@ -280,6 +308,11 @@ export const checkRun = (
 
   if (tsc.unlocated.length > 0) {
     problems.push(`tsc printed output that is not a located diagnostic:\n${tsc.unlocated.join("\n")}`)
+  }
+  // A fixture the program does not include would pass silently (type-testing §6, the dropped-fixture trap).
+  const listed = new Set(tsc.listed)
+  for (const file of fixtureFiles) {
+    if (!listed.has(file)) problems.push(`${rel(file)}: not in the compiled program (check the include list of test/types/tsconfig.json)`)
   }
   for (const d of tsc.diagnostics) {
     if (!fixtureFiles.has(d.file)) problems.push(`${rel(d.file)}:${d.line}:${d.column} diagnostic outside the fixtures (${d.code})\n${d.text}`)

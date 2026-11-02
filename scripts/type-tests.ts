@@ -4,7 +4,8 @@
  *   bun run test:types               check pass fixtures, the fail-fixture gate and the diagnostic snapshots
  *   bun run test:types -- --update   also rewrite the snapshots (review the diff; verify:offline never passes it)
  *
- * One `tsc -p test/types/tsconfig.json --pretty false` covers every fixture. Snapshots are exactly what tsc
+ * One `tsc -p test/types/tsconfig.json --pretty false --listFiles` covers every fixture, and every fixture must be
+ * in the program it lists. Snapshots are exactly what tsc
  * printed: default truncation, no `--noErrorTruncation`, no `--locale`.
  */
 import * as fs from "node:fs"
@@ -30,7 +31,8 @@ const failFixtures: ReadonlyArray<FailFixture> = listTypeScriptFiles(path.join(t
 const rel = (file: string): string => path.relative(repoRoot, file)
 
 assertPinnedCompiler()
-const run = runTsc(["-p", path.join(typesDir, "tsconfig.json"), "--pretty", "false"])
+// `--listFiles` prints the program, so a fixture the tsconfig drops is reported instead of passing silently.
+const run = runTsc(["-p", path.join(typesDir, "tsconfig.json"), "--pretty", "false", "--listFiles"])
 const failures: Array<string> = []
 if (run.status === null) failures.push("tsc was killed by a signal")
 const tsc = parseTscOutput(run.stdout + run.stderr, repoRoot)

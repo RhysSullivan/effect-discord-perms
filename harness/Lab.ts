@@ -13,8 +13,9 @@
  * - nothing is written before `arm` (the identity checks have run and found the lab's protected channels);
  * - a channel write targets an admitted lab channel: named `lab` or `lab-*`, in the lab guild, and never
  *   `#rules`, `#mod-updates` or the guild's rules or public-updates channel; a new channel or thread has a lab
- *   name, and a new channel no parent outside the lab; the guild's channel-list PATCH (positions and parents
- *   of any channel) is refused;
+ *   name, and a new channel no parent outside the lab; a channel PATCH sets overwrites only for lab roles,
+ *   `@everyone` and the two bots (as the per-overwrite route does) and moves the channel only under a lab
+ *   parent; the guild's channel-list PATCH (positions and parents of any channel) is refused;
  * - thread membership changes only for `@me`, the subject and the target (adding a human posts a notice that
  *   can ping them);
  * - a role write targets an admitted lab role (`lab-*`), the subject's or target's managed role, or (PATCH
@@ -105,6 +106,14 @@ const Named = Schema.fromJsonString(Schema.Struct({ name: Schema.String }))
 const decodeNamed = Schema.decodeUnknownOption(Named)
 const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 const decodeJsonObject = Schema.decodeUnknownOption(JsonObject)
+/** The fields of a channel PATCH the guard reads: the overwrites it sets and the parent it moves the channel to. */
+const ChannelEdit = Schema.fromJsonString(
+  Schema.Struct({
+    permission_overwrites: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String }))),
+    parent_id: Schema.optionalKey(Schema.NullOr(Schema.String))
+  })
+)
+const decodeChannelEdit = Schema.decodeUnknownOption(ChannelEdit)
 
 /**
  * The member fields the lab edits: a nickname and a timeout (reset, and the library's `member.setNickname` and
@@ -181,6 +190,21 @@ const channelWrite = (state: GuardState, armed: Armed, method: string, route: st
   if (armed.protectedChannels.has(channel)) return refuse(`${route}: a protected channel`)
   const [area, target, sub] = rest
   if (area === "webhooks" || area === "invites" || area === "followers" || area === "recipients") return refuse(`${route}: not allowed in the lab`)
+  /** The overwrite targets the lab sets: lab roles, `@everyone` and the two bots (never a human or a foreign role). */
+  const overwriteTarget = (id: string): boolean => state.roles.has(id) || id === state.guildId || id === armed.subjectUserId || id === armed.targetUserId
+  // A channel PATCH sets the same overwrites as the per-overwrite route, so it gets the same rule; and a lab
+  // channel moves only under a lab parent (or to none), as a new channel's parent must be.
+  if (rest.length === 0 && method === "PATCH") {
+    const edit = Option.flatMap(textOf(body), decodeChannelEdit)
+    if (Option.isNone(edit)) return refuse(`${route}: channel edit body could not be read`)
+    const outside = (edit.value.permission_overwrites ?? []).filter((overwrite) => !overwriteTarget(overwrite.id))
+    if (outside.length > 0) return refuse(`${route}: overwrite target outside the lab: ${outside.map((overwrite) => overwrite.id).join(", ")}`)
+    const parent = edit.value.parent_id
+    if (parent !== undefined && parent !== null && (!state.channels.has(parent) || armed.protectedChannels.has(parent))) {
+      return refuse(`${route}: a lab channel's parent must be a lab channel`)
+    }
+    return allow
+  }
   // A thread (or forum post) is created by `POST threads` or `POST messages/{id}/threads`; it must have a lab
   // name, so reset can tell scenario threads from anything else (§5.7).
   const threadCreate = (rest.length === 1 && area === "threads") || (rest.length === 3 && area === "messages" && sub === "threads")
@@ -191,8 +215,7 @@ const channelWrite = (state: GuardState, armed: Armed, method: string, route: st
     return isLabChannelName(created.value.name) ? allow : refuse(`${route}: a new thread must have a lab name, not "${created.value.name}"`)
   }
   if (area === "permissions") {
-    const allowed = target !== undefined && (state.roles.has(target) || target === state.guildId || target === armed.subjectUserId || target === armed.targetUserId)
-    return rest.length === 2 && allowed ? allow : refuse(`${route}: overwrite target outside the lab`)
+    return rest.length === 2 && target !== undefined && overwriteTarget(target) ? allow : refuse(`${route}: overwrite target outside the lab`)
   }
   if (area === "thread-members") {
     // Adding a human posts a RECIPIENT_ADD notice that can ping them; only the bots join or leave threads.
@@ -204,8 +227,8 @@ const channelWrite = (state: GuardState, armed: Armed, method: string, route: st
 
 /**
  * The guard's decision for a request, as a pure function of the state, the method, the full URL and the body.
- * The body is read for channel, thread, role and sticker creation, role-position PATCHes and member edits; a
- * body those routes cannot read is refused.
+ * The body is read for channel, thread, role and sticker creation, channel edits, role-position PATCHes and
+ * member edits; a body those routes cannot read is refused.
  */
 export const verdict = (state: GuardState, method: string, url: string, body: RequestBody): Verdict => {
   const parsed = URL.canParse(url) ? new URL(url) : undefined
