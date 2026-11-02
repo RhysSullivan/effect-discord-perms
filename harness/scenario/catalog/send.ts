@@ -322,6 +322,42 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     removals: [],
     memberState: "normal"
   }),
+  // H-036 (M3 verifier): every locked row so far had the subject outside the thread, so its 50001 could be the
+  // refused auto-join (H-034) rather than the lock; here the subject is a member without ManageThreads
+  targeted("locked-thread-member", ["H-034", "H-036"], "plain", {
+    channel: "public-thread",
+    threadState: "locked",
+    subjectThreadMember: true,
+    grants: [{ flags: ["ViewChannel", "SendMessagesInThreads"], via: "role" }],
+    removals: [],
+    memberState: "normal"
+  }),
+  // payload flags missing alone, outside threads (M3 verifier: no pairwise row had SendPolls, a reply's
+  // ReadMessageHistory or SendTTSMessages as its only missing flag in a channel)
+  targeted("poll-without-send-polls", ["H-055"], "poll", {
+    channel: "text",
+    grants: [{ flags: ["ViewChannel", "SendMessages"], via: "role" }],
+    removals: [],
+    memberState: "normal"
+  }),
+  targeted("reply-without-history", ["H-091", "H-135"], "reply", {
+    channel: "text",
+    grants: [{ flags: ["ViewChannel", "SendMessages"], via: "role" }],
+    removals: [],
+    memberState: "normal"
+  }),
+  targeted("tts-without-tts-text", ["H-102"], "tts", {
+    channel: "text",
+    grants: [{ flags: ["ViewChannel", "SendMessages"], via: "role" }],
+    removals: [],
+    memberState: "normal"
+  }),
+  targeted("tts-without-tts-voice", ["H-102", "H-152"], "tts", {
+    channel: "voice",
+    grants: [{ flags: ["ViewChannel", "Connect", "SendMessages"], via: "role" }],
+    removals: [],
+    memberState: "normal"
+  }),
   // ordering: the timeout ranks above a missing SendMessages (H-020)
   targeted("order-timeout-send", ["H-020", "H-023"], "plain", {
     channel: "text",

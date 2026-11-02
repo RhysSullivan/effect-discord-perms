@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import * as Materialize from "../../harness/Materialize.ts"
 import { scenarios as sendScenarios, targetedRows, wirePayload } from "../../harness/scenario/catalog/send.ts"
 import { Setup } from "../../harness/scenario/Dsl.ts"
-import { families, kickBanMustFail, pairsOf, pairwise, validPairs } from "../../harness/scenario/Pairwise.ts"
+import { families, kickBanMustFail, pairsOf, pairwise, selectionProblems, validPairs } from "../../harness/scenario/Pairwise.ts"
 import * as Safety from "../../harness/scenario/Safety.ts"
 import { MessageId, StickerId } from "../../src/Snowflake.ts"
 import { fakeIds } from "../support/lab.ts"
@@ -15,6 +15,19 @@ import { fakeIds } from "../support/lab.ts"
 const now = Date.parse("2026-11-01T12:00:00Z")
 
 describe("pairwise selection", () => {
+  it.each(Object.entries(families))("%s: the run-start check finds nothing wrong with the selection", (name, family) => {
+    expect(selectionProblems(name, family)).toEqual([])
+  })
+
+  it("the run-start check names an invalid row, an uncovered pair, a missing value and a selection that is not the fresh one", () => {
+    const family = { dimensions: { a: ["x", "y"], b: ["p", "q"] }, valid: (row: Readonly<Record<string, string>>) => !(row.a === "y" && row.b === "q") }
+    const rows = pairwise(family)
+    expect(selectionProblems("toy", family, rows)).toEqual([])
+    expect(selectionProblems("toy", family, [...rows, { a: "y", b: "q" }])).toContain('toy: selected an invalid row {"a":"y","b":"q"}')
+    const withoutY = rows.filter((row) => row.a !== "y")
+    expect(selectionProblems("toy", family, withoutY)).toEqual(["toy: no row covers a=y|b=p", "toy: no row has a=y", "toy: the selection is not deterministic"])
+  })
+
   it.each(Object.entries(families))("%s: rows are valid, cover every valid pair and every value, and are deterministic", (_name, family) => {
     const rows = pairwise(family)
     expect(rows.filter((row) => !family.valid(row))).toEqual([])
@@ -110,6 +123,19 @@ describe("Safety", () => {
     expect(Safety.checkMaterialized(everyone, Materialize.desired(everyone.setup, fakeIds), fakeIds, now).map((violation) => violation.detail)).toEqual([
       "@everyone holds MentionEveryone or Administrator"
     ])
+  })
+
+  it("refuses an @everyone payload while the subject holds a role that gives MentionEveryone or Administrator", () => {
+    const plain = scenario("mention-everyone", { channel: "text", grants: [{ flags: ["ViewChannel", "SendMessages"], via: "role" }], removals: [], memberState: "normal", fixtures: [] })
+    const state = Materialize.desired(plain.setup, fakeIds)
+    expect(Safety.checkMaterialized(plain, state, fakeIds, now)).toEqual([])
+    const granting = (bits: bigint): Materialize.Desired => ({ ...state, rolePermissions: new Map(state.rolePermissions).set("lab-grant", (state.rolePermissions.get("lab-grant") ?? 0n) | bits) })
+    for (const bits of [1n << 17n, 8n]) {
+      expect(Safety.checkMaterialized(plain, granting(bits), fakeIds, now).map((violation) => violation.detail)).toEqual(["the subject holds lab-grant, which has MentionEveryone or Administrator"])
+    }
+    // a role the subject does not hold may have it
+    const unheld: Materialize.Desired = { ...state, rolePermissions: new Map(state.rolePermissions).set("lab-high", 1n << 17n) }
+    expect(Safety.checkMaterialized(plain, unheld, fakeIds, now)).toEqual([])
   })
 
   it("refuses a materialized state where the target loses its fixture flags", () => {

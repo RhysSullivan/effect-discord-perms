@@ -1,7 +1,7 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { describe, expect, it } from "vitest"
-import { openQuestionsOf, registryProblems, type RepositoryView, waitingForRhys } from "../../scripts/lib/rules.ts"
+import { escalatedRules, openQuestionsOf, registryProblems, type RepositoryView, waitingForRhys } from "../../scripts/lib/rules.ts"
 import type { Rule } from "../rules.ts"
 
 const failSource = ["import { x } from 'y'", "// @valid", "x.ok()", "// @expect-error TS2345 Beta", "x.bad()"].join("\n")
@@ -106,5 +106,22 @@ describe("documents", () => {
 
   it("reads only the Waiting for Rhys section of LOG.md", () => {
     expect(waitingForRhys("# LOG\n## Waiting for Rhys\n- Q-17\n## Live findings\n- Q-18\n")).toBe("- Q-17")
+  })
+})
+
+describe("escalatedRules", () => {
+  it("lists every escalated live side and remainder, in registry order, and nothing for a registry without one", () => {
+    const base: Rule = { id: "R-a", statement: "a", pass: "test/types/pass/a.ts", fail: "test/types/fail/a.ts", claims: ["A"], live: { kind: "not-live", reason: "pure-typing" } }
+    expect(escalatedRules([base])).toEqual([])
+    expect(
+      escalatedRules([
+        { ...base, id: "R-message-content", remainder: { kind: "escalated", question: "Q-17" } },
+        base,
+        { ...base, id: "R-options-typed", live: { kind: "escalated", question: "Q-18" } }
+      ])
+    ).toEqual([
+      { rule: "R-message-content", part: "remainder", question: "Q-17" },
+      { rule: "R-options-typed", part: "live", question: "Q-18" }
+    ])
   })
 })

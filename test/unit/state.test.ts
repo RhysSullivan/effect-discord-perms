@@ -136,6 +136,19 @@ describe("the reducer", () => {
     expect(guildOf(run([["GUILD_ROLE_UPDATE", { guild_id: ids.guild, role: role(ids.roleB, "0", 1) }]], after.snapshot).snapshot).stale).toBe(false)
   })
 
+  it("clears a channel's unseen mark when a channel or thread event brings it", () => {
+    const unseen = (id: string): Snapshot => {
+      const guild = guildOf(booted.snapshot)
+      return { ...booted.snapshot, guilds: new Map([[guildId, { ...guild, unseen: new Set([ChannelId.make(id)]) }]]) }
+    }
+    expect(guildOf(run([["CHANNEL_UPDATE", channelUpdate(ids.text, 0, [])]], unseen(ids.text)).snapshot).unseen.size).toBe(0)
+    expect(guildOf(run([["CHANNEL_CREATE", channelUpdate(ids.text, 0, [])]], unseen(ids.text)).snapshot).unseen.size).toBe(0)
+    expect(guildOf(run([["THREAD_UPDATE", threadObject(ids.privateThread, 12)]], unseen(ids.privateThread)).snapshot).unseen.size).toBe(0)
+    expect(guildOf(run([["THREAD_CREATE", threadObject(ids.privateThread, 12)]], unseen(ids.privateThread)).snapshot).unseen.size).toBe(0)
+    // an event about another channel leaves it
+    expect([...guildOf(run([["CHANNEL_UPDATE", channelUpdate(ids.voice, 2, [])]], unseen(ids.text)).snapshot).unseen]).toEqual([ids.text])
+  })
+
   it("is idempotent: replaying dispatches leaves every value unchanged and only bumps generations", () => {
     const events: ReadonlyArray<readonly [string, unknown]> = [
       ["CHANNEL_UPDATE", channelUpdate(ids.text, 0, [overwrite(ids.roleB, 0, "0", "1024")])],
@@ -203,6 +216,68 @@ describe("GuildState", () => {
       const guild = guildOf(yield* state.snapshot)
       expect(guild.unseen.has(privateThread)).toBe(true)
       expect(guild.channels.has(privateThread)).toBe(false)
+    })
+  )
+
+  it.effect("sets the bot's thread membership from the REST thread's member field, and commits the thread's parent", () =>
+    Effect.gen(function* () {
+      const parentOverwrites = [overwrite(ids.roleA, 0, "2048", "0")]
+      const answers = (member: boolean) =>
+        scriptedRestEffect((method, path) =>
+          Effect.succeed(
+            restAnswers((channelPath) =>
+              channelPath === `/channels/${ids.privateThread}`
+                ? json(200, threadObject(ids.privateThread, 12, { member, locked: true }))
+                : channelPath === `/channels/${ids.text}`
+                  ? json(200, channelUpdate(ids.text, 0, parentOverwrites))
+                  : json(404, { code: 10003, message: "Unknown Channel" })
+            )(method, path)
+          )
+        )
+      // GUILD_CREATE says the bot is in the private thread; a REST read without `member` says it is not
+      const outside = yield* make(answers(false))
+      yield* outside.apply("READY", ready)
+      yield* outside.apply("GUILD_CREATE", guildCreate)
+      expect(botIsThreadMember(guildOf(yield* outside.snapshot), privateThread)).toBe(true)
+      yield* outside.refresh(guildId, privateThread)
+      const after = guildOf(yield* outside.snapshot)
+      expect(botIsThreadMember(after, privateThread)).toBe(false)
+      expect(after.channels.get(privateThread)?.thread).toMatchObject({ locked: true })
+      // the parent was read and committed too
+      expect(after.channels.get(text)?.overwrites.map((entry) => [entry.id, Flags.toSortedNames(entry.allow)])).toEqual([[ids.roleA, ["SendMessages"]]])
+
+      const inside = yield* make(answers(true))
+      yield* inside.apply("READY", ready)
+      yield* inside.apply("GUILD_CREATE", { ...guildCreate, threads: [threadObject(ids.privateThread, 12)] })
+      expect(botIsThreadMember(guildOf(yield* inside.snapshot), privateThread)).toBe(false)
+      yield* inside.refresh(guildId, privateThread)
+      expect(botIsThreadMember(guildOf(yield* inside.snapshot), privateThread)).toBe(true)
+    })
+  )
+
+  it.effect("clears unseen when a later refresh can fetch the channel", () =>
+    Effect.gen(function* () {
+      let visible = false
+      const state = yield* make(
+        scriptedRestEffect((method, path) =>
+          Effect.succeed(
+            restAnswers(() => (visible ? json(200, threadObject(ids.privateThread, 12, { member: true })) : json(404, { code: 10003, message: "Unknown Channel" })))(
+              method,
+              path
+            )
+          )
+        )
+      )
+      yield* state.apply("READY", ready)
+      yield* state.apply("GUILD_CREATE", guildCreate)
+      yield* state.refresh(guildId, privateThread)
+      expect(guildOf(yield* state.snapshot).unseen.has(privateThread)).toBe(true)
+      visible = true
+      yield* state.refresh(guildId, privateThread)
+      const guild = guildOf(yield* state.snapshot)
+      expect(guild.unseen.has(privateThread)).toBe(false)
+      expect(guild.channels.get(privateThread)?.kind).toBe("private-thread")
+      expect(botIsThreadMember(guild, privateThread)).toBe(true)
     })
   )
 

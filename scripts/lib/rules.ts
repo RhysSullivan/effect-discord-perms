@@ -144,6 +144,25 @@ export const registryProblems = (rules: ReadonlyArray<Rule>, view: RepositoryVie
 
 /** Checks of §5.5 whose inputs do not exist yet; rules-check prints them so they are never mistaken for passes. */
 export const pendingChecks: ReadonlyArray<string> = [
-  "flag coverage per (operation row, flag) and per payload-rule flag, with flip controls (src/permissions/Operations.ts exists; still needs PayloadRules and fixtures/truth-table.json)",
+  "flag coverage per (operation row, flag) and per payload-rule flag, with flip controls (Operations, PayloadRules and the M4 truth table exist; the check arrives with the live-pair checks in M6)",
   "a live intent pair for every event in EventIntents (needs src/gateway/Intents.ts and the truth table)"
 ]
+
+/** One escalated rule part: the rule, which part, and the DESIGN §8 question it waits on. */
+export interface Escalation {
+  readonly rule: Rule["id"]
+  readonly part: "live" | "remainder"
+  readonly question: `Q-${number}`
+}
+
+/**
+ * Every escalated live side or remainder in the registry, in registry order. `verify:live` prints these as unmet
+ * Done criteria, never as passes (§5.1, §5.5).
+ */
+export const escalatedRules = (rules: ReadonlyArray<Rule>): ReadonlyArray<Escalation> =>
+  rules.flatMap((rule) => {
+    const out: Array<Escalation> = []
+    if (rule.live.kind === "escalated") out.push({ rule: rule.id, part: "live", question: rule.live.question })
+    if (rule.remainder?.kind === "escalated") out.push({ rule: rule.id, part: "remainder", question: rule.remainder.question })
+    return out
+  })

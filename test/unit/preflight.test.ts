@@ -85,6 +85,15 @@ describe("Preflight.decide", () => {
     expect(tags("channel.send", known(channel("text", [memberOverwrite("200000000000000001", Flags.empty)])), ["mentionsEveryone"], { granted }).degraded).toEqual([])
   })
 
+  it("reads degraded from the effective set: a granted degrade-mode flag an implicit mask or the timeout removes is degraded", () => {
+    const granted = Flags.union(sendAll, set("MentionEveryone"))
+    // no Send in a text channel masks MentionEveryone (H-013): the send fails on Send, and MentionEveryone is degraded
+    const noSend = tags("channel.send", known(channel("text", deny("SendMessages"))), ["mentionsEveryone"], { granted })
+    expect(noSend).toMatchObject({ tags: ["MissingSendMessages"], degraded: ["MentionEveryone"] })
+    // the timeout keeps only View and ReadMessageHistory (H-020)
+    expect(tags("channel.send", known(channel("text")), ["mentionsEveryone"], { granted, timedOutUntil: later })).toMatchObject({ tags: ["CommunicationDisabled"], degraded: ["MentionEveryone"] })
+  })
+
   it("lists the row's flags, then the payload's error-mode and degrade-mode flags", () => {
     expect(requiredFlags("thread.send", { payload: ["mentionsEveryone", "tts", "reply"] })).toEqual(["ViewChannel", "SendMessagesInThreads", "ReadMessageHistory", "SendTTSMessages", "MentionEveryone"])
   })

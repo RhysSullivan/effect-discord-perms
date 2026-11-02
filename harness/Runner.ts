@@ -50,9 +50,12 @@ import * as Provision from "./Provision.ts"
 import * as Reset from "./Reset.ts"
 import * as SendCatalog from "./scenario/catalog/send.ts"
 import { operationKey, type Scenario, Setup } from "./scenario/Dsl.ts"
+import { families, selectionProblems } from "./scenario/Pairwise.ts"
 import * as Safety from "./scenario/Safety.ts"
 import * as TruthTable from "./TruthTable.ts"
 import * as Wait from "./Wait.ts"
+import { escalatedRules } from "../scripts/lib/rules.ts"
+import { rules } from "../test/rules.ts"
 
 /** The command-line options of `run` (§5.1). */
 export interface Options {
@@ -290,7 +293,10 @@ export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenari
     const state = yield* LabIds.load(context.guildId).pipe(Effect.provide(BunFileSystem.layer))
     const ids = yield* idsOf(state, report)
 
-    // Safety, over the catalog and every scenario's materialized state, before any scenario write
+    // the pairwise selections (every row valid, every valid pair and value covered, deterministic), then Safety
+    // over the catalog and every scenario's materialized state, before any scenario write
+    const selection = Object.entries(families).flatMap(([name, family]) => selectionProblems(name, family))
+    if (selection.length > 0) return yield* Effect.die(new Error(`pairwise selection: ${selection.join("; ")}`))
     const now = yield* Clock.currentTimeMillis
     const violations = [...Safety.checkCatalog(scenarios), ...scenarios.flatMap((scenario) => Safety.checkMaterialized(scenario, Materialize.desired(scenario.setup, ids), ids, now))]
     if (violations.length > 0) return yield* Effect.die(new Error(`Safety: ${violations.map((violation) => `${violation.scenario} ${violation.rule}: ${violation.detail}`).join("; ")}`))
@@ -377,6 +383,7 @@ export const run = (report: IdentityReport, options: Options) =>
     const result = results.at(-1)
     if (result === undefined) return yield* Effect.die(new Error("run: --repeat must be at least 1"))
     const stats = yield* pacing.stats
+    const escalated = escalatedRules(rules)
 
     const lines: Array<string> = [
       `scenarios: ${result.scenarios}${options.repeat > 1 ? ` (x${options.repeat})` : ""}`,
@@ -386,7 +393,7 @@ export const run = (report: IdentityReport, options: Options) =>
       `oracle: ${result.table.env.oracle}`,
       `mismatches: ${result.mismatches.length}`,
       ...result.mismatches.map(([id, kind]) => `  ${kind}: ${id}`),
-      "escalated rules (unmet Done criteria): none in this catalog"
+      `escalated rules (unmet Done criteria): ${escalated.length === 0 ? "none" : escalated.map((entry) => `${entry.rule} (${entry.part}, ${entry.question})`).join(", ")}`
     ]
     let identical = true
     for (const [index, earlier] of results.slice(0, -1).entries()) {

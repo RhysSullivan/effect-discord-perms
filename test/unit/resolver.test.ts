@@ -2,9 +2,9 @@ import { PermissionFlagsBits as P } from "discord-api-types/v10"
 import { describe, expect, it } from "vitest"
 import { PermissionFlags } from "../../src/errors/Missing.generated.ts"
 import * as Flags from "../../src/permissions/Flags.ts"
-import { applyOverwrites, basePermissions, type ChannelInput, resolve, roleBelow, targetBelow } from "../../src/permissions/Resolver.ts"
-import type { ChannelSnap, Overwrite } from "../../src/state/Snapshot.ts"
-import { RoleId, UserId } from "../../src/Snowflake.ts"
+import { applyOverwrites, basePermissions, type ChannelInput, inputFromSnapshot, resolve, roleBelow, targetBelow } from "../../src/permissions/Resolver.ts"
+import type { ChannelSnap, GuildSnap, Overwrite, Snapshot } from "../../src/state/Snapshot.ts"
+import { ChannelId, RoleId, UserId } from "../../src/Snowflake.ts"
 import {
   botId,
   channel,
@@ -266,5 +266,61 @@ describe("hierarchy", () => {
     expect(roleBelow(g, member([roleA]), b)).toBe(true)
     expect(roleBelow(g, member([roleB]), b)).toBe(false)
     expect(roleBelow(g, member([]), b)).toBe(false)
+  })
+})
+
+describe("inputFromSnapshot", () => {
+  const text = channel("text", [roleOverwrite(guildId, Flags.empty, set("SendMessages"))])
+  const privateThread = { ...thread("private-thread"), parentId: text.id }
+  const base: GuildSnap = {
+    id: guildId,
+    ownerId,
+    stale: false,
+    roles: new Map([[everyone, role(everyone, set("ViewChannel", "SendMessages"))]]),
+    channels: new Map([
+      [text.id, text],
+      [privateThread.id, privateThread]
+    ]),
+    unseen: new Set(),
+    threadMembership: new Map(),
+    botMember: { roleIds: [], timedOutUntil: later },
+    generations: new Map()
+  }
+  const snapshot = (guild: Partial<GuildSnap> = {}): Snapshot => ({ botUserId: botId, guilds: new Map([[guildId, { ...base, ...guild }]]) })
+  const channelOf = (target: Snapshot, id: ChannelId) => {
+    const result = inputFromSnapshot(target, guildId, id, now)
+    return result._tag === "Ready" ? result.input.channel : result.reason
+  }
+
+  it("builds the input from the state: the guild's roles, the bot member with its timeout, the channel", () => {
+    const result = inputFromSnapshot(snapshot(), guildId, text.id, now)
+    if (result._tag !== "Ready") throw new Error(result.reason)
+    expect(result.input.member).toEqual({ userId: botId, roleIds: [], timedOutUntil: later })
+    expect(result.input.guild).toEqual({ id: guildId, ownerId, roles: base.roles })
+    expect(result.input.channel).toEqual({ _tag: "Known", channel: text, parent: undefined, threadMember: false })
+    expect(result.input.now).toBe(now)
+  })
+
+  it("gives a thread its parent and the bot's membership from the state's own map", () => {
+    expect(channelOf(snapshot(), privateThread.id)).toEqual({ _tag: "Known", channel: privateThread, parent: text, threadMember: false })
+    expect(channelOf(snapshot({ threadMembership: new Map([[privateThread.id, true]]) }), privateThread.id)).toEqual({ _tag: "Known", channel: privateThread, parent: text, threadMember: true })
+    expect(channelOf(snapshot({ threadMembership: new Map([[privateThread.id, false]]) }), privateThread.id)).toMatchObject({ threadMember: false })
+  })
+
+  it("resolves a channel a refresh found unseen, and a thread whose parent is unseen or missing, as Unseen", () => {
+    expect(channelOf(snapshot({ unseen: new Set([text.id]) }), text.id)).toEqual({ _tag: "Unseen" })
+    // an unseen ID wins over a stale entry for the same channel
+    expect(channelOf(snapshot({ unseen: new Set([privateThread.id]) }), privateThread.id)).toEqual({ _tag: "Unseen" })
+    expect(channelOf(snapshot({ unseen: new Set([text.id]) }), privateThread.id)).toEqual({ _tag: "Unseen" })
+    const orphan = { ...privateThread, parentId: undefined }
+    expect(channelOf(snapshot({ channels: new Map([[orphan.id, orphan]]) }), orphan.id)).toEqual({ _tag: "Unseen" })
+  })
+
+  it("asks for a refresh when the state lacks the guild, the bot, the channel or a thread's parent", () => {
+    expect(inputFromSnapshot({ botUserId: botId, guilds: new Map() }, guildId, text.id, now)._tag).toBe("NeedsRefresh")
+    expect(inputFromSnapshot({ ...snapshot(), botUserId: undefined }, guildId, text.id, now)._tag).toBe("NeedsRefresh")
+    expect(inputFromSnapshot(snapshot({ botMember: undefined }), guildId, text.id, now)._tag).toBe("NeedsRefresh")
+    expect(channelOf(snapshot(), ChannelId.make("300000000000000077"))).toBe("channel 300000000000000077 is not in the state")
+    expect(channelOf(snapshot({ channels: new Map([[privateThread.id, privateThread]]) }), privateThread.id)).toBe(`thread ${privateThread.id}'s parent ${text.id} is not in the state`)
   })
 })

@@ -7,7 +7,7 @@ import type * as Wire from "../../harness/Wire.ts"
 import * as Flags from "../../src/permissions/Flags.ts"
 import { reduce } from "../../src/state/Reducer.ts"
 import { emptySnapshot, type Snapshot } from "../../src/state/Snapshot.ts"
-import { RoleId } from "../../src/Snowflake.ts"
+import { RoleId, UserId } from "../../src/Snowflake.ts"
 import { channelIdOf, fakeIds, labGuildId, roleIdOf } from "../support/lab.ts"
 
 /**
@@ -118,6 +118,35 @@ describe("the projection", () => {
     const timedOut = { ...hiddenText, subjectTimedOut: true }
     expect(Materialize.projectionProblems(Materialize.project(timedOut, fakeIds, now), stateFor(hiddenText), labGuildId, now)).toEqual(["subject timed out: false, not true"])
   })
+
+  it("compares a hidden channel's real overwrites when the gateway delivers them unobfuscated", () => {
+    const projection = Materialize.project(hiddenText, fakeIds, now)
+    const stale: Materialize.Desired = { ...hiddenText, overwrites: new Map([...hiddenText.overwrites].map(([name, overwrites]) => [name, name === "lab-text" ? overwrites.slice(1) : overwrites])) }
+    expect(Materialize.projectionProblems(projection, stateFor(stale), labGuildId, now)).toEqual(["lab-text overwrites differ"])
+    // obfuscated, its (fake) overwrites are not compared
+    expect(Materialize.projectionProblems(projection, stateFor(stale, { obfuscate: new Set(["lab-text"]) }), labGuildId, now)).toEqual([])
+  })
+
+  it("compares an observable thread's state and the subject's membership when the thread is present", () => {
+    const visible = Materialize.desired(
+      new Setup({ channel: "private-thread", threadState: "locked", subjectThreadMember: true, grants: [{ flags: ["ViewChannel"], via: "everyone" }], removals: [], memberState: "normal", fixtures: [] }),
+      fakeIds
+    )
+    const projection = Materialize.project(visible, fakeIds, now)
+    const thread = (options: { readonly locked: boolean; readonly member: boolean }) => ({
+      id: channelIdOf("lab-private-thread"),
+      type: 12,
+      parent_id: channelIdOf("lab-text"),
+      thread_metadata: { archived: false, locked: options.locked },
+      ...(options.member ? { member: {} } : {})
+    })
+    const withThread = (options: { readonly locked: boolean; readonly member: boolean }) => reduce(stateFor(visible), "THREAD_CREATE", { ...thread(options), guild_id: labGuildId }).snapshot
+    expect(Materialize.projectionProblems(projection, withThread({ locked: true, member: true }), labGuildId, now)).toEqual([])
+    expect(Materialize.projectionProblems(projection, withThread({ locked: false, member: true }), labGuildId, now)).toEqual([`thread ${channelIdOf("lab-private-thread")} state differs`])
+    expect(Materialize.projectionProblems(projection, withThread({ locked: true, member: false }), labGuildId, now)).toEqual([`thread ${channelIdOf("lab-private-thread")} membership differs`])
+    // absent is accepted: Discord does not always sync a channel's threads when it becomes visible
+    expect(Materialize.projectionProblems(projection, stateFor(visible), labGuildId, now)).toEqual([])
+  })
 })
 
 describe("the harness read-back", () => {
@@ -143,5 +172,26 @@ describe("the harness read-back", () => {
     expect(Converge.readbackProblems(state, fakeIds, { ...view, subject: { ...view.subject, roles: [] } }, now)).toEqual([`subject roles none, not ${roleIdOf("lab-grant")}`])
     expect(Converge.readbackProblems(state, fakeIds, { ...view, subject: { ...view.subject, communication_disabled_until: new Date(now + 60_000).toISOString() } }, now)).toHaveLength(1)
     expect(Converge.readbackProblems(state, fakeIds, { ...view, channels: view.channels.map((channel) => (channel.name === "lab-text" ? { ...channel, permission_overwrites: [] } : channel)) }, now)).toEqual(["lab-text overwrites differ"])
+    const skewed = view.roles.map((role) => (role.id === roleIdOf("lab-grant") ? { ...role, permissions: "0" } : role))
+    expect(Converge.readbackProblems(state, fakeIds, { ...view, roles: skewed }, now)).toEqual([`lab-grant permissions 0, not ${bits("ViewChannel")}`])
+    const everyone = view.roles.map((role) => (role.id === RoleId.make(labGuildId) ? { ...role, permissions: "1024" } : role))
+    expect(Converge.readbackProblems(state, fakeIds, { ...view, roles: everyone }, now)).toEqual(["@everyone permissions 1024, not 0"])
+  })
+
+  it("checks the scenario thread's state and the subject's membership of it", () => {
+    const threaded = Materialize.desired(new Setup({ channel: "private-thread", threadState: "archived", subjectThreadMember: true, grants: [{ flags: ["ViewChannel"], via: "role" }], removals: [], memberState: "normal", fixtures: [] }), fakeIds)
+    const thread = (archived: boolean): Wire.Channel => ({
+      id: channelIdOf("lab-private-thread"),
+      type: 12,
+      name: "lab-private-thread",
+      thread_metadata: { archived, locked: false, auto_archive_duration: 10080 }
+    })
+    const withThread = (archived: boolean, members: ReadonlyArray<string>): Converge.LabView => ({ ...view, thread: thread(archived), threadMembers: members.map((id) => UserId.make(id)) })
+    expect(Converge.readbackProblems(threaded, fakeIds, withThread(true, [fakeIds.subjectUserId, fakeIds.targetUserId]), now)).toEqual([])
+    expect(Converge.readbackProblems(threaded, fakeIds, withThread(true, [fakeIds.targetUserId]), now)).toEqual(["lab-private-thread subject member false"])
+    expect(Converge.readbackProblems(threaded, fakeIds, withThread(false, [fakeIds.subjectUserId]), now)).toEqual(["lab-private-thread archived false locked false"])
+    // before the fixtures are posted the archived state is not checked yet
+    expect(Converge.readbackProblems(threaded, fakeIds, withThread(false, [fakeIds.subjectUserId]), now, { threadState: false })).toEqual([])
+    expect(Converge.readbackProblems(threaded, fakeIds, { ...view, thread: undefined, threadMembers: undefined }, now)).toEqual(["lab-private-thread missing", "lab-private-thread subject member false"])
   })
 })

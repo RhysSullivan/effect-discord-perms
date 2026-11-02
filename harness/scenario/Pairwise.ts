@@ -94,6 +94,28 @@ export const pairwise = (family: Family): ReadonlyArray<Combination> => {
   return rows
 }
 
+/**
+ * What is wrong with a family's selection, empty when nothing is (§5.9): a selected row its predicate rejects,
+ * a valid pair no row covers, a value of a dimension that some valid row has but no selected row does, or rows
+ * that differ from a fresh selection (the selection must be deterministic). The catalog test runs it offline and
+ * the runner again at run start, before any write.
+ */
+export const selectionProblems = (name: string, family: Family, rows: ReadonlyArray<Combination> = pairwise(family)): ReadonlyArray<string> => {
+  const problems: Array<string> = []
+  for (const row of rows) if (!family.valid(row)) problems.push(`${name}: selected an invalid row ${JSON.stringify(row)}`)
+  const covered = new Set(rows.flatMap((row) => pairsOf(row, family)))
+  const valid = validPairs(family)
+  for (const pair of valid) if (!covered.has(pair)) problems.push(`${name}: no row covers ${pair}`)
+  for (const [dimension, values] of Object.entries(family.dimensions)) {
+    for (const value of values) {
+      const possible = completable({ [dimension]: value }, family)
+      if (possible && !rows.some((row) => row[dimension] === value)) problems.push(`${name}: no row has ${dimension}=${value}`)
+    }
+  }
+  if (JSON.stringify(pairwise(family)) !== JSON.stringify(rows)) problems.push(`${name}: the selection is not deterministic`)
+  return problems
+}
+
 const isVoice = (channel: string | undefined): boolean => channel === "voice" || channel === "stage"
 
 /** The payloads whose feature needs a flag (`missing=payload` removes it). A guild sticker needs none (H-138). */

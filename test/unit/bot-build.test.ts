@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ApplicationFlags } from "discord-api-types/v10"
-import { Cause, Config, Effect, Exit, Fiber, Layer, Option, Redacted } from "effect"
+import { Cause, Config, Context, Effect, Exit, Fiber, Layer, Option, Redacted } from "effect"
 import * as TestClock from "effect/testing/TestClock"
+import * as Headers from "effect/http/Headers"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { Bot, BotRuntime, intentBits } from "../../src/bot/Bot.ts"
@@ -105,6 +106,52 @@ describe("the bot build", () => {
       const exit = yield* Effect.exit(Effect.provide(Effect.service(BotRuntime), layer).pipe(Effect.scoped))
       expect(reasonOf(exit)).toBe("invalid-token")
       expect(yield* gateway.opened).toBe(-1)
+    })
+  )
+
+  it.live("keeps two bot builds in one layer graph apart: each has its own token, dfx client and guild state (Layer.fresh, G1)", () =>
+    Effect.gen(function* () {
+      const users: Readonly<Record<string, string>> = { "Bot fake-token-a": ids.bot, "Bot fake-token-b": ids.target }
+      const seen: Array<{ readonly authorization: string; readonly path: string }> = []
+      const client = HttpClient.make((request) =>
+        Effect.sync(() => {
+          const path = new URL(request.url).pathname.replace(/^\/api\/v\d+/, "")
+          const authorization = Option.getOrElse(Headers.get(request.headers, "authorization"), () => "")
+          seen.push({ authorization, path })
+          const user = users[authorization]
+          const answer = (status: number, body: unknown) =>
+            HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }))
+          if (user === undefined) return answer(401, { message: "401: Unauthorized", code: 0 })
+          if (path === "/users/@me") return answer(200, { id: user, username: `user-${user.slice(-2)}` })
+          if (path === "/applications/@me") return answer(200, { id: "100000000000000002", flags: ApplicationFlags.GatewayGuildMembers })
+          if (path === `/guilds/${ids.guild}/members/${user}`) return answer(200, memberObject(user, []))
+          if (path === `/channels/${ids.text}`) return answer(200, channelUpdate(ids.text, 0, []))
+          return answer(404, { message: "404: Not Found", code: 0 })
+        })
+      )
+      const gateway = yield* makeFakeGateway({ userFor: (token) => users[`Bot ${token}`], guildsFor: () => [guildCreate] }, () => 0)
+      class RawA extends Context.Service<RawA, SubjectRaw["Service"]>()("test/RawA") {}
+      class RawB extends Context.Service<RawB, SubjectRaw["Service"]>()("test/RawB") {}
+      class RuntimeB extends Context.Service<RuntimeB, BotRuntime["Service"]>()("test/RuntimeB") {}
+      const build = (token: string) => BotInternals.layerWith(bot, { token: Config.succeed(Redacted.make(token)), guildId })
+      const a = Layer.merge(Layer.effect(RawA, Effect.service(SubjectRaw)), Layer.effect(BotRuntime, Effect.service(BotRuntime))).pipe(Layer.provide(build("fake-token-a")))
+      const b = Layer.merge(Layer.effect(RawB, Effect.service(SubjectRaw)), Layer.effect(RuntimeB, Effect.service(BotRuntime))).pipe(Layer.provide(build("fake-token-b")))
+      const both = Layer.mergeAll(a, b).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(HttpClient.HttpClient, client), gateway.layer)))
+      yield* Effect.gen(function* () {
+        const runtimeA = yield* BotRuntime
+        const runtimeB = yield* RuntimeB
+        expect([runtimeA.identity.userId, runtimeB.identity.userId]).toEqual([ids.bot, ids.target])
+        expect(runtimeA.guildState).not.toBe(runtimeB.guildState)
+        expect((yield* runtimeA.guildState.snapshot).botUserId).toBe(ids.bot)
+        expect((yield* runtimeB.guildState.snapshot).botUserId).toBe(ids.target)
+        const rawA = yield* RawA
+        const rawB = yield* RawB
+        expect(rawA).not.toBe(rawB)
+        seen.length = 0
+        yield* rawA.getChannel(ids.text)
+        yield* rawB.getChannel(ids.text)
+        expect(seen.map((entry) => entry.authorization)).toEqual(["Bot fake-token-a", "Bot fake-token-b"])
+      }).pipe(Effect.provide(both), Effect.scoped)
     })
   )
 

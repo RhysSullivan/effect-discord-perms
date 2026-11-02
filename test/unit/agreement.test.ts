@@ -4,7 +4,11 @@ import * as Outcome from "../../harness/Outcome.ts"
 import { Setup } from "../../harness/scenario/Dsl.ts"
 import * as TruthTable from "../../harness/TruthTable.ts"
 import { DiscordResponse, FieldError } from "../../src/errors/Cause.ts"
+import type { PermissionFlag } from "../../src/errors/Missing.generated.ts"
+import * as Flags from "../../src/permissions/Flags.ts"
+import { resolve } from "../../src/permissions/Resolver.ts"
 import { MessageId } from "../../src/Snowflake.ts"
+import { channel, everyone, guild, guildId, known, later, member, now, role, roleOverwrite, set, thread } from "../support/guild.ts"
 
 /**
  * The matrix's judgment (DESIGN §5.10, §5.12): agreement per mismatch kind, the raw outcome and degradation
@@ -66,7 +70,7 @@ describe("agreement", () => {
     expect(agreement(missingEveryone, facts)).toBe("resolver-vs-raw")
   })
 
-  it("flags resolver-vs-oracle, comparing only View for an obfuscated channel and nothing for an unseen one", () => {
+  it("flags resolver-vs-oracle, comparing only View for an obfuscated or unseen channel, and nothing for an unseen private thread the subject is not in", () => {
     expect(agreement(row({ oracle: { missing: ["EmbedLinks"] } }), facts)).toBe("resolver-vs-oracle")
     const blind = (mask: "obfuscated" | "unseen") =>
       row({
@@ -78,7 +82,14 @@ describe("agreement", () => {
       })
     expect(agreement(blind("obfuscated"), facts)).toBe("agree")
     expect(agreement({ ...blind("obfuscated"), oracle: { missing: [] } }, facts)).toBe("resolver-vs-oracle")
-    expect(agreement({ ...blind("unseen"), oracle: { missing: [] } }, facts)).toBe("agree")
+    expect(agreement(blind("unseen"), facts)).toBe("agree")
+    expect(agreement({ ...blind("unseen"), oracle: { missing: [] } }, facts)).toBe("resolver-vs-oracle")
+    // the oracle ignores thread membership: a private thread the subject is not in reads View there (H-033)
+    const privateThread = (member: boolean | undefined) =>
+      new Setup({ channel: "private-thread", ...(member === undefined ? {} : { subjectThreadMember: member }), grants: [], removals: [], memberState: "normal", fixtures: [] })
+    expect(agreement({ ...blind("unseen"), setup: privateThread(false), oracle: { missing: [] } }, facts)).toBe("agree")
+    expect(agreement({ ...blind("unseen"), setup: privateThread(undefined), oracle: { missing: [] } }, facts)).toBe("agree")
+    expect(agreement({ ...blind("unseen"), setup: privateThread(true), oracle: { missing: [] } }, facts)).toBe("resolver-vs-oracle")
   })
 
   it("flags recompute-vs-preflight when step (d) differs in tag or categories", () => {
@@ -110,6 +121,9 @@ describe("the raw outcome", () => {
     expect(Outcome.succeeded("tts", message({})).degraded).toEqual(["SendTTSMessages"])
     expect(Outcome.succeeded("poll", message({ poll: null })).degraded).toEqual(["SendPolls"])
     expect(Outcome.succeeded("reply", message({ message_reference: { message_id: "1" } })).class).toBe("success")
+    expect(Outcome.succeeded("reply", message({})).degraded).toEqual(["ReadMessageHistory"])
+    expect(Outcome.succeeded("reply", message({ message_reference: null })).degraded).toEqual(["ReadMessageHistory"])
+    expect(Outcome.succeeded("poll", message({ poll: { question: {} } })).class).toBe("success")
     expect(Outcome.succeeded("mention-everyone", message({}))).toMatchObject({ class: "degraded", degraded: ["MentionEveryone"] })
     expect(Outcome.succeeded("plain", message({})).class).toBe("success")
   })
@@ -151,5 +165,42 @@ describe("the truth table", () => {
       "send/b",
       "send/c"
     ])
+  })
+})
+
+describe("the resolver record (step a)", () => {
+  const all = set("ViewChannel", "SendMessages", "SendMessagesInThreads", "Connect", "EmbedLinks", "MentionEveryone")
+  const resolution = (target: Parameters<typeof resolve>[0]["channel"], granted = all, timedOutUntil: string | null = null) =>
+    resolve({ guild: guild([role(everyone, granted)]), channel: target, member: member([], timedOutUntil), now })
+  const deny = (...flags: ReadonlyArray<PermissionFlag>) => [roleOverwrite(guildId, Flags.empty, set(...flags))]
+
+  it("records the required flags sorted, what is missing after the masks and before them, and the masks", () => {
+    // no Send masks EmbedLinks (H-013): missing after the masks, present before them
+    const record = TruthTable.resolverRecord("channel.send", resolution(known(channel("text", deny("SendMessages")))), ["ViewChannel", "SendMessages", "EmbedLinks"], ["ViewChannel", "SendMessages", "EmbedLinks"])
+    expect(record).toEqual({
+      required: ["EmbedLinks", "SendMessages", "ViewChannel"],
+      missing: ["EmbedLinks", "SendMessages"],
+      missingBeforeMasks: ["SendMessages"],
+      masks: ["implicit-send"],
+      level: "action"
+    })
+    // flags outside `required` are never listed, whatever the resolution lacks
+    expect(TruthTable.resolverRecord("channel.send", resolution(known(channel("text")), set("ViewChannel")), ["ViewChannel"], ["ViewChannel"]).missing).toEqual([])
+  })
+
+  it("levels a blind channel, a missing View and a voice row without Connect as view", () => {
+    const needed = ["ViewChannel", "SendMessages"] as const
+    expect(TruthTable.levelOf("channel.send", resolution({ _tag: "Unseen" }), needed)).toBe("view")
+    expect(TruthTable.levelOf("channel.send", resolution(known(channel("text", deny("ViewChannel")))), needed)).toBe("view")
+    expect(TruthTable.levelOf("thread.send", resolution(known(thread("private-thread"), channel("text"))), ["ViewChannel", "SendMessagesInThreads"])).toBe("view")
+    expect(TruthTable.levelOf("voice.send", resolution(known(channel("voice", deny("Connect")))), ["ViewChannel", "Connect", "SendMessages"])).toBe("view")
+    // Connect only counts on a row that requires it
+    expect(TruthTable.levelOf("channel.send", resolution(known(channel("text")), set("ViewChannel", "SendMessages")), needed)).toBe("none")
+  })
+
+  it("levels a missing error-mode flag, or a timeout that removes one, as action, and a missing degrade-mode flag as none", () => {
+    expect(TruthTable.levelOf("channel.send", resolution(known(channel("text", deny("SendMessages")))), ["ViewChannel", "SendMessages"])).toBe("action")
+    expect(TruthTable.levelOf("channel.send", resolution(known(channel("text")), all, later), ["ViewChannel", "SendMessages"])).toBe("action")
+    expect(TruthTable.levelOf("channel.send", resolution(known(channel("text")), set("ViewChannel", "SendMessages")), ["ViewChannel", "SendMessages"])).toBe("none")
   })
 })

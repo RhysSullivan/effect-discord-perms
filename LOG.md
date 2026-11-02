@@ -81,18 +81,30 @@ table). Findings marked **M4** are the mismatches M3 leaves for M4's fixes:
   `send/forum-post/*/base/*`, ...). Outside threads a missing SendMessages answers 50013 as H-080 says
   (`send/text/file/role-overwrite-allow/base/member-overwrite-deny/normal`). **M4**: `level-vs-raw` on these rows;
   `Observed.codeForLevel` (or the row's level) must say that SMIT is a 50001 flag.
-- **M3, H-036 refuted for bots: a locked thread answers 403 50001, not 160005**, to a member without
-  ManageThreads (`send/locked-thread/plain/everyone/none/absent/normal`, `send/targeted/archived-locked-thread`,
-  `send/targeted/order-smit-locked`); with ManageThreads the send succeeds (`send/targeted/locked-thread-moderator`).
-  **M4**: `level-vs-raw` on the locked rows (preflight's ThreadLocked is right; the code is 50001).
-- **M3, H-102: TTS without SendTTSMessages degrades instead of failing.** The message is sent with `tts: false`
-  (`send/forum-post/tts/member-overwrite-allow/payload/member-overwrite-deny/normal`,
-  `send/public-thread/tts/...`). **M4**: `PayloadRules.tts.mode = "degrade"` (`preflight-vs-raw` on 2 rows).
+- **M3, H-036: a send in a locked thread by a subject without ManageThreads that is not a member of the
+  thread answers 403 50001, not 160005** (`send/locked-thread/plain/everyone/none/absent/normal`,
+  `send/targeted/archived-locked-thread`, `send/targeted/order-smit-locked`); with ManageThreads the send succeeds
+  (`send/targeted/locked-thread-moderator`). Every one of these rows had the subject outside the thread, so the
+  50001 may be Discord refusing the implicit auto-join (H-034) rather than the lock itself; M4's
+  `send/targeted/locked-thread-member` (a member without ManageThreads) separates the two. **M4**: `level-vs-raw`
+  on the locked rows (preflight's ThreadLocked is right; the code is 50001).
+- **M3, H-102: in threads, TTS without SendTTSMessages degrades instead of failing.** The message is sent with
+  `tts: false` (`send/forum-post/tts/member-overwrite-allow/payload/member-overwrite-deny/normal`,
+  `send/public-thread/tts/...`: two thread rows, `preflight-vs-raw`). No M3 row outside a thread had
+  SendTTSMessages as its only missing flag, so M4 adds `send/targeted/tts-without-tts-{text,voice}` before
+  `PayloadRules.tts.mode` changes for every kind.
 - **M3, H-103: embeds without EmbedLinks are refused (403 50013)**, not dropped
   (`send/announcement/embed/everyone/payload/absent/normal`), so `PayloadRules.embeds.mode = "error"` holds.
 - **M3, H-100 confirmed: `@everyone` without MentionEveryone is sent and pings nobody** (`mention_everyone: false`
-  in the create response, recorded as degraded MentionEveryone), in text, voice and every thread kind. Safety's
+  in the create response, recorded as degraded MentionEveryone) in voice, and in public, private, announcement
+  and archived threads. The two text rows answered 50001 or 50013 (View or Send missing as well), and the
+  forum-post and locked-thread rows 50001, so no text, forum-post or locked row shows the degradation. Safety's
   oracle check showed the subject without MentionEveryone and Administrator before each such send.
+- **M3 (correction by the M3 verifier): no M3 row had SendPolls, or a reply's ReadMessageHistory, as its only
+  missing flag.** Each pairwise row that removed one either had the removal defeated by overwrite precedence (for
+  example `send/stage/poll/role-overwrite-allow/payload/role-overwrite-deny/normal` succeeded: a role allow beats
+  another role's deny, H-006) or had View, SMIT or Send missing as well. M4 adds
+  `send/targeted/poll-without-send-polls` and `send/targeted/reply-without-history`.
 - **M3, H-135/§3.2: a reply without ReadMessageHistory and without SendMessages answers 403 160002**, Discord's
   dedicated reply code, where our order ranks SendMessages first (`send/targeted/order-send-reply-history`). As
   §3.2 decided, agreement accepts the mapped tag because it is in the row's `preflightSet`.
@@ -339,6 +351,31 @@ the same commit.
     Converge sets overwrites through that PATCH;
   - the host-local lock limit is recorded under "Notes for every milestone";
   - the registry item was done by the orchestrator, outside the rift.
+
+- **Before M4 (the M3 verifier's minor findings):**
+  - offline cases for the pieces M4's replay depends on, each checked by applying the verifier's mutation and
+    seeing the new test fail (18 mutations, all red, then reverted): `Resolver.inputFromSnapshot` (the unseen
+    lookup, a thread under an unseen or missing parent, thread membership from the state's own map, each
+    `NeedsRefresh`), `TruthTable.resolverRecord` and `levelOf` (missing after and before the masks, the voice
+    Connect level), `GuildState.refresh` (membership from the REST thread's `member` field, the parent commit,
+    `unseen` cleared by a later fetch), the reducer clearing `unseen` on a channel or thread event,
+    `projectionProblems` (a hidden channel's real overwrites, the thread's state and membership),
+    `Converge.readbackProblems` (role and `@everyone` permissions, thread membership), Safety's held-role
+    MentionEveryone check, the reply readback, preflight's `degraded` read from the effective set, and a test
+    that builds two bots in one layer graph (removing `Layer.fresh` from `BotInternals.layerWith` gives both the
+    first token);
+  - agreement compares ViewChannel with the oracle on `unseen` rows too, except a private thread the subject
+    does not belong to (§5.10 updated). The full exemption M3 used was justified only by those rows: 7 of
+    M3's 8 unseen rows were threads under a parent that hides View, where the comparison is well defined;
+  - `send/targeted/locked-thread-member` separates the lock from a refused auto-join (H-036 reworded above), and
+    `send/targeted/{poll-without-send-polls, reply-without-history, tts-without-tts-text, tts-without-tts-voice}`
+    give SendPolls, a reply's ReadMessageHistory and TTS a row of their own outside threads (H-100 and H-102
+    reworded above);
+  - the runner prints the escalated rules from the registry (`scripts/lib/rules.ts` `escalatedRules`) instead
+    of a fixed line, rules-check's staged flag-coverage message names what it now waits for (M6), and the runner
+    checks every pairwise selection at run start (`Pairwise.selectionProblems`: valid rows, every valid pair and
+    value covered, deterministic), which the catalog test also runs, so §5.9's "the run checks every selected
+    row" holds.
 
 - **M3: `--only` writes and compares a subset table, never `fixtures/truth-table.json`** (§5.1 updated). §5.1 said
   `--only` never writes the table, but M3's exit runs `--only 'send/**' --write` in two processes, the second with

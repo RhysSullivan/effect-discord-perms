@@ -12,8 +12,9 @@
  *   50001, or the raw call's degraded list differs from the resolver's missing degrade-mode flags.
  * - `recompute-vs-preflight`: step (d) (M5) differs from step (b) in tag or categories.
  * - `resolver-vs-oracle`: the oracle's missing flags differ from `missingBeforeMasks`. For an obfuscated
- *   channel only ViewChannel is compared. For an unseen one nothing is: the subject knows none of its
- *   overwrites, and the oracle (`implicit=false`) does not model thread membership.
+ *   channel, and for an unseen one, only ViewChannel is compared: the subject knows none of their overwrites.
+ *   An unseen private thread the subject does not belong to is not compared at all, because the oracle
+ *   (`implicit=false`) does not model thread membership and reads View there.
  *
  * Flip controls (M4) and rule observations (M6) are judged where their rows are built.
  */
@@ -56,12 +57,18 @@ export const agreement = (row: Omit<Row, "agreement">, facts: Facts): AgreementK
   if (recompute !== "n/a" && (preflight === "pass" || preflight.tag !== recompute.tag || !sameList(preflight.categories, recompute.categories))) return "recompute-vs-preflight"
 
   const oracle = row.oracle
-  if (typeof oracle === "object" && !resolver.masks.includes("unseen")) {
-    if (resolver.masks.includes("obfuscated")) {
+  if (typeof oracle === "object") {
+    if (resolver.masks.includes("obfuscated") || (resolver.masks.includes("unseen") && !privateThreadNonMember(row.setup))) {
       if (oracle.missing.includes("ViewChannel") !== resolver.missing.includes("ViewChannel")) return "resolver-vs-oracle"
-    } else if (!sameList([...oracle.missing].sort(), [...resolver.missingBeforeMasks].sort())) {
+    } else if (!resolver.masks.includes("unseen") && !sameList([...oracle.missing].sort(), [...resolver.missingBeforeMasks].sort())) {
       return "resolver-vs-oracle"
     }
   }
   return "agree"
 }
+
+/**
+ * A private thread the subject does not belong to: the oracle (`implicit=false`) computes it from the parent's
+ * overwrites alone, so it reads View there even though the thread is invisible to the subject (H-033).
+ */
+const privateThreadNonMember = (setup: Row["setup"]): boolean => setup.channel === "private-thread" && setup.subjectThreadMember !== true

@@ -2267,7 +2267,9 @@ state is set after the fixtures are posted (posting would unarchive it).
 
 **Pairwise families.** These use `[sd:pairwise.ts]`, a deterministic greedy
 algorithm. Each family has a **validity predicate**, and the run checks every
-selected row against it, plus coverage of every value of every dimension. Counts
+selected row against it, plus coverage of every valid pair and every value of
+every dimension, before any write (`Pairwise.selectionProblems`, which the
+catalog test also runs offline). Counts
 were measured (`[sd:pairwise.txt]`, `problems: []`):
 
 | Family | Dimensions | Full product | Pairwise rows |
@@ -2428,9 +2430,11 @@ outcome: the request may have been applied (§4.10).
 - `recompute-vs-preflight`: (d) is not equal to (b), **tag and categories**;
 - `resolver-vs-oracle`: the oracle's `missing` is not equal to
   `missingBeforeMasks` when the oracle is available. On rows where the subject
-  sees the channel as obfuscated, only ViewChannel is compared; on rows where it
-  is unseen nothing is (the subject knows none of its overwrites, and the
-  oracle's `implicit=false` does not model thread membership);
+  sees the channel as obfuscated or unseen, only ViewChannel is compared (the
+  subject knows none of its overwrites); an unseen private thread the subject
+  does not belong to is not compared at all, because the oracle's
+  `implicit=false` does not model thread membership and reads View there
+  (before M4: nothing was compared on any unseen row);
 - `flip-control`: a flip sibling did not succeed and did not fail with the
   next-ranked failure;
 - `rule-observation`: a rule row's observation differs from the registry's
