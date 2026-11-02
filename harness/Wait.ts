@@ -15,6 +15,7 @@ import type { ChannelId, GuildId } from "../src/Snowflake.ts"
 import * as Converge from "./Converge.ts"
 import type { HarnessRest } from "./Identities.ts"
 import type { LabRequestFailed } from "./Lab.ts"
+import type * as LabIds from "./LabIds.ts"
 import * as Materialize from "./Materialize.ts"
 
 /** The cap on one scenario's wait. */
@@ -43,6 +44,8 @@ export const settle = (input: {
   readonly guildId: GuildId
   readonly channel: ChannelId
   readonly readOracle: Effect.Effect<OracleValue, LabRequestFailed>
+  /** The lab channels whose overwrites the read-back checks (see `Converge.readView`). */
+  readonly channels: ReadonlySet<LabIds.ChannelName>
 }): Effect.Effect<Settled, SetupTimeout | LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {
     const started = yield* Clock.currentTimeMillis
@@ -52,7 +55,7 @@ export const settle = (input: {
     // the harness's read-back
     let problems: ReadonlyArray<string> = []
     for (;;) {
-      const view = yield* Converge.readView(input.state, input.ids)
+      const view = yield* Converge.readView(input.state, input.ids, input.channels)
       problems = Converge.readbackProblems(input.state, input.ids, view, yield* Clock.currentTimeMillis)
       if (problems.length === 0) break
       if ((yield* remaining) <= 500) return yield* timeout(`harness read-back: ${problems.join("; ")}`)

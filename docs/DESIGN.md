@@ -127,7 +127,8 @@ src/
                                  record), `PermissionErrorClasses`, and the `AllErrors` union used by the D6 test
   permissions/
     Flags.ts                     PermissionSet (bigint wrapper): fromBits, has, toSortedNames; the 2FA-starred set
-    Resolver.ts                  pure resolver: base -> overwrites -> masks (obfuscated, private-thread, implicit, timeout)
+    Resolver.ts                  pure resolver: base -> overwrites -> masks (obfuscated, unseen, private-thread, implicit,
+                                 timeout); hierarchy (targetBelow, roleBelow); inputFromSnapshot (state -> input or refresh)
     ResolverRules.ts             data: one entry per resolver hypothesis (H-ids), flipped by live findings
     Operations.ts *              THE operation table: per op, required flags, D5 variant, non-permission tags; derived
                                  OpFlags, OpTags, OpPermissionErrors, OpErrors<G>; variantConstructors, errorFor
@@ -158,12 +159,14 @@ src/
   rest/
     DiscordApi.ts                service wrapping DiscordREST: deadline, span, error mapping, decode, recompute hook
     ErrorMap.ts                  (operation, status, code, inner path) -> tag; unmapped -> defect
+    Request.ts                   one bounded dfx call, its failure classified (Transient or a Discord answer) (M3)
     Coded429.ts                  base HttpClient interceptor for nonzero-coded 429s (G2)
     Schemas.ts                   response schemas (Message incl. reactions, Channel, Thread, Member, Role, Guild)
     Oracle.ts                    GET /channels/{c}/permissions/member/{u} etc. via rest.httpClient (harness only)
                                  (ErrorMap.ts's dfx failure classifier, `classify`, arrives in M2 for startup and
                                  the harness; M5 adds the table)
   state/
+    Snapshot.ts                  the snapshot types, channel kinds (type 0..16), entity keys and generations (M3)
     GuildState.ts                service: SubscriptionRef<Snapshot> with per-entity generations; awaitGuild, refresh
     Reducer.ts                   pure (Snapshot, dispatch) -> Snapshot; stamps guild_id; obfuscation; bot member; idempotent
     Hook.ts                      DispatchHook layer: decode the minimum, reduce, bump generations; never fails
@@ -210,7 +213,8 @@ harness/
   Smoke.ts                       harness:smoke's oracle reads (with a target positive control) and `inventory`
   SelfTest.ts                    harness:selftest: dirt, a spec-based read-back that must see it, reset, read-back,
                                  a second reset with zero writes (§5.7)
-  TruthTable.ts *                schema + canonicalJson; write / compare
+  TruthTable.ts *                schema + canonicalJson; write / compare; the step (a) record and level (shared with replay)
+  Runner.ts                      `run`: reset, provision, Safety, the catalog in setup groups, one scenario's steps, summary
   scenario/
     Dsl.ts *                     Setup, Operation, Observation, Scenario
     Pairwise.ts *                deterministic greedy pairwise selection with per-family validity predicates
@@ -1359,23 +1363,35 @@ reads see content (D35).
 
 ```
 Snapshot   = { botUserId: UserId | undefined, guilds: ReadonlyMap<GuildId, GuildSnap> }
-GuildSnap  = { id, ownerId: UserId, stale: boolean, generation: number,
-               roles: ReadonlyMap<RoleId, { permissions: PermissionSet, position: number, managed: boolean, generation: number }>,
+GuildSnap  = { id, ownerId: UserId, stale: boolean,
+               roles: ReadonlyMap<RoleId, { permissions: PermissionSet, position: number, managed: boolean }>,
                channels: ReadonlyMap<ChannelId, ChannelSnap>,
-               botMember: { roleIds: ReadonlyArray<RoleId>, timedOutUntil: number | null, generation: number } | undefined }
-ChannelSnap = { id, kind: ChannelKind, parentId: ChannelId | undefined, obfuscated: boolean, generation: number,
+               unseen: ReadonlySet<ChannelId>,                       // a refresh got 50001/10003: no View
+               threadMembership: ReadonlyMap<ChannelId, boolean>,    // the bot's, apart from the thread entries
+               botMember: { roleIds: ReadonlyArray<RoleId>, timedOutUntil: string | null } | undefined,
+               generations: ReadonlyMap<"guild" | "member" | `role:${id}` | `channel:${id}`, number> }
+ChannelSnap = { id, kind: ChannelKind, parentId: ChannelId | undefined, obfuscated: boolean,
                overwrites: ReadonlyArray<{ id, type: "role" | "member", allow: PermissionSet, deny: PermissionSet }>,
-               thread: { archived: boolean, locked: boolean, ownerId: UserId, botIsMember: boolean } | undefined }
+               thread: { archived: boolean, locked: boolean, ownerId: UserId | undefined } | undefined }
 ```
 
-- `state/Hook.ts` is `Layer.succeed(DispatchHook, (payload) => ...)`. It runs
-  serially per shard **before** subscribers, so it cannot miss GUILD_CREATE.
+(M3: the generations live in one per-guild map keyed by entity, which also keeps the generation of a deleted
+entity, so a refresh that read a channel before a CHANNEL_DELETE and a CHANNEL_CREATE cannot commit it. The
+bot's thread membership is a map of its own, because THREAD_MEMBERS_UPDATE can arrive before the thread.
+`timedOutUntil` is Discord's ISO string, which `CommunicationDisabled.until` carries.)
+
+- `state/Hook.ts` is a `DispatchHook` layer over `GuildState.apply`, provided below
+  dfx's gateway in the same build. It runs serially per shard **before**
+  subscribers, so it cannot miss GUILD_CREATE.
 - The reducer handles: READY (bot user ID), GUILD_CREATE (roles, channels and
   threads with `guild_id` **stamped from the dispatch**, owner, the bot member
   from `members` filtered to the bot), GUILD_UPDATE/DELETE, GUILD_ROLE_*,
   CHANNEL_*, THREAD_CREATE/UPDATE/DELETE/LIST_SYNC, THREAD_MEMBERS_UPDATE (bot
-  membership), and GUILD_MEMBER_UPDATE for the bot (it arrives without
-  GuildMembers, H-175).
+  membership), THREAD_MEMBER_UPDATE, and GUILD_MEMBER_UPDATE for the bot (it
+  arrives without GuildMembers, H-175).
+- A private thread the bot is removed from is dropped: Discord sends no further
+  events for it (threads.mdx), and a refresh brings it back if the bot can still
+  see it. A thread without `thread_metadata` is a malformed payload.
 - A channel carrying flag `1 << 17` is stored with `obfuscated: true`, and its
   fake overwrite is dropped.
 - **Versioning.** Every dispatch that touches an entity bumps its
@@ -1386,7 +1402,8 @@ ChannelSnap = { id, kind: ChannelKind, parentId: ChannelId | undefined, obfuscat
   at Error with the event name and sets `stale: true` on that guild.
 - `refresh(guildId, channelId)` captures the generations of the entities it
   will fetch, issues `getChannel` (and the parent for threads),
-  `getGuildMember(guild, botUser)`, `listGuildRoles` and `getGuild`, and
+  `getGuildMember(guild, botUser)` and `getGuild` (which carries the roles, so
+  M3 does not also call `listGuildRoles`), and
   commits **only entities whose generation is unchanged**. An entity a newer
   gateway event touched keeps the newer value. Revision 1 fed REST results
   through the reducer unconditionally, and a CHANNEL_UPDATE reduced while the
@@ -1396,17 +1413,28 @@ ChannelSnap = { id, kind: ChannelKind, parentId: ChannelId | undefined, obfuscat
   CHANNEL_UPDATE value survives, a replay changes nothing). `stale` is cleared
   by a non-racing refresh or a gateway event.
 - `getChannel` answering 50001 or 10003 during a refresh records the channel as
-  not visible (no View); it is not a defect (§3.1).
+  not visible (`unseen`, no View); it is not a defect (§3.1). A REST thread
+  carries the bot's thread member object exactly when it is a member, so a
+  refresh sets membership from it.
 
 ### 4.6 Resolver (D22; H-001..H-029, H-033, H-047)
 
-`resolve({ guild, channel, parent, member, now }): Resolution` is pure:
+`resolve({ guild, channel, member, now }): Resolution` is pure; `channel` is
+`Known { channel, parent, threadMember }` or `Unseen`:
 
 ```
-Resolution = { base: PermissionSet, afterOverwrites: PermissionSet, effective: PermissionSet,
-               masks: ReadonlyArray<"obfuscated" | "implicit-view" | "implicit-send" | "implicit-connect" | "private-thread" | "timeout">,
-               timedOut: boolean, thread: { archived, locked, creatorIsBot, botIsMember } | undefined }
+Resolution = { base: PermissionSet, afterOverwrites: PermissionSet, beforeTimeout: PermissionSet, effective: PermissionSet,
+               masks: ReadonlyArray<"obfuscated" | "unseen" | "private-thread" | "implicit-view" | "implicit-send"
+                                    | "implicit-connect" | "timeout">,
+               timeout: { until: string } | undefined, thread: { archived, locked, creatorIsMember, memberIsInThread } | undefined,
+               voice: boolean }
 ```
+
+`inputFromSnapshot(snapshot, guild, channel, now)` builds the input from the
+guild state, or says a refresh is needed first (a channel, a thread's parent or
+the bot member the state does not hold). `unseen` (M3) is the mask for a channel
+a refresh could not fetch, or a thread whose parent is unknown (§3.1): the bot
+knows nothing of its overwrites.
 
 The stages run in this order:
 
@@ -1415,8 +1443,11 @@ The stages run in this order:
 2. **overwrites**: computed on the parent for threads. Apply the `@everyone`
    overwrite, then all role overwrites aggregated (deny, then allow), then the
    member overwrite. Array order and role positions are ignored.
-3. **masks**:
-   - obfuscated means no View;
+3. **masks** (each recorded when its condition holds, stopping once nothing is
+   left; an Administrator in the base holds every flag, so no implicit mask's
+   condition holds for it, and an Administrator bit from an overwrite exempts
+   nothing, H-004):
+   - obfuscated (or unseen) means no View;
    - a private thread is visible only to members and to holders of
      ManageThreads (threads.mdx; H-033, H-047): otherwise no View;
    - no View means nothing (H-012);
@@ -1480,6 +1511,25 @@ ordered failure list of §3.2. The basis is GuildState for gateway-obtained
 handles, or the interaction's `app_permissions` (and resolved channels'
 `app_permissions`) for handles from an interaction (`basis: "app-permissions"`).
 `Preflight.decide` is pure and shared by the library and the offline replay.
+What counts as a problem (M3):
+
+- a blind channel (obfuscated, unseen, or a private thread the bot neither
+  belongs to nor moderates) is `ViewChannel` and nothing else, since nothing
+  else about it is known;
+- a required flag (the row's and the payload's error-mode flags) missing
+  **after overwrites**: a flag an implicit mask removes only as a consequence of
+  another problem (no View, no Send, no Connect) is not listed, because granting
+  the first problem's flag brings it back (so a flip control's next-ranked
+  failure is real);
+- `CommunicationDisabled` when the timeout mask applies and the request needs a
+  flag it does not keep, whether or not the bot holds that flag otherwise;
+- `ThreadLocked` (a locked thread without ManageThreads, H-036) and
+  `ThreadArchived`, only where the row lists the tag.
+
+Degrade-mode payload flags missing from the effective set are reported as
+`degraded`, never as failures. The payload's features are the `PayloadRules`
+names it carries (`src/payload/PayloadRules.ts`, whose table and flag lookups
+arrive in M3; the payload types and the type-level computations arrive in M6).
 
 **Implementation pattern** (`[sd:src/impl-boundary.ts]`):
 
@@ -1759,9 +1809,13 @@ and pass.
 
 It exits 0 only with zero mismatches. With `--compare` it also exits non-zero
 when the new table differs from the committed one, which a **previous process**
-wrote; that is the determinism gate (§5.12). `--repeat 2` runs the matrix twice
-in one process with a reset between, a quick in-process check only. `--only
-<glob>` runs a subset and never writes the table.
+wrote; that is the determinism gate (§5.12), and a missing previous table fails
+it too. `--repeat 2` runs the matrix twice in one process with a reset between,
+a quick in-process check only. `--only <glob>` runs a subset and never writes
+`fixtures/truth-table.json`: with `--write` it writes the subset's table to
+`/tmp/effect-discord-perms-truth-table.only-<glob slug>.json`, and with
+`--compare` it compares with that file, which a previous `--only` process with
+the same glob wrote (M3's exit runs `--only 'send/**'` twice this way).
 
 ### 5.2 Type-test runner and diagnostic snapshots (D30, D2 with changes)
 
@@ -2145,8 +2199,8 @@ export class Setup extends Schema.Class<Setup>("Setup")({
   memberState: Schema.Literals(["normal", "timed-out"]),
   targetRank: Schema.optionalKey(Rank), roleRank: Schema.optionalKey(Rank), targetAdmin: Schema.optionalKey(Schema.Boolean),
   channelSettings: Schema.optionalKey(Schema.Struct({ nameVariant: Schema.Literals(["a", "b"]), slowmode: Schema.Int, requireTag: Schema.Boolean })),
-  fixtures: Schema.Array(Schema.Literals(["subject-message", "target-message", "existing-reaction", "pinned-subject-message",
-    "guild-sticker", "subject-thread", "crossposted-subject-message"]))
+  fixtures: Schema.Array(Schema.Literals(["subject-message", "target-message", "harness-message", "existing-reaction",
+    "pinned-subject-message", "guild-sticker", "subject-thread", "crossposted-subject-message"]))
 }) {}
 interface Scenario {
   readonly id: string                         // "<family>/<channel>/<dims...>", stable, unique
@@ -2163,15 +2217,35 @@ channel, thread state and subject membership, channel settings, the target's
 roles, nickname and timeout, and the subject's timeout. It is pure, and offline
 replay uses it with fake IDs.
 
+`harness-message` (M3) is a plain message the harness posts, the target of a
+reply: the harness can post in every lab channel, including voice text chat,
+which the target cannot without Connect.
+
+The desired state covers every lab object the matrix controls, so converging to
+it also undoes the previous scenario: `@everyone`'s and every lab role's
+permissions, the subject's lab roles and timeout, every available lab channel's
+overwrites (baseline: `lab-target`'s allow), and the scenario thread's state and
+the subject's membership of it. Grants and removals go on the scenario channel,
+or a thread's parent. Within one overwrite a removal wins (the flag leaves the
+`allow`); two roles' overwrites aggregate instead (H-006), which some rows test
+on purpose. The other threads stay at baseline, because cleanup restores the
+one a scenario touched.
+
 **Subject-observable projection.** `Materialize.project(desired)` computes what
 the subject's gateway state can show for that desired state, under the codec
 and Discord's thread-sync rules (threads.mdx):
 
-- a channel whose desired state denies the subject View is expected as
-  `obfuscated: true`, and its overwrites are not compared;
+- a channel whose desired state denies the subject View is expected either as
+  `obfuscated: true` (with the codec, or after Discord's switch) or with its real
+  overwrites: before the switch, without the codec, the gateway gives a bot every
+  channel with its real overwrites, including ones it cannot view (M3 live);
 - threads under a hidden parent, and private threads the subject is not a
   member of and cannot moderate, are expected to be absent or unchanged
   (Discord sends no further events for them);
+- an observable thread may be absent too: GUILD_CREATE carries only the threads
+  the bot can view, and Discord does not always sync a channel's threads when it
+  becomes visible; when present, its state and the subject's membership are
+  compared;
 - everything else is compared in full.
 
 The wait (§5.10) compares the subject's GuildState with this projection, and the
@@ -2182,7 +2256,12 @@ every View-removed row and every private-thread row would have timed out.
 **Converge order** is fixed: remove the subject's admin role and lift timeouts,
 then set roles and overwrites, then apply timeouts, then grant admin. A timeout
 of an admin returns 403 (H-021), so admin with timeout is a targeted row with
-its own order (§5.9).
+its own order (§5.9). The scenario thread's subject membership changes before
+the overwrites, with View granted to the subject on the parent through a
+temporary member overwrite that the overwrite step then replaces: Discord
+refuses to add a member who cannot view the parent (403 50001, M3 live), and
+cleanup removes the subject the same way. The thread's archived and locked
+state is set after the fixtures are posted (posting would unarchive it).
 
 ### 5.9 Dimensions and selection
 
@@ -2193,7 +2272,7 @@ were measured (`[sd:pairwise.txt]`, `problems: []`):
 
 | Family | Dimensions | Full product | Pairwise rows |
 |---|---|---|---|
-| send | channel 10 (text, announcement, voice, stage, forum-post, public, private, announcement, archived, locked threads) × payload 8 × grantSource 5 × missing 5 (none, view, base, payload, connect) × removal 4 × memberState 2 | 16,000 | 88 |
+| send | channel 10 (text, announcement, voice, stage, forum-post, public, private, announcement, archived, locked threads) × payload 8 × grantSource 5 × missing 5 (none, view, base, payload, connect) × removal 4 × memberState 2 | 16,000 | 89 (M3) |
 | react | channel 5 × emoji 3 (unicode-new, unicode-existing, guild) × missing 5 (incl. connect) × removal 3 × memberState 2 | 450 | 25 |
 | pins | channel 5 × op 3 × missing 5 (incl. connect) × removal 3 × memberState 2 | 450 | 25 |
 | createThread | parent 2 × visibility 2 × missing 3 × memberState 2 | 24 | 8 |
@@ -2204,7 +2283,9 @@ were measured (`[sd:pairwise.txt]`, `problems: []`):
 
 Validity predicates (in `[sd:pairwise.ts]`):
 
-- **send**: `missing=payload` needs a payload with a flag; administrator only
+- **send**: `missing=payload` needs a payload with a flag (not plain,
+  mention-everyone or a guild sticker: a guild sticker needs no flag, H-138; the
+  prototype let it through, and the M3 fix adds one row, 89 in all); administrator only
   with `missing=none`, `memberState=normal` and no @everyone payload;
   `missing=none` means `removal=absent`; `connect` only for voice and stage.
   MentionEveryone is never granted in an @everyone row (Safety).
@@ -2274,17 +2355,26 @@ writes. Within a group, order is by ID. The order is fixed, so runs are
 reproducible.
 
 1. **Converge** the setup in the fixed order of §5.8: harness reads, then the
-   minimal writes.
+   minimal writes. The harness reads the roles, the subject, the scenario
+   thread, and with `getChannel` only the lab channels whose overwrites may be
+   off baseline (the scenario's, and the previous scenario's); every other lab
+   channel has been at baseline since the opening reset, because only Converge
+   and cleanup write overwrites. (M3 live: the guild channel list route answered
+   429 several times a run when read twice per scenario.)
 2. **Fixtures.** The target posts, the harness archives or locks, and so on.
 3. **Consistency wait** (`Wait.ts`, G9). All of these must hold, with a 15 s
    cap. On timeout the run aborts with `setup-timeout`, an infrastructure
    failure that is never recorded as a mismatch.
-   - Harness read-back equals the desired state.
+   - Harness read-back equals the desired state (the same reads as step 1).
    - The subject's GuildState equals the **projection** of the desired state
      (§5.8).
    - Two oracle reads 300 ms apart are identical.
    - A further 250 ms settle has passed.
-4. **(a) Resolver** over the subject's GuildState: record `required`,
+4. **(a) Resolver** over the subject's GuildState (M3: a scenario thread is
+   refreshed first through `GuildState.refresh`, so the subject's view of it is a
+   function of the setup, fetched when it can see it and unseen when it cannot,
+   not of which events earlier scenarios delivered; the offline replay can then
+   rebuild it from the setup): record `required`,
    `missing`, `missingBeforeMasks`, `masks` and `level` (`view` if the first
    failure is View-level: View, obfuscated, private-thread, or Connect in
    voice; `action` if View is present and an error-mode flag is missing;
@@ -2338,7 +2428,9 @@ outcome: the request may have been applied (§4.10).
 - `recompute-vs-preflight`: (d) is not equal to (b), **tag and categories**;
 - `resolver-vs-oracle`: the oracle's `missing` is not equal to
   `missingBeforeMasks` when the oracle is available. On rows where the subject
-  sees the channel as obfuscated, only ViewChannel is compared;
+  sees the channel as obfuscated, only ViewChannel is compared; on rows where it
+  is unseen nothing is (the subject knows none of its overwrites, and the
+  oracle's `implicit=false` does not model thread membership);
 - `flip-control`: a flip sibling did not succeed and did not fail with the
   next-ranked failure;
 - `rule-observation`: a rule row's observation differs from the registry's
@@ -2381,7 +2473,8 @@ channel_types, ...) and expects one write.
 
 ```ts
 export const Row = Schema.Struct({ setup: Setup, operation: Schema.String,
-  resolver: Schema.Struct({ required, missing, missingBeforeMasks, masks, level: Schema.Literals(["none", "view", "action"]) }),
+  resolver: Schema.Struct({ required, missing, missingBeforeMasks, masks /* the resolver's masks, incl. "unseen" */,
+    level: Schema.Literals(["none", "view", "action"]) }),
   preflight: Schema.Union([Schema.Literal("pass"), Schema.Literal("n/a"), RecordedError]),   // RecordedError = { tag, categories }
   preflightSet: Schema.Array(Schema.String),
   raw: RawOutcome,                    // class, status, code, inner [{path, code}], degraded, mappedTag, unsupported?

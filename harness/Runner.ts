@@ -144,6 +144,11 @@ interface Context {
   readonly stickerId: StickerId | undefined
   readonly log: (line: string) => Effect.Effect<void, PlatformError>
   readonly oracleSeen: { unavailable: boolean }
+  /**
+   * The lab channels whose overwrites may differ from baseline: the previous scenario's (its desired overwrites,
+   * or the temporary View grant cleanup made). Every other lab channel is at baseline since the opening reset.
+   */
+  readonly dirty: Set<LabIds.ChannelName>
 }
 
 const infrastructure = (what: string) => (error: Transient) => Effect.die(new Error(`infrastructure abort: ${what}: ${error._tag}`))
@@ -182,21 +187,39 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
     const cleanup = Effect.andThen(Converge.cleanMessages({ id: channelId, name: state.channel }, botAuthors(ids, harnessUserId)), Converge.restoreThread(state, ids))
 
     // 1-2. converge, fixtures, thread state
-    const converged = yield* Converge.converge(state, ids)
+    const times: Array<readonly [string, number]> = []
+    let mark = yield* Clock.currentTimeMillis
+    const lap = (step: string) =>
+      Effect.map(Clock.currentTimeMillis, (at) => {
+        times.push([step, at - mark])
+        mark = at
+      })
+    const channels: ReadonlySet<LabIds.ChannelName> = new Set([...context.dirty, state.overwriteChannel])
+    // whatever happens next, the scenario's channel may be off baseline afterwards
+    context.dirty.clear()
+    context.dirty.add(state.overwriteChannel)
+    const converged = yield* Converge.converge(state, ids, channels)
+    yield* lap("converge")
     if (converged._tag === "TimeoutRefused") {
       yield* cleanup
       return unsupportedRow(Outcome.unsupported("bot-not-timeoutable", converged.status, converged.code))
     }
+    if (converged._tag === "AdminExempt") {
+      yield* cleanup
+      return unsupportedRow(Outcome.unsupported("admin-exempt"))
+    }
     let replyTo: MessageId | undefined
     if (scenario.setup.fixtures.includes("harness-message")) replyTo = (yield* Converge.postHarnessMessage(channelId)).id
     yield* Converge.applyThreadState(state, ids)
+    yield* lap("fixtures")
 
     // 3. wait
     const readOracle = Oracle.memberPermissions(rest, channelId, ids.subjectUserId, Duration.seconds(30)).pipe(
       Effect.mapError(toLabFailure),
       Effect.map((read): Wait.OracleValue => (read._tag === "Permissions" ? { _tag: "Permissions", permissions: read.permissions } : { _tag: "Unavailable" }))
     )
-    const settled = yield* Wait.settle({ scenario: scenario.id, state, ids, guildState: runtime.guildState, guildId: ids.guildId, channel: channelId, readOracle })
+    const settled = yield* Wait.settle({ scenario: scenario.id, state, ids, guildState: runtime.guildState, guildId: ids.guildId, channel: channelId, readOracle, channels })
+    yield* lap("wait")
 
     // 4. (a) the resolver over the subject's state
     if (isThreadKind(Materialize.kindOf(state.channel))) yield* runtime.guildState.refresh(ids.guildId, channelId).pipe(Effect.catch(infrastructure("refresh")))
@@ -243,10 +266,13 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
         : Outcome.rejected(answer.response)
     const created = answer._tag === "Ok" ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.Struct({ id: MessageId }))(answer.body)) : undefined
 
+    yield* lap("steps")
+
     // 9. cleanup
     yield* cleanup
+    yield* lap("cleanup")
     yield* context.log(
-      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${created === undefined ? "" : ` message ${created.id}`}${replyTo === undefined ? "" : ` fixture ${replyTo}`}; preflight ${preflightSet.join(",") || "pass"}; masks ${resolver.masks.join(",") || "none"}`
+      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${created === undefined ? "" : ` message ${created.id}`}${replyTo === undefined ? "" : ` fixture ${replyTo}`}; preflight ${preflightSet.join(",") || "pass"}; masks ${resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}`
     )
     const row: Omit<TruthTable.Row, "agreement"> = { ...base, resolver, preflight, preflightSet, raw, oracle }
     return { ...row, agreement: agreement(row, facts) }
@@ -277,18 +303,27 @@ export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenari
     const everyone = roles.find((role) => role.id === context.guildId)
     const everyoneBaseline = everyone === undefined ? [] : Flags.toSortedNames(Flags.fromBits(BigInt(everyone.permissions)))
 
-    const runContext: Context = { ids, stickerId: state.sticker, log, oracleSeen: { unavailable: false } }
+    const runContext: Context = { ids, stickerId: state.sticker, log, oracleSeen: { unavailable: false }, dirty: new Set() }
     const ordered = order(scenarios)
     const rows: Record<string, TruthTable.Row> = {}
+    const pacing = yield* Pacing
     for (const [index, scenario] of ordered.entries()) {
       const before = yield* Clock.currentTimeMillis
+      const limitedBefore = new Map((yield* pacing.stats).rateLimitedByRoute)
       const row = yield* execute(scenario, runContext, report.harness.userId)
       rows[scenario.id] = row
       const after = yield* Clock.currentTimeMillis
+      const limited = (yield* pacing.stats).rateLimitedByRoute
+        .map(([route, count]) => [route, count - (limitedBefore.get(route) ?? 0)] as const)
+        .filter(([, count]) => count > 0)
+        .map(([route, count]) => `${route} x${count}`)
+      if (limited.length > 0) yield* log(`  429s during ${scenario.id}: ${limited.join(", ")}`)
       const elapsed = after - started
       const eta = Math.round(((elapsed / (index + 1)) * (ordered.length - index - 1)) / 1000)
       yield* Effect.sync(() =>
-        console.log(`[${index + 1}/${ordered.length}] ${scenario.id}: ${row.raw.class}${row.agreement === "agree" ? "" : ` MISMATCH ${row.agreement}`} (${after - before} ms, eta ${eta} s)`)
+        console.log(
+          `[${index + 1}/${ordered.length}] ${scenario.id}: ${row.raw.class}${row.agreement === "agree" ? "" : ` MISMATCH ${row.agreement}`} (${after - before} ms, eta ${eta} s${limited.length > 0 ? `, 429: ${limited.join(", ")}` : ""})`
+        )
       )
     }
     const closing = yield* Reset.run(context)
@@ -346,6 +381,7 @@ export const run = (report: IdentityReport, options: Options) =>
       `scenarios: ${result.scenarios}${options.repeat > 1 ? ` (x${options.repeat})` : ""}`,
       `duration: ${Math.round(result.durationMs / 1000)} s`,
       `requests: ${stats.requests - statsBefore.requests}, writes: ${stats.writes - statsBefore.writes}, invalid (401/403/429): ${stats.invalid - statsBefore.invalid}`,
+      `rate limited (429, retried by dfx): ${stats.rateLimitedByRoute.map(([route, count]) => `${route} x${count}`).join(", ") || "none"}`,
       `oracle: ${result.table.env.oracle}`,
       `mismatches: ${result.mismatches.length}`,
       ...result.mismatches.map(([id, kind]) => `  ${kind}: ${id}`),

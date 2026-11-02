@@ -113,7 +113,8 @@ export const kindOf = (name: LabName): ChannelKind => {
 /** The channel whose overwrites a lab channel or thread uses (H-030). */
 export const overwriteChannelOf = (name: LabName): LabIds.ChannelName => threadSpec(name)?.parent ?? channelName(name)
 
-const channelName = (name: LabName): LabIds.ChannelName => {
+/** A lab channel's name, typed; a thread's name is a defect here. */
+export const channelName = (name: LabName): LabIds.ChannelName => {
   const spec = channelSpec(name)
   if (spec === undefined) throw new Error(`Materialize: ${name} is not a lab channel`)
   return spec.name

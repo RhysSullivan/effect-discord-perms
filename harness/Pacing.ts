@@ -25,14 +25,16 @@ export interface Stats {
   readonly writesByRoute: ReadonlyArray<readonly [route: string, count: number]>
   /** 401, 403 and 429 responses. */
   readonly invalid: number
+  /** 429 responses per route, sorted by route (dfx waits and retries them; each costs time). */
+  readonly rateLimitedByRoute: ReadonlyArray<readonly [route: string, count: number]>
 }
 
 /** The pacing service. */
 export interface Interface {
   /** Waits for the next slot of the global bucket, then counts the request (and the write, if it is one). */
   readonly take: (method: string, url: string) => Effect.Effect<void>
-  /** Counts a response status. Dies when the invalid-request count reaches the cap. */
-  readonly recordStatus: (status: number) => Effect.Effect<void>
+  /** Counts a response's status (and a 429's route). Dies when the invalid-request count reaches the cap. */
+  readonly recordStatus: (status: number, method: string, url: string) => Effect.Effect<void>
   /** The counters so far. */
   readonly stats: Effect.Effect<Stats>
 }
@@ -73,6 +75,7 @@ interface Counters {
   readonly requests: number
   readonly writes: ReadonlyMap<string, number>
   readonly invalid: number
+  readonly rateLimited: ReadonlyMap<string, number>
 }
 
 /** Builds the pacing service. Fails fast (a defect) on options outside 0 < rps <= 5 or a cap below 1. */
@@ -85,7 +88,7 @@ export const make = (options: Options): Effect.Effect<Interface> =>
       return yield* Effect.die(new Error(`invalidCap must be a positive integer, got ${options.invalidCap}`))
     }
     const interval = 1000 / options.requestsPerSecond
-    const counters = yield* Ref.make<Counters>({ nextSlot: 0, requests: 0, writes: new Map(), invalid: 0 })
+    const counters = yield* Ref.make<Counters>({ nextSlot: 0, requests: 0, writes: new Map(), invalid: 0, rateLimited: new Map() })
 
     const take = (method: string, url: string): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -100,9 +103,16 @@ export const make = (options: Options): Effect.Effect<Interface> =>
         if (wait > 0) yield* Effect.sleep(Duration.millis(wait))
       })
 
-    const recordStatus = (status: number): Effect.Effect<void> =>
+    const recordStatus = (status: number, method: string, url: string): Effect.Effect<void> =>
       status === 401 || status === 403 || status === 429
-        ? Ref.modify(counters, (current): readonly [number, Counters] => [current.invalid + 1, { ...current, invalid: current.invalid + 1 }]).pipe(
+        ? Ref.modify(counters, (current): readonly [number, Counters] => {
+          const rateLimited = new Map(current.rateLimited)
+          if (status === 429) {
+            const route = routeKey(method, url)
+            rateLimited.set(route, (rateLimited.get(route) ?? 0) + 1)
+          }
+          return [current.invalid + 1, { ...current, invalid: current.invalid + 1, rateLimited }]
+        }).pipe(
           Effect.flatMap((invalid) =>
             invalid >= options.invalidCap
               ? Effect.die(new Error(`invalid-request budget exhausted: ${invalid} responses with status 401, 403 or 429 (cap ${options.invalidCap})`))
@@ -118,7 +128,8 @@ export const make = (options: Options): Effect.Effect<Interface> =>
           requests: current.requests,
           writes: writesByRoute.reduce((sum, [, count]) => sum + count, 0),
           writesByRoute,
-          invalid: current.invalid
+          invalid: current.invalid,
+          rateLimitedByRoute: [...current.rateLimited.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         }
       })
     )

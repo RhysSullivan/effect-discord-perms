@@ -50,7 +50,7 @@ export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpCli
     const guard = yield* Lab.LabGuard
     const sent = base.pipe(
       HttpClient.tapRequest((request) => pacing.take(request.method, request.url)),
-      HttpClient.transformResponse(Effect.tap((response) => pacing.recordStatus(response.status)))
+      HttpClient.transformResponse(Effect.tap((response) => pacing.recordStatus(response.status, response.request.method, response.request.url)))
     )
     return HttpClient.make((request) =>
       Effect.gen(function* () {

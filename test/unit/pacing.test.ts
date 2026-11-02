@@ -55,13 +55,15 @@ describe("pacing", () => {
   it.effect("dies when the invalid-request count reaches the cap", () =>
     Effect.gen(function* () {
       const pacing = yield* make({ requestsPerSecond: 5, invalidCap: 3 })
-      yield* pacing.recordStatus(200)
-      yield* pacing.recordStatus(404)
-      yield* pacing.recordStatus(401)
-      yield* pacing.recordStatus(403)
+      const at = url("/channels/300000000000000001")
+      yield* pacing.recordStatus(200, "GET", at)
+      yield* pacing.recordStatus(404, "GET", at)
+      yield* pacing.recordStatus(401, "GET", at)
+      yield* pacing.recordStatus(403, "GET", at)
       expect((yield* pacing.stats).invalid).toBe(2)
-      const exit = yield* Effect.exit(pacing.recordStatus(429))
+      const exit = yield* Effect.exit(pacing.recordStatus(429, "PATCH", at))
       expect(Exit.isFailure(exit) && !Exit.hasFails(exit)).toBe(true)
+      expect((yield* pacing.stats).rateLimitedByRoute).toEqual([["PATCH /channels/{id}", 1]])
     })
   )
 
