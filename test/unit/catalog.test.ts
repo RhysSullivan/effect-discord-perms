@@ -1,6 +1,8 @@
+import { Duration } from "effect"
 import { describe, expect, it } from "vitest"
+import * as Drivers from "../../harness/Drivers.ts"
 import * as Materialize from "../../harness/Materialize.ts"
-import { scenarios as sendScenarios, targetedRows, wirePayload } from "../../harness/scenario/catalog/send.ts"
+import { scenarios as sendScenarios, slowmodeSeconds, targetedRows, wirePayload } from "../../harness/scenario/catalog/send.ts"
 import { Setup } from "../../harness/scenario/Dsl.ts"
 import { families, kickBanMustFail, pairsOf, pairwise, selectionProblems, validPairs } from "../../harness/scenario/Pairwise.ts"
 import * as Safety from "../../harness/scenario/Safety.ts"
@@ -101,6 +103,16 @@ describe("the send catalog", () => {
     }
     expect(wirePayload("reply", context).request.allowed_mentions?.replied_user).toBe(false)
     expect(wirePayload("mention-everyone", context).request.allowed_mentions?.parse).toEqual(["everyone"])
+  })
+
+  it("sets the H-053 rows' slowmode longer than a raw call's deadline, so a slowmode 429 dfx retries cannot pass as a success", () => {
+    expect(slowmodeSeconds * 1000).toBeGreaterThan(Duration.toMillis(Drivers.deadline))
+    const slowmodeRows = sendScenarios.filter((scenario) => (scenario.setup.channelSettings?.slowmode ?? 0) > 0)
+    expect(slowmodeRows.map((scenario) => scenario.id)).toEqual(["send/targeted/slowmode-second-send", "send/targeted/slowmode-second-send-bypass"])
+    for (const scenario of slowmodeRows) {
+      expect(scenario.setup.channelSettings?.slowmode).toBe(slowmodeSeconds)
+      expect(scenario.setup.fixtures).toContain("subject-prior-send")
+    }
   })
 })
 

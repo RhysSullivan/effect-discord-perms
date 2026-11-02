@@ -107,7 +107,7 @@ const threadTargeted = (name: string, hypotheses: ReadonlyArray<`H-${number}`>, 
 
 /** Hypotheses the pairwise dimensions cannot express. */
 export const targetedRows: ReadonlyArray<Scenario> = [
-  // H-032: a member of a thread still needs View on its parent
+  // H-032: does a member of a thread need View on its parent to leave it? (M4 live: no, it leaves without View)
   threadTargeted("member-without-parent-view", ["H-032", "H-048"], { _tag: "thread", action: "leave" }, {
     channel: "public-thread",
     subjectThreadMember: true,
@@ -115,8 +115,8 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     removals: [],
     memberState: "normal"
   }),
-  // H-038: unarchiving needs SendMessages (channel docs) or membership (thread docs): a member without either
-  // flag, and a non-member with SendMessages
+  // H-038: unarchiving needs SendMessages (channel docs) or membership (thread docs)? A member without
+  // SendMessages, a non-member with it, and a moderator without SMIT (M4 live: SMIT is what it needs)
   threadTargeted("unarchive-member-without-manage", ["H-038"], { _tag: "thread", action: "unarchive" }, {
     channel: "public-thread",
     threadState: "archived",
@@ -155,7 +155,7 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     },
     ["subject-thread"]
   ),
-  // H-046: adding a member to an archived thread fails (50083)
+  // H-046: does an archived thread refuse adding a member (50083)? (M4 live: no, adding succeeds)
   threadTargeted(
     "add-member-archived",
     ["H-037", "H-046"],
@@ -170,7 +170,8 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     },
     ["subject-thread"]
   ),
-  // H-046: archiving needs ManageThreads unless the subject created the thread; locking needs it always
+  // H-045: archiving needs ManageThreads unless the subject created the thread; locking needs it always (M4
+  // live: the creator may lock too)
   threadTargeted("archive-without-manage", ["H-045"], { _tag: "thread", action: "archive" }, {
     channel: "public-thread",
     subjectThreadMember: true,
@@ -207,7 +208,7 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     removals: [],
     memberState: "normal"
   }),
-  // H-046: leaving an archived thread (joining one succeeds, M4 live)
+  // H-037, H-046: leaving an archived thread (M4 live: it succeeds)
   threadTargeted("leave-archived", ["H-037", "H-046"], { _tag: "thread", action: "leave" }, {
     channel: "public-thread",
     threadState: "archived",
@@ -216,7 +217,7 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     removals: [],
     memberState: "normal"
   }),
-  // H-037: joining an archived thread fails (50083)
+  // H-037: does an archived thread refuse joining (50083)? (M4 live: no, joining succeeds)
   threadTargeted("join-archived", ["H-037", "H-046"], { _tag: "thread", action: "join" }, {
     channel: "public-thread",
     threadState: "archived",

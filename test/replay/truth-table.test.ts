@@ -88,9 +88,29 @@ describe("the constants the table decides (§5.13)", () => {
     expect(ranRows.some(([, row]) => row.setup.memberState === "timed-out" && row.resolver.masks.includes("timeout"))).toBe(true)
   })
 
-  it("Observed.slowmodeAppliesToBots: no row answered 20016", () => {
-    expect(Observed.slowmodeAppliesToBots).toBe(false)
-    expect(rows.filter(([, row]) => row.raw.code === 20016).map(([id]) => id)).toEqual([])
+  it("Observed.slowmodeAppliesToBots: rows witness a second send in a row under slowmode without a bypass, and agree with it", () => {
+    // a witness: a send right after the subject's own prior send, in a channel with slowmode, by a subject
+    // without BypassSlowmode or Administrator and not timed out (H-053)
+    const bypasses = (setup: Setup) => setup.grants.some((grant) => grant.via === "administrator" || grant.flags.includes("BypassSlowmode") || grant.flags.includes("Administrator"))
+    const witnesses = rows.filter(
+      ([, row]) =>
+        row.operation.startsWith("send:") &&
+        (row.setup.channelSettings?.slowmode ?? 0) > 0 &&
+        row.setup.fixtures.includes("subject-prior-send") &&
+        row.setup.memberState === "normal" &&
+        !bypasses(row.setup)
+    )
+    expect(witnesses.length).toBeGreaterThan(0)
+    const expected = Observed.slowmodeAppliesToBots ? "20016" : "success"
+    for (const [id, row] of witnesses) expect({ id, outcome: row.raw.code === 20016 ? "20016" : row.raw.class }).toEqual({ id, outcome: expected })
+    const slowed = rows.filter(([, row]) => row.raw.code === 20016).map(([id]) => id)
+    expect(slowed.length > 0).toBe(Observed.slowmodeAppliesToBots)
+  })
+
+  it("H-081: no 50013 or 50001 answer names a permission (no inner errors)", () => {
+    const refused = rows.filter(([, row]) => row.raw.class === "50013" || row.raw.class === "50001")
+    expect(refused.length).toBeGreaterThan(0)
+    expect(refused.filter(([, row]) => row.raw.inner.length > 0).map(([id]) => id)).toEqual([])
   })
 
   it("Observed.codeForLevel and viewCodeFailures: every 50001 and 50013 matches, and every listed failure was seen answering 50001", () => {

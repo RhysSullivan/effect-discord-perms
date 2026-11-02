@@ -6,8 +6,8 @@
  *
  * 1. **Converge**: the subject's own fixtures first (`Fixtures.subjectObjects`, with temporary access), then
  *    the materialized desired state (`Converge.ts`, the fixed order of §5.8).
- * 2. **Fixtures**: the harness's messages, reaction and pin (`Fixtures.harnessObjects`), then the thread's
- *    archived and locked state.
+ * 2. **Fixtures**: the harness's messages, reaction and pin (`Fixtures.harnessObjects`), the subject's prior send
+ *    under the setup (`Fixtures.subjectPriorSend`, H-053), then the thread's archived and locked state.
  * 3. **Wait** until the harness's read-back, the subject's gateway state and the oracle agree (`Wait.ts`).
  * 4. **(a) Resolver** over the subject's guild state: for a channel operation, a scenario thread is refreshed
  *    first through the library's `GuildState.refresh`, so the subject's view of it is a function of the setup;
@@ -306,11 +306,16 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
       return unsupportedRow(Outcome.unsupported("admin-exempt"))
     }
 
-    // 2. the harness's fixtures, then the thread's state
+    // 2. the harness's fixtures, the subject's prior send, then the thread's state
     const posted = yield* Fixtures.harnessObjects(setup, channelId)
     if (posted._tag === "Refused") {
       yield* cleanup
       return unsupportedRow(Outcome.unsupported("rejected-by-discord", posted.status, posted.code))
+    }
+    const prior = yield* Fixtures.subjectPriorSend(setup, channelId)
+    if (prior._tag === "Refused") {
+      yield* cleanup
+      return unsupportedRow(Outcome.unsupported("rejected-by-discord", prior.status, prior.code))
     }
     yield* Converge.applyThreadState(state, ids)
     yield* lap("fixtures")

@@ -56,7 +56,10 @@ export const Rank = Schema.Literals(["below", "equal", "above"])
  * - `guild-sticker`: the lab's sticker (send);
  * - `subject-thread`: the scenario thread is one the subject created (before Converge, with temporary access),
  *   instead of the provisioned one of that kind;
- * - `target-role`: the target holds the role of `roleRank` (a role removal's subject).
+ * - `target-role`: the target holds the role of `roleRank` (a role removal's subject);
+ * - `subject-prior-send`: the subject has just sent a plain message in the scenario channel, after Converge and
+ *   with the setup's own permissions and slowmode, so a send that follows is its second in a row (H-053). Discord
+ *   refusing it makes the setup `rejected-by-discord`.
  */
 export const Fixture = Schema.Literals([
   "subject-message",
@@ -66,7 +69,8 @@ export const Fixture = Schema.Literals([
   "pinned-harness-message",
   "guild-sticker",
   "subject-thread",
-  "target-role"
+  "target-role",
+  "subject-prior-send"
 ])
 /** A fixture. */
 export type Fixture = typeof Fixture.Type

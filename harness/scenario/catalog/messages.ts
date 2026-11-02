@@ -90,7 +90,7 @@ const targeted = (name: string, hypotheses: ReadonlyArray<`H-${number}`>, action
 
 /** Hypotheses the pairwise dimensions cannot express. */
 export const targetedRows: ReadonlyArray<Scenario> = [
-  // H-037: in an archived thread, editing fails (50083) and deleting succeeds
+  // H-037: an archived thread refuses editing one's own message (M4 live: 400 50083), and deleting it too
   targeted("edit-own-archived-thread", ["H-037"], "edit-own", {
     channel: "public-thread",
     threadState: "archived",
@@ -139,7 +139,7 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     removals: [],
     memberState: "normal"
   }),
-  // H-037: an archived thread refuses deleting one's own message (M4 live, 50083); others' messages, and a bulk delete?
+  // H-037: an archived thread refuses deleting others' messages and a bulk delete too (M4 live, 400 50083)
   targeted("delete-foreign-archived-thread", ["H-037"], "delete-foreign", {
     channel: "public-thread",
     threadState: "archived",
@@ -160,6 +160,20 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     grants: [{ flags: ["ViewChannel"], via: "role" }],
     removals: [],
     memberState: "normal"
+  }),
+  // H-020, H-147: does a timeout stop deleting one's own message where the subject can see it? (M4 verifier: the
+  // only timed-out own delete lacked View as well.) The rows require only View, which the timeout keeps
+  targeted("delete-own-timed-out", ["H-020", "H-147"], "delete-own", {
+    channel: "text",
+    grants: [{ flags: ["ViewChannel"], via: "role" }],
+    removals: [],
+    memberState: "timed-out"
+  }),
+  targeted("delete-own-timed-out-thread", ["H-020", "H-147"], "delete-own", {
+    channel: "public-thread",
+    grants: [{ flags: ["ViewChannel"], via: "role" }],
+    removals: [],
+    memberState: "timed-out"
   })
 ]
 

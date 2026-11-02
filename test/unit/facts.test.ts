@@ -123,7 +123,7 @@ describe("the run order", () => {
     const ordered = order(scenarios)
     expect([...ordered].map((scenario) => scenario.id).sort()).toEqual(scenarios.map((scenario) => scenario.id).sort())
     expect(order(scenarios)).toEqual(ordered)
-    expect(roleEditsOf(ordered)).toBe(67)
+    expect(roleEditsOf(ordered)).toBe(68)
     // the M3 order (by setup alone) changed them far more often
     const bySetup = [...scenarios].sort((a, b) => (JSON.stringify(a.setup) < JSON.stringify(b.setup) ? -1 : 1))
     expect(roleEditsOf(bySetup)).toBeGreaterThan(150)

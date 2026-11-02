@@ -13,6 +13,10 @@
  * reaction with the scenario's emoji, and its pin. Posting in an archived thread would unarchive it, so the
  * runner sets the thread's archived and locked state after these. Discord refusing the harness's pin (400 50019
  * in a stage channel's chat, M2) makes the setup `rejected-by-discord`.
+ *
+ * **The subject's prior send, after the harness's objects.** `subject-prior-send` is a message the subject sends
+ * under the setup itself (its permissions and the channel's slowmode), so it cannot be made with temporary
+ * access before Converge; Discord refusing it also makes the setup `rejected-by-discord`, with the code.
  */
 import { Clock, Effect, Option, Schema } from "effect"
 import { SubjectRaw } from "../src/bot/Internals.ts"
@@ -116,6 +120,27 @@ export const subjectObjects = (input: {
         .pipe(labStep("fixtures: the subject's message"), Effect.flatMap(Wire.decode(Created, "createMessage")))).id
     }
     return { subjectMessage, thread }
+  })
+
+/** What the subject's `subject-prior-send` did. */
+export type PriorSend =
+  | { readonly _tag: "Sent" }
+  /** Discord refused it (a 20016 here would be slowmode applying to the subject): the setup cannot be built. */
+  | { readonly _tag: "Refused"; readonly status: number; readonly code: number }
+
+/**
+ * Sends the subject's `subject-prior-send` message in `channel`, after Converge, with the setup's own permissions
+ * and slowmode, so the operation that follows is the subject's second send in a row (H-053). Nothing to do for a
+ * setup without the fixture. No answer within the step's deadline aborts the run.
+ */
+export const subjectPriorSend = (setup: Setup, channel: ChannelId): Effect.Effect<PriorSend, LabRequestFailed, SubjectRaw> =>
+  Effect.gen(function* () {
+    if (!setup.fixtures.includes("subject-prior-send")) return { _tag: "Sent" }
+    const subject = yield* SubjectRaw
+    const sent = yield* subject.createMessage(channel, { content: "lab prior send", allowed_mentions: { parse: [] } }).pipe(labStep("fixtures: the subject's prior send"), Effect.result)
+    if (sent._tag === "Success") return { _tag: "Sent" }
+    if (sent.failure.status === 0) return yield* Effect.fail(sent.failure)
+    return { _tag: "Refused", status: sent.failure.status, code: sent.failure.code }
   })
 
 /** Makes the harness's objects in `channel` (see the module comment); `existing-reaction` uses `emoji.existing`. */

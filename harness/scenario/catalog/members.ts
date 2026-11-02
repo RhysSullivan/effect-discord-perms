@@ -87,6 +87,14 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     hypotheses: ["H-060"],
     setup: new Setup({ channel: "text", grants: [], removals: [], memberState: "normal", targetRank: "below", roleRank: "below", targetAdmin: false, fixtures: ["target-role"] }),
     operation: { _tag: "member", action: "remove-role" }
+  },
+  // §3.2 (M4 verifier): TargetIsAdministrator on its own. The target holds `lab-admin`, which sits below the
+  // subject's `lab-mid`, so it ranks below the subject, and the subject holds ModerateMembers (H-021, H-067)
+  {
+    id: "member/targeted/timeout-admin-below",
+    hypotheses: ["H-021", "H-067"],
+    setup: new Setup({ channel: "text", grants: [{ flags: ["ModerateMembers"], via: "role" }], removals: [], memberState: "normal", targetRank: "below", targetAdmin: true, fixtures: [] }),
+    operation: { _tag: "member", action: "timeout" }
   }
 ]
 

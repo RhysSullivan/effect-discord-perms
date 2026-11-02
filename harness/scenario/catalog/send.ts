@@ -143,13 +143,25 @@ const targeted = (
   name: string,
   hypotheses: ReadonlyArray<`H-${number}`>,
   payload: SendPayload,
-  setup: Omit<ConstructorParameters<typeof Setup>[0], "fixtures">
+  setup: Omit<ConstructorParameters<typeof Setup>[0], "fixtures">,
+  extraFixtures: ReadonlyArray<Fixture> = []
 ): Scenario => ({
   id: `send/targeted/${name}`,
   hypotheses: [...hypotheses].sort(),
-  setup: new Setup({ ...setup, fixtures: fixturesFor(payload) }),
+  setup: new Setup({ ...setup, fixtures: [...fixturesFor(payload), ...extraFixtures] }),
   operation: { _tag: "send", payload }
 })
+
+/**
+ * The slowmode of the H-053 rows, in seconds. It is longer than a raw call's deadline (`Drivers.deadline`, 30 s)
+ * on purpose: dfx retries every 429 after its `retry_after`, so a slowmode 429 (20016) on the second send cannot
+ * come back as a late success; it runs past the deadline, which aborts the run (§5.10). A unit test holds the two
+ * constants apart.
+ */
+export const slowmodeSeconds = 60
+
+/** The channel settings of a slowmode row: the lab name, `slowmodeSeconds`, no required tag. */
+const slowmode = { nameVariant: "a", slowmode: slowmodeSeconds, requireTag: false } as const
 
 /** Hypotheses the pairwise dimensions cannot express (§5.9 targeted families, the send part). */
 export const targetedRows: ReadonlyArray<Scenario> = [
@@ -226,8 +238,9 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     removals: [],
     memberState: "normal"
   }),
-  // ordering (§3.2): View and Send both missing
-  targeted("order-view-send", ["H-012", "H-080"], "plain", {
+  // ordering (§3.2): View and Send both missing. H-011: the channel's only allow is `lab-target`'s overwrite (View
+  // and Send among it), for a role the subject does not hold, and it gives the subject nothing
+  targeted("order-view-send", ["H-011", "H-012", "H-080"], "plain", {
     channel: "text",
     grants: [],
     removals: [],
@@ -297,6 +310,45 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     grants: [{ flags: ["ViewChannel"], via: "role" }],
     removals: [],
     memberState: "timed-out"
+  }),
+  // ordering (§3.2 tiers 5 and 6, M4 verifier): a locked thread and a payload flag; the lock answers 50001
+  // (H-036), a missing EmbedLinks alone 50013 (H-103), so the code shows which Discord checked first
+  targeted("order-locked-embed", ["H-036", "H-103"], "embed", {
+    channel: "public-thread",
+    threadState: "locked",
+    subjectThreadMember: true,
+    grants: [{ flags: ["ViewChannel", "SendMessagesInThreads"], via: "role" }],
+    removals: [],
+    memberState: "normal"
+  }),
+  // H-053: bots ignore slowmode, so the subject's second send in a row succeeds without BypassSlowmode (the
+  // fixture is its first, sent after Converge set the slowmode); with BypassSlowmode it succeeds by any account
+  targeted(
+    "slowmode-second-send",
+    ["H-053"],
+    "plain",
+    { channel: "text", channelSettings: slowmode, grants: [{ flags: ["ViewChannel", "SendMessages"], via: "role" }], removals: [], memberState: "normal" },
+    ["subject-prior-send"]
+  ),
+  targeted(
+    "slowmode-second-send-bypass",
+    ["H-053"],
+    "plain",
+    { channel: "text", channelSettings: slowmode, grants: [{ flags: ["ViewChannel", "SendMessages", "BypassSlowmode"], via: "role" }], removals: [], memberState: "normal" },
+    ["subject-prior-send"]
+  ),
+  // H-005: an @everyone overwrite allow grants what the base lacks; H-007: a role overwrite deny beats it
+  targeted("overwrite-everyone-allow", ["H-005"], "plain", {
+    channel: "text",
+    grants: [{ flags: ["ViewChannel", "SendMessages"], via: "everyone-overwrite-allow" }],
+    removals: [],
+    memberState: "normal"
+  }),
+  targeted("overwrite-everyone-allow-role-deny", ["H-005", "H-007"], "plain", {
+    channel: "text",
+    grants: [{ flags: ["ViewChannel", "SendMessages"], via: "everyone-overwrite-allow" }],
+    removals: [{ flags: ["SendMessages"], via: "role-overwrite-deny" }],
+    memberState: "normal"
   })
 ]
 

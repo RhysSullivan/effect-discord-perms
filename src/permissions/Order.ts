@@ -5,7 +5,8 @@
  * 1. ViewChannel, then Connect in voice and stage rows (H-015, H-152), then the row's `viewLevel` flags
  *    (ReadMessageHistory for a pin or a crosspost, M4 live);
  * 2. CommunicationDisabled (the timeout mask, H-020);
- * 3. the action's access flags: SendMessages or SendMessagesInThreads, or ReadMessageHistory for a reaction;
+ * 3. the action's access flags: SendMessages or SendMessagesInThreads, and ReadMessageHistory in a row of the
+ *    `reaction` variant that lists it (none does since M4 live showed a reaction needs none);
  * 4. the action's own flags, in the row's order;
  * 5. hierarchy (TargetAboveInHierarchy, RoleAboveInHierarchy, TargetIsAdministrator), then other state
  *    (ThreadLocked, ThreadArchived, RoleIsManaged, TagRequired);
