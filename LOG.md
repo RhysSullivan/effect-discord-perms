@@ -1471,3 +1471,64 @@ Live, in order (each alone under the lock):
   typecheck; 1,079 tests in 40 files, the replay's 374 among them; test:types 5 pass and 2 fail fixtures, largest
   gated 325 characters; hover 3 markers; rules 2 rules; budget nothing to measure yet).
 
+
+### M6 Payloads, channel and message ops, require, phase-1 rules live
+
+- Before M6, the M5 verifier's six minor findings (commit `af4c320`; "Design deviations", "Before M6").
+- The library: `src/payload/` (`Message.ts`: the create and edit payloads and their checks `CheckCreate`,
+  `CheckEdit`, `NonEmpty` and `V2Excludes`; `Components.ts`: buttons, selects, rows, `CustomId` and Components V2
+  text; `PayloadRules.ts`: the payload-flag table's types and `features`; `Limits.ts`: the limits, counted in code
+  points, and the local checks; `ToDfx.ts`: the wire bodies, `allowed_mentions` always `parse: []` plus the opt-ins),
+  `src/channels/` (`Channel.ts`: the channel kinds and their methods; `Message.ts`: own and foreign messages;
+  `Ops.ts`: `perform`, which runs preflight in enforce mode, then the local checks, then `DiscordApi.execute`, in a
+  `discord.<area>.<op>` span; the handles; `Channels.get`), `src/members/Member.ts` (`Members.get` and the member
+  operations), `src/permissions/Require.ts`, `src/components/CustomId.ts` (`ComponentRoute.make`),
+  `DiscordApi.read`, and the public barrel `src/index.ts`.
+- The harness: step (b) runs the public operation (`harness/Library.ts`, enforce mode, `DryRun` with a canned body
+  for every library route); step (d) runs it in bypass mode after Discord's refusal and records the recompute; the
+  rule rows (`catalog/rules.ts`, `harness/Probes.ts`), the flag-coverage rows (`catalog/coverage.ts`) and the blind
+  flips, the `harness-thread` fixture and the `mention-role` payload. rules-check checks the live pairs (catalog IDs,
+  setups, table rows and observations) and the flag coverage.
+- Type fixtures: pass `payload.ts`, `channels.ts`, `op-errors.ts` (49 assertions, one for each operation row and
+  the DM send) and `ids.ts`; fail `ids.ts`, `channel-kinds.ts`, `payload-rules.ts`, `payload-flags.ts`,
+  `components.ts`, `limits.ts` and `require.ts`; hover `test/hover/channels.ts` (11 markers).
+- Decisions earlier milestones left to M6: a voice or stage message has no `pin` (M4's open type rule: `GuildOps`
+  gives pins to text, announcement and thread messages); every message row lists `UnknownChannel` (M5's note,
+  "Design deviations"); no category edit row (H-018): a category's `edit({ name })` is the `channel.edit` row,
+  whose flags the text rows cover; no `CannotMessageUser` rule row (H-096, H-158): a DM to a human is forbidden and
+  bot-to-bot DMs only fail, so `dm.send` is a flag-coverage exemption; no nonce row (H-112, H-145): the library
+  sends no nonce; no cross-channel reply (H-136): `ReplyTo` names a message in the channel being sent to.
+- Unit tests: 1,330 in 42 files (M5 ended with 1,079 in 40). New: `payload.test.ts`
+  (ToDfx, features, limits in code points, `ComponentRoute`), `operations-runtime.test.ts` (through the real
+  `DiscordApi`: preflight before anything is sent, with the D5 variant and a `PreflightDecision` cause; the
+  readback of dropped features; the local limits ranked after preflight; bypass mode and the recompute; a stale
+  guild refreshed first; the span's attributes; reactions' conditional AddReactions and UseExternalEmojis;
+  `Permissions.require`'s order and narrowing; `Channels.get` and `Members.get`; leaving a thread without View),
+  the rule-row and flag-coverage checks (`rules-check.test.ts`), the guild state's `unseen` rules
+  (`state.test.ts`), the private-thread timeout rule (`resolver.test.ts`), and the replay's rule rows and limit rows
+  (`test/replay/truth-table.test.ts`: every rule row agrees with its registry expectation, and each limit's valid
+  side is exactly at `Limits` and its invalid side's 50035 maps to the limit's tag). The matrix-row checks of the
+  replay, the error map and the recompute leave out the rule rows, which record a probe and no preflight.
+- Mutation checks (each reverted, each failed the test meant to catch it): `perform` skipping preflight (8
+  operations-runtime tests), skipping the local checks (2), running them before preflight (1); rules-check not
+  comparing the two sides' setups (1), counting every row as flipped (1); the refresh dropping a guild channel's
+  copy (state), the bot's member update not retiring `unseen` marks (state), a voice channel's 50001 marked unseen
+  (state); the resolver's moderator visibility ignoring the timeout (resolver).
+- Live runs, in order (each on minisforum, one at a time):
+  - `run --only 'rule/**'` twice (65, then 64 rows): 12 planned expectations, then one (`raw-topic-voice`) were
+    wrong; the registry and the types follow Discord ("Live findings", M6);
+  - `run --only '*/targeted/**'` (75 rows): aborted at row 7 with the `unseen` SetupTimeout, then 6 mismatches
+    after the fix (the voice 50001), then `run --only '*/targeted/*voice*'` (9 rows) exited 0 ("Design
+    deviations", M6);
+  - the first full run (485 rows, 3,136 s, 11,036 requests, 2,417 writes, 591 invalid): one mismatch,
+    `flip-control` on the private-thread flip (H-047 refined, "Live findings"); no `preflight-wiring` and no
+    `recompute-vs-preflight` row;
+  - the second full run (486 rows) aborted at row 477 with
+    `SetupTimeout {"scenario":"send/archived-thread/plain/everyone/none/absent/normal","detail":"subject state: thread
+    1566581035049820311 membership differs"}`: the subject's gateway state had not caught up with the harness's
+    removal of the subject from the scenario thread within the wait's 15 s; the same two rows (a send in the archived
+    thread, then the next one's setup) passed in the first full run and in the next. The wait's thread problems now
+    name the values (`subject member true, not false`), so a recurrence shows its direction; the cap stays 15 s;
+  - the third full run, `run --write` (486 rows, 3,224 s, 11,065 requests, 2,420 writes, 588 invalid, 7 reaction and
+    1 channel 429s retried by dfx): 0 mismatches, every row `agree`, 229 rows with a recompute; the table was
+    committed (`df28ad2`).
