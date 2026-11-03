@@ -967,18 +967,30 @@ the same commit.
     build's base client requires the request dfx builds to have that method and a path the template matches, else a
     defect naming the declared route and the path's shape (`{…}` for every segment that is not a lowercase word, so
     an interaction token in a path never reaches it). It checks the library and the harness's raw calls alike.
-  - The request check in every matrix row: the operation again in bypass mode over the stub (step (d)'s request),
-    and the raw call over the stub; the stub records the method, the path with its IDs and sorted query, and the
-    body (a multipart body by its parts). The library's request, and step (b)'s when it reached the stub, must equal
-    the raw call's, or the row is the new mismatch kind `request-wiring`. Nothing of it is sent; the guard judges it
-    with `LabGuard.checkDry`, the live verdict with the target's kick or ban treated as permitted, using no permit
-    (the dry raw call of a kick row would otherwise have been refused, or used up the permit the live call needs).
+  - The request check in every matrix row: steps (c) and (d) run under `DryRun.Capture`, which records each
+    request the shared client sends (the method, the path with its IDs and sorted query, and the body, a multipart
+    body by its parts). Step (d)'s request, and step (b)'s when it reached the stub, must equal step (c)'s, or the row
+    is the new mismatch kind `request-wiring`. Every row of the M6 table has (b) passing or a (d); a row with neither
+    would run the operation in bypass mode over the stub instead. A dry request is judged by `LabGuard.checkDry`, the
+    live verdict with the target's kick or ban treated as permitted, using no permit (a dry kick would otherwise
+    have been refused, or used up the permit the live call needs).
+  - The first design ran (c) and (d) a second time over the stub instead of capturing them, and the first exit run
+    after it went wrong at row 74 of 486: `createThread/announcement/public/op-flag/normal: 50001 MISMATCH
+    recompute-vs-preflight`, its step (d) `RequestTimedOut` after the 30 s deadline (`steps 30199` ms; 956 and
+    1,035 ms in the two M6 full runs before). No 429 came: dfx's own per-route limiter (`maybeWait`, above the stub)
+    counts every request it executes, dry ones included, so two more per row spent the thread-create bucket and dfx
+    held the live request. The run was stopped there (SIGINT; the lock was released, the table untouched, and the
+    next run's opening reset cleaned the lab). Capturing the live requests adds none. The same row also showed that
+    `Library.recomputeStep` recorded a `Transient` as the row's recompute, where §5.10 makes a timeout of (c) or (d)
+    an infrastructure abort; (d) now aborts on a `Transient` as (c) does.
   - Tests: `operations-runtime.test.ts` runs 35 operations (every handle method, both `setArchived` and `setLocked`
     values, both thread visibilities and the announcement thread, a file send, a tagged and an untagged post, both
     `timeout` and `ban` forms) through a route-checked client and asserts the exact method, path and body of each;
-    `request-check.test.ts` runs the matrix's request check offline through `Identities.compose` for one scenario of
-    each of the catalog's 158 (operation, lab channel) pairs. Each of the five mutations, and a Drivers unpin sent as
-    a pin, now fails both (the method swaps as route-check defects, the body swaps as `request-wiring` differences).
+    `request-check.test.ts` runs the comparison offline through `Identities.compose` for one scenario of each of the
+    catalog's 158 (operation, lab channel) pairs (both sides over the stub), and runs (c) and (d) under the capture
+    (each step's own request first, (d)'s before its recompute reads; a `Transient` in (d) aborts). Each of the five
+    mutations, and a Drivers unpin sent as a pin, now fails both files (the method swaps as route-check defects, the
+    body swaps as request differences).
 - **After the M6 verifier: `Permissions.require` no longer grants what it did not check** (minor; §2.6 and §4.7
   updated). When even a refresh left the state unable to resolve the channel, `require` succeeded with
   `decided?.decision.failures ?? []`, returning a handle whose checked flags were marked granted, so their later

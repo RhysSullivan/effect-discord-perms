@@ -1,10 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import { BunFileSystem } from "@effect/platform-bun"
-import { Effect, Option, Schema } from "effect"
+import { Cause, Effect, Exit, Option, Schema } from "effect"
+import type * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as Drivers from "../../harness/Drivers.ts"
-import { DryRun, loadCanned, makeRecorder, requestDifferences } from "../../harness/DryRun.ts"
+import { Capture, DryRun, loadCanned, makeCapture, makeRecorder, operationRequest, requestDifferences } from "../../harness/DryRun.ts"
 import * as Fixtures from "../../harness/Fixtures.ts"
-import { compose } from "../../harness/Identities.ts"
+import * as Identities from "../../harness/Identities.ts"
 import { LabGuard } from "../../harness/Lab.ts"
 import * as LabIds from "../../harness/LabIds.ts"
 import * as Library from "../../harness/Library.ts"
@@ -19,11 +20,15 @@ import { type Answer, fakeCredentials, fakeGuildId, makeRecordingClient, subject
 import { makeFakeGateway } from "../support/fakeGateway.ts"
 
 /**
- * The request check (DESIGN §5.10, the M6 verifier) offline, over the whole catalog: for one scenario of every
- * (operation, lab channel) the catalog has, the library's operation with preflight bypassed (what step (d) sends)
- * and the raw call of step (c), both over the dry-run stub of the harness's real wiring (`Identities.compose`, the
- * subject's real bot build and its declared-route check), record one request each, and the two are the same
- * request: the method, the path with its IDs and query, and the body. Nothing is sent.
+ * The request check (DESIGN §5.10, the M6 verifier), through the harness's real wiring (`Identities.compose`, the
+ * subject's real bot build and its declared-route check) over a fake base client:
+ *
+ * - offline over the whole catalog: for one scenario of every (operation, lab channel) the catalog has, the
+ *   library's operation with preflight bypassed (what step (d) sends) and the raw call of step (c), both over the
+ *   dry-run stub, record one request each, and the two are the same request: the method, the path with its IDs and
+ *   query, and the body. Nothing is sent;
+ * - as the live run does it: steps (c) and (d) under the capture record their requests as sent, (d)'s own request
+ *   first, and a `Transient` in (d) is an infrastructure abort.
  */
 const ids: Materialize.Ids = { ...Predict.symbolicIds, guildId: fakeGuildId }
 const harnessUserId = UserId.make("200000000000000000")
@@ -82,6 +87,61 @@ const message = (id: string, channelId: ChannelId, author: string, reactions: Re
     reactions
   })
 
+/** The library's and the raw call's contexts for `scenario`, with fresh fixture messages (the bulk delete's age check). */
+const contextsFor = (scenario: Scenario, runtime: Library.LibraryContext["runtime"], canned: ReadonlyMap<string, unknown>) =>
+  Effect.gen(function* () {
+    const state = Materialize.desired(scenario.setup, ids)
+    const channelId = ids.channels.get(state.channel)
+    if (channelId === undefined) return yield* Effect.die(new Error(`no ID for ${state.channel}`))
+    const assigned = Materialize.assignedRoleOf(scenario.setup)
+    const roleId = assigned === undefined ? undefined : ids.roles.get(assigned)
+    const subjectMessage = message(recentId(3), channelId, ids.subjectUserId)
+    const harnessMessage = message(recentId(2), channelId, harnessUserId, [{ count: 1, me: false, emoji: { id: null, name: Fixtures.emoji.existing } }])
+    const secondHarnessMessage = MessageId.make(recentId(1))
+    const stickerId = StickerId.make("800000000000000001")
+    const emojiId = EmojiId.make("900000000000000001")
+    const forumTag = "700000000000000001"
+    const now = Date.parse("2026-11-03T12:00:00Z")
+    const prior = yield* Fixtures.subjectPriorSend(scenario.setup, channelId).pipe(Effect.provideService(DryRun, Option.some(yield* makeRecorder(canned))), Effect.orDie)
+    if (prior._tag === "Refused") return yield* Effect.die(new Error("the dry prior send was refused"))
+    const library: Library.LibraryContext = {
+      runtime,
+      ids,
+      state,
+      channelId,
+      subjectMessage,
+      harnessMessage,
+      secondHarnessMessage,
+      stickerId,
+      emojiId,
+      forumTag: ForumTagId.make(forumTag),
+      roleId,
+      target: Schema.decodeUnknownSync(Schemas.Member)({ user: { id: ids.targetUserId }, roles: [] }),
+      now
+    }
+    const call: Drivers.CallContext = { ids, state, channelId, subjectMessage: subjectMessage.id, harnessMessage: harnessMessage.id, secondHarnessMessage, stickerId, emojiId, forumTag, roleId, now, priorSend: prior }
+    return { library, call, channelId }
+  })
+
+/** Runs `body` over the harness's real wiring with a fake base client answering `answer`, the guard armed and the lab admitted. */
+const inLab = <A>(answer: (request: HttpClientRequest.HttpClientRequest) => Answer | undefined, body: (runtime: Library.LibraryContext["runtime"], canned: ReadonlyMap<string, unknown>) => Effect.Effect<A, never, Identities.Services>) =>
+  Effect.gen(function* () {
+    const client = yield* makeRecordingClient((request): Answer => subjectStartupAnswer(request) ?? answer(request) ?? { status: 404, body: { message: "not in the fake", code: 0 } })
+    const gateway = yield* makeFakeGateway({ userFor: (token) => (token === "fake-subject-token" ? ids.subjectUserId : undefined), guildsFor: () => [guildCreate()] }, () => 0)
+    const canned = yield* loadCanned.pipe(Effect.provide(BunFileSystem.layer))
+    const result = yield* Effect.gen(function* () {
+      const guard = yield* LabGuard
+      yield* guard.arm({ harnessUserId, subjectUserId: ids.subjectUserId, targetUserId: ids.targetUserId, protectedChannels: new Set() })
+      for (const [name, id] of ids.channels) yield* guard.admitChannel({ id, name })
+      for (const [name, id] of ids.roles) yield* guard.admitRole({ id, name, botId: undefined })
+      return yield* body(yield* BotRuntime, canned)
+    }).pipe(Effect.provide(Identities.compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 })))
+    return { result, sent: yield* client.recorded }
+  })
+
+const startupPaths = ["/applications/@me", "/gateway/bot", `/guilds/${fakeGuildId}/members/${ids.subjectUserId}`, "/users/@me"]
+const pathsOf = (sent: ReadonlyArray<{ readonly url: string }>) => sent.map((request) => new URL(request.url).pathname.replace(/^\/api\/v\d+/, ""))
+
 describe("the request check over the catalog", () => {
   it("covers every operation of the catalog", () => {
     expect(new Set(representatives.map((scenario) => scenario.operation._tag))).toEqual(new Set(["send", "createPost", "message", "react", "pins", "createThread", "thread", "channelEdit", "member"]))
@@ -90,72 +150,72 @@ describe("the request check over the catalog", () => {
 
   it.live("the library sends exactly the raw call's request, for one scenario of each operation and lab channel", () =>
     Effect.gen(function* () {
-      const client = yield* makeRecordingClient((request): Answer => subjectStartupAnswer(request) ?? { status: 404, body: { message: "not in the fake", code: 0 } })
-      const gateway = yield* makeFakeGateway({ userFor: (token) => (token === "fake-subject-token" ? ids.subjectUserId : undefined), guildsFor: () => [guildCreate()] }, () => 0)
-      const canned = yield* loadCanned.pipe(Effect.provide(BunFileSystem.layer))
-      const checked = yield* Effect.gen(function* () {
-        const guard = yield* LabGuard
-        const runtime = yield* BotRuntime
-        yield* guard.arm({ harnessUserId, subjectUserId: ids.subjectUserId, targetUserId: ids.targetUserId, protectedChannels: new Set() })
-        for (const [name, id] of ids.channels) yield* guard.admitChannel({ id, name })
-        for (const [name, id] of ids.roles) yield* guard.admitRole({ id, name, botId: undefined })
-        const problems: Array<string> = []
-        const counts: Array<readonly [string, number, number]> = []
-        for (const scenario of representatives) {
-          const state = Materialize.desired(scenario.setup, ids)
-          const channelId = ids.channels.get(state.channel)
-          if (channelId === undefined) return yield* Effect.die(new Error(`no ID for ${state.channel}`))
-          const assigned = Materialize.assignedRoleOf(scenario.setup)
-          const roleId = assigned === undefined ? undefined : ids.roles.get(assigned)
-          const subjectMessage = message(recentId(3), channelId, ids.subjectUserId)
-          const harnessMessage = message(recentId(2), channelId, harnessUserId, [{ count: 1, me: false, emoji: { id: null, name: Fixtures.emoji.existing } }])
-          const secondHarnessMessage = MessageId.make(recentId(1))
-          const stickerId = StickerId.make("800000000000000001")
-          const emojiId = EmojiId.make("900000000000000001")
-          const forumTag = "700000000000000001"
-          const now = Date.parse("2026-11-03T12:00:00Z")
-          const prior = yield* Fixtures.subjectPriorSend(scenario.setup, channelId).pipe(Effect.provideService(DryRun, Option.some(yield* makeRecorder(canned))), Effect.orDie)
-          if (prior._tag === "Refused") return yield* Effect.die(new Error("the dry prior send was refused"))
-          const library: Library.LibraryContext = {
-            runtime,
-            ids,
-            state,
-            channelId,
-            subjectMessage,
-            harnessMessage,
-            secondHarnessMessage,
-            stickerId,
-            emojiId,
-            forumTag: ForumTagId.make(forumTag),
-            roleId,
-            target: Schema.decodeUnknownSync(Schemas.Member)({ user: { id: ids.targetUserId }, roles: [] }),
-            now
-          }
-          const call: Drivers.CallContext = {
-            ids,
-            state,
-            channelId,
-            subjectMessage: subjectMessage.id,
-            harnessMessage: harnessMessage.id,
-            secondHarnessMessage,
-            stickerId,
-            emojiId,
-            forumTag,
-            roleId,
-            now,
-            priorSend: prior
-          }
-          const bypassed = yield* Library.bypassedRequests(scenario.operation, library, yield* makeRecorder(canned))
-          const expected = yield* Drivers.dryRequests(scenario, call, yield* makeRecorder(canned)).pipe(Effect.orDie)
-          problems.push(...requestDifferences(scenario.id, bypassed, expected))
-          counts.push([scenario.id, bypassed.length, expected.length])
-        }
-        return { problems, counts, sent: yield* client.recorded }
-      }).pipe(Effect.provide(compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 })))
-      expect(checked.problems).toEqual([])
-      expect(checked.counts.filter(([, library, raw]) => library !== 1 || raw !== 1)).toEqual([])
+      const { result, sent } = yield* inLab(
+        () => undefined,
+        (runtime, canned) =>
+          Effect.gen(function* () {
+            const problems: Array<string> = []
+            const counts: Array<readonly [string, number, number]> = []
+            for (const scenario of representatives) {
+              const { library, call } = yield* contextsFor(scenario, runtime, canned)
+              const bypassed = yield* Library.bypassedRequests(scenario.operation, library, yield* makeRecorder(canned))
+              const expected = yield* Drivers.dryRequests(scenario, call, yield* makeRecorder(canned)).pipe(Effect.orDie)
+              problems.push(...requestDifferences(scenario.id, bypassed, expected))
+              counts.push([scenario.id, bypassed.length, expected.length])
+            }
+            return { problems, counts }
+          })
+      )
+      expect(result.problems).toEqual([])
+      expect(result.counts.filter(([, library, raw]) => library !== 1 || raw !== 1)).toEqual([])
       // nothing but the subject's startup reached the base client
-      expect(checked.sent.map((request) => new URL(request.url).pathname.replace(/^\/api\/v\d+/, "")).sort()).toEqual(["/applications/@me", "/gateway/bot", `/guilds/${fakeGuildId}/members/${ids.subjectUserId}`, "/users/@me"].sort())
+      expect(pathsOf(sent).sort()).toEqual([...startupPaths].sort())
+    })
+  , 60_000)
+})
+
+describe("steps (c) and (d) live, under the capture", () => {
+  const send = scenarios.find((scenario) => scenario.operation._tag === "send" && scenario.operation.payload === "plain" && Materialize.labNameOf(scenario.setup) === "lab-text" && !scenario.setup.fixtures.includes("subject-prior-send"))
+  const pins = scenarios.find((scenario) => scenario.operation._tag === "pins" && scenario.operation.action === "list" && Materialize.labNameOf(scenario.setup) === "lab-text")
+  const textId = ids.channels.get("lab-text")
+  // Discord refuses the send, answers the recompute's refresh reads, and has no answer for the pins list
+  const answer = (request: HttpClientRequest.HttpClientRequest): Answer | undefined => {
+    const path = new URL(request.url).pathname.replace(/^\/api\/v\d+/, "")
+    if (request.method === "POST" && path === `/channels/${textId}/messages`) return { status: 403, body: { message: "Missing Permissions", code: 50013 } }
+    if (request.method === "GET" && path === `/channels/${textId}`) return { status: 200, body: { id: textId, type: 0, guild_id: fakeGuildId, permission_overwrites: [] } }
+    if (request.method === "GET" && path === `/guilds/${fakeGuildId}/members/${ids.subjectUserId}`) return { status: 200, body: { user: { id: ids.subjectUserId }, roles: [] } }
+    if (request.method === "GET" && path === `/guilds/${fakeGuildId}`) return { status: 200, body: { id: fakeGuildId, owner_id: ids.ownerId, roles: [{ id: fakeGuildId, permissions: "0", position: 0, managed: false }] } }
+    if (request.method === "GET" && path === `/channels/${textId}/messages/pins`) return { status: 503, body: { message: "unavailable", code: 0 } }
+    return undefined
+  }
+
+  it.live("records each step's request as sent; (d)'s first is its operation's, before the recompute's reads; a Transient in (d) aborts", () =>
+    Effect.gen(function* () {
+      if (send === undefined || pins === undefined) return yield* Effect.die(new Error("no plain send or pins list in lab-text"))
+      const { result } = yield* inLab(answer, (runtime, canned) =>
+        Effect.gen(function* () {
+          const contexts = yield* contextsFor(send, runtime, canned)
+          const capturedC = yield* makeCapture
+          const called = yield* Drivers.rawCall(send, contexts.call).pipe(Effect.provideService(Capture, Option.some(capturedC)), Effect.orDie)
+          const capturedD = yield* makeCapture
+          const stepD = yield* Library.recomputeStep(send.operation, contexts.library).pipe(Effect.provideService(Capture, Option.some(capturedD)))
+          const pinsContexts = yield* contextsFor(pins, runtime, canned)
+          const aborted = yield* Effect.exit(Library.recomputeStep(pins.operation, pinsContexts.library))
+          return { answer: called.answer._tag, c: yield* capturedC.recorded, d: yield* capturedD.recorded, stepD, aborted }
+        })
+      )
+      expect(result.answer).toBe("Rejected")
+      expect(result.c.map((entry) => `${entry.method} ${entry.path}`)).toEqual([`POST /channels/${textId}/messages`])
+      expect(result.d.map((entry) => `${entry.method} ${entry.path}`)).toEqual([
+        `POST /channels/${textId}/messages`,
+        `GET /channels/${textId}`,
+        `GET /guilds/${fakeGuildId}/members/${ids.subjectUserId}`,
+        `GET /guilds/${fakeGuildId}`
+      ])
+      expect(requestDifferences("step (d)", operationRequest(result.d), operationRequest(result.c))).toEqual([])
+      expect(result.stepD.record).toEqual({ tag: "MissingViewChannel", categories: ["access", "permission"] })
+      expect(Exit.isFailure(result.aborted) && Cause.hasDies(result.aborted.cause)).toBe(true)
+      expect(String(Exit.isFailure(result.aborted) ? Cause.squash(result.aborted.cause) : "")).toContain("infrastructure abort: step (d): DiscordUnavailable")
     })
   , 60_000)
 })

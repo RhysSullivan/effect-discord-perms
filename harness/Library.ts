@@ -10,10 +10,11 @@
  * - **(d)** runs it in `"bypass"` mode, live, for rows whose raw call Discord refused with 50013, 50001 or a
  *   dedicated code: the request goes out, Discord refuses it again, and the recompute decides the error, which must
  *   equal step (b)'s, tag and categories (`recompute-vs-preflight`). The Lab guard and Safety apply as to (c).
- * - **The request check** (the M6 verifier): {@link bypassedRequests} runs it in `"bypass"` mode over the dry-run
- *   stub, which records the request step (d) sends, and the runner compares that request (and step (b)'s, when (b)
- *   reached the stub) with the raw call's, also recorded by the stub (`Drivers.dryRequests`): the method, the path
- *   with its IDs and query, and the body (`request-wiring` otherwise).
+ * - **The request check** (the M6 verifier): the runner records step (d)'s request as sent (`DryRun.Capture`) and
+ *   compares it, and step (b)'s when (b) reached the stub, with the raw call's, recorded the same way: the method,
+ *   the path with its IDs and query, and the body (`request-wiring` otherwise). A row with neither falls back to
+ *   {@link bypassedRequests}, the operation in `"bypass"` mode over the dry-run stub (no row of the M6 table needs
+ *   it); `test/unit/request-check.test.ts` runs that and `Drivers.dryRequests` over the whole catalog offline.
  *
  * The handles are built from what the lab knows, as a bot holds handles it got earlier: the scenario channel by
  * its kind, the fixtures' messages from the harness's read of them (their author and reactions), and the target
@@ -25,6 +26,7 @@ import { channelHandle, messageHandle } from "../src/channels/Ops.ts"
 import type { AnyMessage } from "../src/channels/Message.ts"
 import type { GuildChannel, GuildChannelKind, GuildMessageKind, MessageChannel } from "../src/channels/Channel.ts"
 import { PreflightDecision } from "../src/errors/Cause.ts"
+import { catchCategory } from "../src/errors/Category.ts"
 import type { AllErrors } from "../src/errors/index.ts"
 import { memberHandle } from "../src/members/Member.ts"
 import * as Preflight from "../src/permissions/Preflight.ts"
@@ -298,8 +300,9 @@ export const preflightStep = (operation: Operation, context: LibraryContext, rec
   )
 
 /**
- * The request check's library side: the operation in bypass mode over the dry-run stub, which records what step (d)
- * would send. A typed failure (a local check) records nothing, which no raw call equals; a defect aborts.
+ * The operation in bypass mode over the dry-run stub, which records what step (d) would send (the request check's
+ * fallback, and its library side offline). A typed failure (a local check) records nothing, which no raw call
+ * equals; a defect aborts.
  */
 export const bypassedRequests = (operation: Operation, context: LibraryContext, recorder: Recorder): Effect.Effect<ReadonlyArray<Recorded>> =>
   operate(operation, context).pipe(
@@ -309,10 +312,15 @@ export const bypassedRequests = (operation: Operation, context: LibraryContext, 
     Effect.andThen(recorder.recorded)
   )
 
-/** Step (d)'s record: the error with preflight bypassed; a success (Discord let it through this time) never equals (b). */
+/**
+ * Step (d)'s record: the error with preflight bypassed; a success (Discord let it through this time) never equals (b).
+ * A `Transient` (no answer, the deadline, a 5xx, or a recompute read without an answer) is an infrastructure abort,
+ * never a row outcome (§5.10).
+ */
 export const recomputeStep = (operation: Operation, context: LibraryContext): Effect.Effect<{ readonly record: RecordedError; readonly created: ChannelId | undefined }> =>
   operate(operation, context).pipe(
     Effect.provideService(Preflight.Mode, "bypass"),
+    catchCategory("transient", (error) => Effect.die(new Error(`infrastructure abort: step (d): ${error._tag}`))),
     Effect.matchEffect({
       onSuccess: (operated) => Effect.succeed({ record: { tag: "(succeeded)", categories: [] }, created: operated.created }),
       onFailure: (error) => Effect.succeed({ record: recordError(error), created: undefined })

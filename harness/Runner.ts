@@ -15,14 +15,15 @@
  *    a member operation resolves at guild level, and the subject reads the target member (as the library's
  *    `Members.get` will, M6) for the hierarchy.
  * 5. **(b) Preflight**: the real public operation in enforce mode over the dry-run stub (`Library.ts`, M6), whose
- *    record must be `Preflight.decide`'s (`preflight-wiring` otherwise). Then the **request check** (the M6
- *    verifier): the operation's request with preflight bypassed (step (d)'s) and step (b)'s, when (b) reached the
- *    stub, must each be the raw call's, every one recorded by the stub and none sent (`request-wiring` otherwise).
+ *    record must be `Preflight.decide`'s (`preflight-wiring` otherwise).
  * 6. **(c) Raw call** through `SubjectRaw`, with no check (`Drivers.ts`), classified by `Outcome.ts`. A payload
  *    that mentions `@everyone` is sent only if the oracle shows the subject without MentionEveryone and
  *    Administrator; a kick or ban only with the Lab guard's permit, which it issues from harness-side reads.
  * 7. **(d) Recompute**: for a row Discord refused with 50013, 50001 or a dedicated code, the library's operation with
  *    preflight bypassed, live (`Library.recomputeStep`, M6); its error must be step (b)'s (`recompute-vs-preflight`).
+ *    Then the **request check** (the M6 verifier): steps (c) and (d) run under `DryRun.Capture`, and the library's
+ *    request, step (d)'s as sent and step (b)'s when (b) reached the stub, must each be step (c)'s
+ *    (`request-wiring` otherwise); a row with neither is checked with the operation run dry in bypass mode.
  * 8. **Oracle**: the value the wait settled on, restricted to the required flags (`not-applicable` for member
  *    operations, which have no channel).
  * 9. **Cleanup**: the threads the scenario created, the scenario channel's bot messages, and the thread back to
@@ -469,16 +470,6 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
       priorSend: prior
     }
 
-    // the request check (the M6 verifier): the request the library sends with preflight bypassed (step (d)'s), and
-    // step (b)'s when it reached the stub, must be the raw call's (step (c)'s), all three recorded by the dry-run stub
-    // and none sent: the method, the path with its IDs and query, and the body
-    const expected = yield* Drivers.dryRequests(scenario, callContext, yield* DryRun.makeRecorder(context.canned)).pipe(Effect.catch(infrastructure(`${scenario.id}: the raw call, dry`)))
-    const bypassed = yield* Library.bypassedRequests(operation, library, yield* DryRun.makeRecorder(context.canned))
-    const requestProblems = [
-      ...DryRun.requestDifferences("the library, preflight bypassed", bypassed, expected),
-      ...(stepB.step === "pass" ? DryRun.requestDifferences("step (b)", stepB.requests, expected) : [])
-    ]
-    if (requestProblems.length > 0) yield* context.log(`${scenario.id}: request-wiring: ${requestProblems.join("; ")}`)
 
     // 8. the oracle (read during the wait), restricted to the required flags
     const oracleValue = settled.oracle
@@ -506,7 +497,8 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
       yield* guard.permitKickOrBan(kickOrBan, { guildId: ids.guildId, roles, subject: yield* member(ids.subjectUserId), target: yield* member(ids.targetUserId) })
     })
     yield* permitKickOrBan
-    const called = yield* Drivers.rawCall(scenario, callContext).pipe(Effect.catch(infrastructure(`${scenario.id}: the raw call`)))
+    const capturedC = yield* DryRun.makeCapture
+    const called = yield* Drivers.rawCall(scenario, callContext).pipe(Effect.provideService(DryRun.Capture, Option.some(capturedC)), Effect.catch(infrastructure(`${scenario.id}: the raw call`)))
     created = called.created
     if (created !== undefined && called.answer._tag === "Ok") yield* guard.admitChannel({ id: created, name: LabIds.createdThreadName })
     const raw = yield* Drivers.outcomeOf(scenario, called)
@@ -514,9 +506,10 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
     // 7. (d) the library's operation with preflight bypassed, live, where Discord refused the raw call with a
     // permission-like or dedicated code: the recompute must give what (b) gave
     let recompute: TruthTable.Row["recompute"] = "n/a"
+    const capturedD = yield* DryRun.makeCapture
     if (refusedForRecompute(raw)) {
       yield* permitKickOrBan
-      const stepD = yield* Library.recomputeStep(operation, library)
+      const stepD = yield* Library.recomputeStep(operation, library).pipe(Effect.provideService(DryRun.Capture, Option.some(capturedD)))
       recompute = stepD.record
       if (stepD.created !== undefined) {
         yield* guard.admitChannel({ id: stepD.created, name: LabIds.createdThreadName })
@@ -524,6 +517,18 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
         else yield* rest.deleteChannel(stepD.created).pipe(labStepUnless("cleanup: delete the thread step (d) created", [10003]))
       }
     }
+
+    // the request check (the M6 verifier): the library's request must be the raw call's (step (c)'s, as sent), in
+    // method, path with its IDs and query, and body: step (d)'s as sent, and step (b)'s when it reached the stub; a row
+    // with neither has the operation recorded in bypass mode over the stub instead. Nothing extra is sent: a dry
+    // request still counts in dfx's own limiter, which delayed live requests past the deadline (§5.10)
+    const rawRequest = DryRun.operationRequest(yield* capturedC.recorded)
+    const libraryRequests: Array<readonly [string, ReadonlyArray<DryRun.Recorded>]> = []
+    if (stepB.step === "pass") libraryRequests.push(["step (b)", stepB.requests])
+    if (recompute !== "n/a") libraryRequests.push(["step (d)", DryRun.operationRequest(yield* capturedD.recorded)])
+    if (libraryRequests.length === 0) libraryRequests.push(["the library, preflight bypassed", yield* Library.bypassedRequests(operation, library, yield* DryRun.makeRecorder(context.canned))])
+    const requestProblems = libraryRequests.flatMap(([label, requests]) => DryRun.requestDifferences(label, requests, rawRequest))
+    if (requestProblems.length > 0) yield* context.log(`${scenario.id}: request-wiring: ${requestProblems.join("; ")}`)
     yield* lap("steps")
 
     // 9. cleanup

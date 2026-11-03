@@ -1,14 +1,18 @@
 /**
- * The dry-run switch (DESIGN §5.10 step (b) and the request check): a `Context.Reference` the shared base
- * `HttpClient` reads for every request. When it holds a recorder, the request still passes the Lab guard (judged as
- * the live request would be, `LabGuard.checkDry`), then is recorded and answered with a canned 2xx body from
- * `fixtures/canned/` instead of being sent; nothing is paced or counted, because nothing reaches Discord. A request
- * without a canned body is a defect.
+ * The dry-run switch and the live capture (DESIGN §5.10 step (b) and the request check), two `Context.Reference`s the
+ * shared base `HttpClient` reads for every request.
  *
- * The matrix's step (b) runs the real public operation in `"enforce"` mode under it (M6), so the run exercises the
- * user-facing path without an extra Discord request. The request check (the M6 verifier) runs the operation again
- * with preflight bypassed, as step (d) sends it, and the raw call of step (c), both under it, and compares what was
- * recorded: the method, the path with its IDs and query, and the body ({@link requestDifferences}).
+ * - **{@link DryRun}**: when it holds a recorder, the request still passes the Lab guard (judged as the live request
+ *   would be, `LabGuard.checkDry`), then is recorded and answered with a canned 2xx body from `fixtures/canned/`
+ *   instead of being sent; nothing is paced or counted by the harness, because nothing reaches Discord. A request
+ *   without a canned body is a defect. The matrix's step (b) runs the real public operation in `"enforce"` mode under
+ *   it (M6), so the run exercises the user-facing path without an extra Discord request.
+ * - **{@link Capture}**: when it holds a recorder, a request that passes the guard is recorded and then sent as usual.
+ *   Steps (c) and (d) run under it, so the request check (the M6 verifier) compares the requests Discord received:
+ *   step (c)'s with step (d)'s, and with step (b)'s when (b) reached the stub ({@link requestDifferences}: the method,
+ *   the path with its IDs and query, and the body). It adds no request: a dry one still counts in dfx's own per-route
+ *   limiter, which sits above the stub, so two dry requests per row delayed the live ones that followed past the
+ *   request deadline (M6 verifier, first run).
  */
 import { Context, Effect, FileSystem, Option, Ref, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
@@ -41,6 +45,9 @@ export interface Recorder {
 
 /** The switch: `None` (the default) sends every request; a recorder answers them instead. */
 export const DryRun = Context.Reference<Option.Option<Recorder>>("harness/DryRun", { defaultValue: () => Option.none() })
+
+/** The live capture: `None` (the default) records nothing; a recorder records every request sent, which still goes out. */
+export const Capture = Context.Reference<Option.Option<Recorder>>("harness/Capture", { defaultValue: () => Option.none() })
 
 /**
  * The canned 2xx bodies, by route (`fixtures/canned/`): one per route the library's operations send (M6), each
@@ -128,6 +135,15 @@ export const makeRecorder = (bodies: ReadonlyMap<string, unknown>): Effect.Effec
       canned: (route) => Option.fromUndefinedOr(bodies.get(route))
     }
   })
+
+/** A recorder for {@link Capture}: it answers nothing, so it holds no canned bodies. */
+export const makeCapture: Effect.Effect<Recorder> = Effect.suspend(() => makeRecorder(new Map()))
+
+/**
+ * A live step's own request among what its capture recorded: the first. The operation sends one request; a 429 that
+ * dfx retries sends it again, and the recompute's reads (step (d)) follow it.
+ */
+export const operationRequest = (recorded: ReadonlyArray<Recorded>): ReadonlyArray<Recorded> => recorded.slice(0, 1)
 
 /**
  * How the requests `actual` recorded differ from the `expected` ones (the raw call's), each difference named with

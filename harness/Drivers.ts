@@ -214,8 +214,9 @@ export const rawCall = (scenario: Pick<Scenario, "operation" | "setup">, context
   })
 
 /**
- * The request check's reference (§5.10): the scenario's raw call over the dry-run stub, which records the request
- * step (c) sends (method, path with its IDs and query, body) and answers it without sending it.
+ * The scenario's raw call over the dry-run stub, which records the request step (c) sends (method, path with its IDs
+ * and query, body) and answers it without sending it: the request check's raw side offline
+ * (`test/unit/request-check.test.ts`; live, the runner captures step (c) as sent).
  */
 export const dryRequests = (scenario: Pick<Scenario, "operation" | "setup">, context: CallContext, recorder: Recorder): Effect.Effect<ReadonlyArray<Recorded>, Transient, SubjectRaw> =>
   rawCall(scenario, context).pipe(Effect.provideService(DryRun, Option.some(recorder)), Effect.andThen(recorder.recorded))

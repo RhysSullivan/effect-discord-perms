@@ -28,7 +28,7 @@ import { Bot, type BotRuntime } from "../src/bot/Bot.ts"
 import { BotInternals, type SubjectRaw } from "../src/bot/Internals.ts"
 import type { StartupFailed } from "../src/bot/Startup.ts"
 import { Credentials, type IdentityCredentials, type LabCredentials, layer as credentialsLayer } from "../src/config/Credentials.ts"
-import { cannedRoute, DryRun } from "./DryRun.ts"
+import { cannedRoute, Capture, DryRun } from "./DryRun.ts"
 import * as Lab from "./Lab.ts"
 import * as PacingModule from "./Pacing.ts"
 
@@ -42,7 +42,8 @@ export class TargetRest extends Context.Service<TargetRest, DiscordRestService>(
  * The base client every identity's dfx sees: guarded, paced and counted. It requires the real base client,
  * the pacing service and the guard, all from outside every identity's fresh boundary. Under a dry run
  * (`DryRun.ts`) a request passes the guard (`checkDry`: as the live request would, with no kick or ban permit used)
- * and is answered with its canned body instead of being sent.
+ * and is answered with its canned body instead of being sent; under a capture a request that passes the guard is
+ * recorded, then sent.
  */
 export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpClient.HttpClient | PacingModule.Pacing | Lab.LabGuard> = Layer.effect(
   HttpClient.HttpClient,
@@ -68,6 +69,8 @@ export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpCli
         const dry = yield* DryRun
         if (Option.isNone(dry)) {
           yield* guard.check(request)
+          const capture = yield* Capture
+          if (Option.isSome(capture)) yield* capture.value.record(request)
           return yield* sent.execute(request)
         }
         // nothing is sent: the guard judges the request as it would the live one, with no kick or ban permit used
