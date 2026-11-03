@@ -780,6 +780,12 @@ readonly require: <C extends GuildChannel, const F extends ReadonlyArray<Permiss
 
 `require` is optional and reads gateway state. When the guild is stale it
 refreshes over REST first, so it can fail with `Transient` and `UnknownChannel`.
+(After the M6 verifier) When even the refresh leaves the state unable to resolve
+the channel (the guild or the channel left the state meanwhile: the bot was
+removed, the channel deleted), nothing can be checked, and `require` fails with
+`UnknownChannel` (a `PreflightDecision` cause, logged at Warning with the
+reason). M6 had returned the handle with the flags granted, unchecked, so their
+later refusals would have been `PermissionRevokedSinceCheck`.
 It fails with the most fundamental problem (§3.2), including
 `CommunicationDisabled` when a timeout masks a checked flag. On the returned
 handle, `Missing<F>` for the checked flags becomes one
@@ -1600,6 +1606,21 @@ What counts as a problem (M3):
 - `ThreadLocked` (a locked thread without ManageThreads, H-036) and
   `ThreadArchived`, only where the row lists the tag.
 
+**A state that cannot decide** (after the M6 verifier). Preflight refreshes
+first when the state lacks what the resolver needs or is stale. When even the
+refresh leaves it short (the guild or the channel left the state meanwhile:
+the bot was removed, the channel deleted, or a gateway event moved it while the
+refresh read), `decisionOf` is `Undecidable` with the reason, and:
+
+- an operation (`perform`) sends the request unchecked, logged at Warning:
+  Discord decides, and a refusal goes through the error map (a 50013 or 50001
+  to the recompute, which finds the state as short and gives the code's own
+  tag, `PermissionDeniedUnattributed`, §4.9), so no error is guessed;
+- `Permissions.require` fails with `UnknownChannel` (§2.6): it exists to check,
+  and it never returns flags it did not check;
+- the pins readback (§4.12) cannot tell, and reports nothing degraded, logged at
+  Warning.
+
 Degrade-mode payload flags missing from the effective set are reported as
 `degraded`, never as failures. (M6: `DecideArgs.extraFlags` carries the
 error-mode flags a request needs beyond its row and payload: UseExternalEmojis for
@@ -1820,7 +1841,10 @@ listed for the operation map; any other 50035 is a defect. dfx failure shapes
   listed.
 
 **Reads.** A list operation that returns empty while ReadMessageHistory is
-missing reports `degraded: ["ReadMessageHistory"]` (H-107).
+missing reports `degraded: ["ReadMessageHistory"]` (H-107). (After the M6
+verifier) The readback resolves the channel as preflight does; a `Transient`
+from its refresh fails the list (M6 had dropped it and reported nothing
+degraded), and a state that cannot decide reports nothing degraded (§4.7).
 
 Harness REST reads are used only for fields not gated by the content toggle,
 unless startup confirmed the harness has the Message Content flag. The

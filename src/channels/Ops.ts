@@ -9,7 +9,10 @@
  *    (refreshed first when the state lacks what the resolver needs, or is stale), the request's arguments
  *    completed (`Preflight.stateArgs`), and `Preflight.decide`; the first failure in §3.2 order is the error,
  *    with a `PreflightDecision` cause, and a flag the handle's `require` checked is `PermissionRevokedSinceCheck`
- *    (D8);
+ *    (D8). When even a refresh leaves the state unable to resolve the request (the guild or the channel left it
+ *    meanwhile: the bot was removed, the channel deleted), the request is sent unchecked, with a warning: Discord
+ *    decides, and a refusal goes through the error map (a 50013 or 50001 to the recompute, which finds the same
+ *    and gives the code's own tag; §4.7);
  * 2. the local checks (`Limits.ts`, basis `payload-check`), which rank last (§3.2 tier 7);
  * 3. `DiscordApi.execute`: the call with its deadline, the error map, the recompute and the decode (§4.8 steps
  *    3-5);
@@ -127,8 +130,8 @@ export interface Plan<A> {
   readonly targetMember?: MemberInput
 }
 
-/** The resolver's input for `target`, refreshing first when the state lacks it or is stale; `undefined` when even a refresh leaves it short. */
-const resolverInput = (runtime: Runtime, target: Recompute.Target): Effect.Effect<Extract<FromSnapshot, { readonly _tag: "Ready" }> | undefined, Transient> =>
+/** The resolver's input for `target`, refreshing first when the state lacks it or is stale; `NeedsRefresh` when even a refresh leaves it short. */
+const resolverInput = (runtime: Runtime, target: Recompute.Target): Effect.Effect<FromSnapshot, Transient> =>
   Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
     const scope = target.scope
@@ -142,22 +145,29 @@ const resolverInput = (runtime: Runtime, target: Recompute.Target): Effect.Effec
       else yield* runtime.guildState.refreshGuild(target.guildId)
       current = yield* read
     }
-    if (current.input._tag === "Ready") return current.input
-    yield* Effect.logWarning(`preflight: ${target.op}: the state cannot resolve the request even after a refresh (${current.input.reason}); sending it unchecked`)
-    return undefined
+    return current.input
   })
 
-/** Preflight's decision for a plan over the current state (`undefined` when the state cannot decide it). */
-export const decisionOf = <A>(runtime: Runtime, plan: Pick<Plan<A>, "target" | "targetMember">): Effect.Effect<{ readonly resolution: Resolution; readonly decision: Preflight.Decision } | undefined, Transient> =>
+/**
+ * Preflight's decision for a request over the current state, or `Undecidable` with the reason when even a refresh
+ * leaves the state unable to resolve it (`perform` then sends it unchecked, `Permissions.require` fails with
+ * `UnknownChannel`).
+ */
+export type Decided =
+  | { readonly _tag: "Decided"; readonly resolution: Resolution; readonly decision: Preflight.Decision }
+  | { readonly _tag: "Undecidable"; readonly reason: string }
+
+/** Preflight's decision for a plan over the current state (see {@link Decided}). */
+export const decisionOf = <A>(runtime: Runtime, plan: Pick<Plan<A>, "target" | "targetMember">): Effect.Effect<Decided, Transient> =>
   Effect.gen(function* () {
     const { target } = plan
     const input = yield* resolverInput(runtime, target)
-    if (input === undefined) return undefined
+    if (input._tag === "NeedsRefresh") return { _tag: "Undecidable", reason: input.reason }
     const resolution = resolve(input.input)
     const role = target.completion._tag === "Member" ? target.completion.role : undefined
     const hierarchy = plan.targetMember === undefined ? undefined : { guild: input.input.guild, bot: input.input.member, target: plan.targetMember, role }
     const args = Preflight.stateArgs(target.op, target.args, resolution, hierarchy)
-    return { resolution, decision: Preflight.decide(target.op, resolution, args) }
+    return { _tag: "Decided", resolution, decision: Preflight.decide(target.op, resolution, args) }
   })
 
 /** Runs one operation request (see the module comment). */
@@ -166,7 +176,8 @@ export const perform = <A>(runtime: Runtime, plan: Plan<A>): Effect.Effect<A, Wi
     const mode = yield* Preflight.Mode
     if (mode === "enforce") {
       const decided = yield* decisionOf(runtime, plan)
-      const [first] = decided?.decision.failures ?? []
+      if (decided._tag === "Undecidable") yield* Effect.logWarning(`preflight: ${plan.target.op}: the state cannot resolve the request even after a refresh (${decided.reason}); sending it unchecked`)
+      const [first] = decided._tag === "Decided" ? decided.decision.failures : []
       if (first !== undefined) {
         const cause = new PreflightDecision({ route: plan.request.route.template, basis: "gateway-state" })
         return yield* Effect.fail(Preflight.toHandleError(plan.target.op, first, plan.target.granted, cause))
@@ -411,9 +422,11 @@ const pinsMethod = <G extends PermissionFlag, Op extends "channel.pins" | "voice
     }
     return Effect.gen(function* () {
       const page = yield* perform(core.runtime, plan)
-      // an empty list without ReadMessageHistory means nothing was readable, not that nothing is pinned (H-107)
-      const decided = page.items.length === 0 ? yield* decisionOf(core.runtime, plan).pipe(Effect.catch(() => Effect.succeed(undefined))) : undefined
-      const unreadable = decided !== undefined && !Flags.has(decided.resolution.effective, "ReadMessageHistory")
+      // an empty list without ReadMessageHistory means nothing was readable, not that nothing is pinned (H-107); a
+      // state that cannot resolve the channel even after a refresh cannot tell, and the list is taken as read
+      const decided = page.items.length === 0 ? yield* decisionOf(core.runtime, plan) : undefined
+      if (decided?._tag === "Undecidable") yield* Effect.logWarning(`pins: the state cannot resolve the channel even after a refresh (${decided.reason}); the empty list is not reported degraded`)
+      const unreadable = decided?._tag === "Decided" && !Flags.has(decided.resolution.effective, "ReadMessageHistory")
       return {
         messages: page.items.map((item) => messageOf(core, item.message)),
         degraded: unreadable ? ["ReadMessageHistory" as const] : []

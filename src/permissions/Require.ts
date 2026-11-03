@@ -3,7 +3,9 @@
  * of the calls that follow. It is never required.
  *
  * - It reads the gateway state, refreshing it over REST first when the state lacks the channel or is stale, so it
- *   can fail with `Transient`.
+ *   can fail with `Transient`. When even the refresh leaves the state unable to resolve the channel (the guild or
+ *   the channel left the state meanwhile: the bot was removed, or the channel deleted), nothing can be checked, and
+ *   it fails with `UnknownChannel`: it never returns a handle whose flags were not checked.
  * - It fails with the most fundamental problem (§3.2): ViewChannel (a channel the bot cannot see included), then
  *   Connect in voice and stage channels, then the timeout (`CommunicationDisabled`, when it masks a checked flag,
  *   H-020), then SendMessages or SendMessagesInThreads, then the other checked flags in the order given, then the
@@ -17,6 +19,7 @@ import { type ChannelCore, channelHandle, coreOf, decisionOf } from "../channels
 import type { ChannelKinds, GuildChannel, GuildChannelKind, WithGranted } from "../channels/Channel.ts"
 import { PreflightDecision } from "../errors/Cause.ts"
 import type { PermissionErrors, PermissionFlag } from "../errors/Missing.generated.ts"
+import { UnknownChannel } from "../errors/State.ts"
 import type { Transient } from "../errors/Transient.ts"
 import { payloadRuleNames, PayloadRules } from "../payload/PayloadRules.ts"
 import { isVoiceKind } from "../state/Snapshot.ts"
@@ -42,7 +45,7 @@ function requireFlags<C extends GuildChannel, const F extends ReadonlyArray<Perm
   channel: C,
   flags: F
 ): Effect.Effect<WithGranted<C, F[number]>, PermissionErrors["ViewChannel" | F[number]] | OpTags["permissions.require"] | Transient>
-function requireFlags(channel: GuildChannel, flags: ReadonlyArray<PermissionFlag>): Effect.Effect<ChannelKinds<PermissionFlag>[GuildChannelKind], ReturnType<typeof toError> | Transient> {
+function requireFlags(channel: GuildChannel, flags: ReadonlyArray<PermissionFlag>): Effect.Effect<ChannelKinds<PermissionFlag>[GuildChannelKind], ReturnType<typeof toError> | UnknownChannel | Transient> {
   return Effect.gen(function* () {
     const core = coreOf(channel)
     if (core === undefined) return yield* Effect.die(new Error("Permissions.require: a channel handle the library did not build"))
@@ -55,13 +58,18 @@ function requireFlags(channel: GuildChannel, flags: ReadonlyArray<PermissionFlag
       completion: { _tag: "Static" as const }
     }
     const decided = yield* decisionOf(core.runtime, { target })
-    const failures = [...(decided?.decision.failures ?? [])].sort((a, b) => {
+    const cause = new PreflightDecision({ route, basis: core.basis })
+    if (decided._tag === "Undecidable") {
+      yield* Effect.logWarning(`Permissions.require: the state cannot resolve the channel even after a refresh (${decided.reason}); nothing was checked`)
+      return yield* Effect.fail(new UnknownChannel({ cause }))
+    }
+    const failures = [...decided.decision.failures].sort((a, b) => {
       const [ta, pa] = rankOf(core, flags, a)
       const [tb, pb] = rankOf(core, flags, b)
       return ta - tb || pa - pb
     })
     const [first] = failures
-    if (first !== undefined) return yield* Effect.fail(toError("permissions.require", first, new PreflightDecision({ route, basis: core.basis })))
+    if (first !== undefined) return yield* Effect.fail(toError("permissions.require", first, cause))
     return channelHandle(core.runtime, { guildId: core.guildId, id: core.id, kind: core.kind }, [...new Set([...core.granted, ...flags])], core.basis)
   }).pipe(Effect.withSpan("discord.permissions.require", { attributes: { "discord.channel_kind": channel.kind, "discord.guild_id": channel.guildId, "discord.required_flags": [...flags].sort().join(",") } }))
 }

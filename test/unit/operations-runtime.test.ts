@@ -5,16 +5,20 @@ import { Cause, Effect, Exit, Layer, Option, Redacted, Schema, Tracer } from "ef
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as TestClock from "effect/testing/TestClock"
+import { bodyOf, pathOf } from "../../harness/DryRun.ts"
 import { BotRuntime } from "../../src/bot/Bot.ts"
 import { Channels, channelHandle, messageHandle, type Runtime } from "../../src/channels/Ops.ts"
+import { NoResponse } from "../../src/errors/Cause.ts"
 import { categoriesOf } from "../../src/errors/Category.ts"
 import type { PermissionFlag } from "../../src/errors/Missing.generated.ts"
+import { NetworkError, type Transient } from "../../src/errors/Transient.ts"
 import { memberHandle } from "../../src/members/Member.ts"
 import * as Preflight from "../../src/permissions/Preflight.ts"
 import { Permissions } from "../../src/permissions/Require.ts"
 import * as DiscordApi from "../../src/rest/DiscordApi.ts"
+import { checked } from "../../src/rest/RouteCheck.ts"
 import * as Schemas from "../../src/rest/Schemas.ts"
-import { ApplicationId, ChannelId, EmojiId, MessageId, RoleId } from "../../src/Snowflake.ts"
+import { ApplicationId, ChannelId, EmojiId, ForumTagId, MessageId, RoleId, UserId } from "../../src/Snowflake.ts"
 import type { Snapshot } from "../../src/state/Snapshot.ts"
 import { botId, channel, everyone, guildId, later, now, otherId, role, roleA, roleB, roleOverwrite, set, textId, thread, threadId } from "../support/guild.ts"
 import { snapshotOf, stubGuildState } from "../support/guildStateStub.ts"
@@ -24,8 +28,9 @@ import { snapshotOf, stubGuildState } from "../support/guildStateStub.ts"
  * with a scripted base client: preflight decides from the guild state before anything is sent (with a
  * `PreflightDecision` cause), the local limits rank after it, `"bypass"` sends and lets the recompute decide, the
  * send's readback reports what Discord dropped, a reaction needs AddReactions only for a new emoji, `require`
- * narrows (D8), `Channels.get` refuses a channel the bot cannot see, member operations check the hierarchy, and the
- * operation's span carries its attributes.
+ * narrows (D8), `Channels.get` refuses a channel the bot cannot see, member operations check the hierarchy, the
+ * operation's span carries its attributes, and every operation sends its own method, path and body (the M6
+ * verifier), through a client that holds each request to its declared route (`RouteCheck.checked`).
  */
 interface Sent {
   readonly method: string
@@ -58,23 +63,27 @@ const messageWire = (overrides: Record<string, unknown> = {}) => ({
 })
 const decodeMessage = Schema.decodeUnknownSync(Schemas.Message)
 
-/** A runtime over a guild state holding `before` (a refresh gives `after`) and a base client answering with `answer`. */
-const runtimeWith = (options: { readonly before: Snapshot; readonly after?: Snapshot; readonly answer: (method: string, path: string) => Answer }) =>
+/**
+ * A runtime over a guild state holding `before` (a refresh gives `after`) and a base client answering with `answer`.
+ * Each request is recorded with its path under the API base (and its sorted query) and its body: JSON as sent, a
+ * multipart body's parts (`DryRun.bodyOf`), `null` for none. The client is wrapped as a bot build wraps it, by the
+ * declared-route check.
+ */
+const runtimeWith = (options: { readonly before: Snapshot; readonly after?: Snapshot; readonly refreshFails?: Transient; readonly answer: (method: string, path: string) => Answer }) =>
   Effect.gen(function* () {
     const sent: Array<Sent> = []
     const client = HttpClient.make((request) =>
-      Effect.sync(() => {
-        const path = new URL(request.url).pathname.replace(/^\/api\/v\d+/, "")
-        const body: unknown = request.body._tag === "Uint8Array" ? JSON.parse(new TextDecoder().decode(request.body.body)) : undefined
+      Effect.map(bodyOf(request.body), (body) => {
+        const path = pathOf(request)
         sent.push({ method: request.method, path, body })
         const answer = options.answer(request.method, path)
         return HttpClientResponse.fromWeb(request, new Response(answer.status === 204 ? null : JSON.stringify(answer.body), { status: answer.status, headers: { "content-type": "application/json" } }))
       })
-    )
+    ).pipe(checked)
     const rest = yield* Effect.service(DiscordREST).pipe(
       Effect.provide(DiscordRESTMemoryLive.pipe(Layer.provide(DiscordConfig.layer({ token: Redacted.make("fake-token") })), Layer.provide(Layer.succeed(HttpClient.HttpClient, client))))
     )
-    const stub = yield* stubGuildState(options.before, options.after ?? options.before)
+    const stub = yield* stubGuildState(options.before, options.after ?? options.before, options.refreshFails)
     const api = yield* DiscordApi.make(rest, stub.state)
     const runtime: Runtime = {
       identity: { userId: botId, username: "bot", applicationId: ApplicationId.make("100000000000000002"), applicationFlags: 0, guildRoles: [] },
@@ -261,6 +270,54 @@ describe("Permissions.require (§2.6, D8)", () => {
   )
 })
 
+describe("a state that cannot resolve the channel even after a refresh (§4.7, the M6 verifier)", () => {
+  const without = snapshotOf({ roles: [role(everyone, set(), 0)], channels: [], botRoles: [] })
+
+  it.effect("Permissions.require checks nothing, so it fails with UnknownChannel and never grants", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(now)
+      const { runtime, sent, refreshes } = yield* runtimeWith({ before: without, answer: () => ok(messageWire()) })
+      const exit = yield* Permissions.require(textOf(runtime), ["SendMessages"]).pipe(Effect.exit)
+      expect(failureOf(exit)).toEqual({ tag: "UnknownChannel", categories: ["state"], cause: "PreflightDecision" })
+      expect(yield* refreshes).toEqual([`refresh ${textId}`])
+      expect(sent).toEqual([])
+    })
+  )
+
+  it.effect("an operation is sent unchecked, and Discord decides", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(now)
+      const { runtime, sent } = yield* runtimeWith({ before: without, answer: () => ok(messageWire()) })
+      expect((yield* textOf(runtime).send({ content: "hi" })).degraded).toEqual([])
+      expect(sent.map((request) => `${request.method} ${request.path}`)).toEqual([`POST /channels/${textId}/messages`])
+    })
+  )
+
+  it.effect("the pins readback cannot tell, and reports nothing degraded", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(now)
+      const { runtime } = yield* runtimeWith({ before: without, answer: () => ok({ items: [] }) })
+      expect(yield* textOf(runtime).pins()).toEqual({ messages: [], degraded: [] })
+    })
+  )
+})
+
+describe("the pins readback", () => {
+  it.effect("reports an empty list read without ReadMessageHistory as degraded (H-107), and fails with the Transient when its refresh gets no answer", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(now)
+      const unread = yield* runtimeWith({ before: sendable("ViewChannel"), answer: () => ok({ items: [] }) })
+      expect(yield* textOf(unread.runtime).pins()).toEqual({ messages: [], degraded: ["ReadMessageHistory"] })
+      const offline = new NetworkError({ cause: new NoResponse({ route: "/channels/{channel.id}", method: "GET", reason: "transport", afterMs: 1 }) })
+      const missing = snapshotOf({ roles: [role(everyone, set("ViewChannel"), 0)], channels: [], botRoles: [] })
+      const failing = yield* runtimeWith({ before: missing, refreshFails: offline, answer: () => ok({ items: [] }) })
+      const exit = yield* textOf(failing.runtime).pins().pipe(Effect.provideService(Preflight.Mode, "bypass"), Effect.exit)
+      expect(failureOf(exit)).toEqual({ tag: "NetworkError", categories: ["transient"], cause: "NoResponse" })
+      expect(failing.sent.map((request) => `${request.method} ${request.path}`)).toEqual([`GET /channels/${textId}/messages/pins?limit=50`])
+    })
+  )
+})
+
 describe("Channels.get", () => {
   it.effect("gives a known channel's handle from the state, and MissingViewChannel for an unseen or obfuscated one, without a request", () =>
     Effect.gen(function* () {
@@ -331,4 +388,116 @@ describe("threads", () => {
       expect(failureOf(yield* channelHandle(runtime, { guildId, id: threadId, kind: "public-thread" }).join().pipe(Effect.exit))).toMatchObject({ tag: "MissingViewChannel" })
     })
   )
+})
+
+describe("every operation's request (the M6 verifier)", () => {
+  // nothing here may depend on preflight: each operation runs in bypass mode, over a client holding it to its route
+  const quiet = { allowed_mentions: { parse: [] } }
+  const forumId = ChannelId.make("300000000000000005")
+  const tag = ForumTagId.make("700000000000000001")
+  const emojiId = EmojiId.make("123456789012345678")
+  const messageId = "500000000000000001"
+  const recentId = (minutesAgo: number) => MessageId.make(String(BigInt(now - minutesAgo * 60_000 - 1_420_070_400_000) << 22n))
+  const until = new Date(now + 60_000)
+  const state = snapshotOf({ roles: [role(everyone, set(), 0)], channels: [channel("text"), thread("public-thread")], botRoles: [] })
+  const threadWire = { id: "300000000000000077", type: 11, guild_id: guildId, parent_id: textId, thread_metadata: { archived: false, locked: false } }
+  const memberWire = { user: { id: otherId }, roles: [] }
+  const answerFor = (method: string, path: string): Answer => {
+    if (path.endsWith("/threads")) return ok(threadWire)
+    if (path.startsWith("/channels/") && path.split("/").length === 3) return ok({ id: path.split("/")[2], type: 0, guild_id: guildId })
+    if (path.includes("/messages/pins?")) return ok({ items: [] })
+    if (method === "PATCH" && path.startsWith("/guilds/")) return ok(memberWire)
+    if (method === "POST" && (path.endsWith("/messages") || path.endsWith("/crosspost"))) return ok(messageWire())
+    if (method === "PATCH" && path.includes("/messages/")) return ok(messageWire())
+    return empty
+  }
+  const own = (runtime: Runtime) => {
+    const handle = messageHandle(runtime, { guildId, id: textId, kind: "text" }, decodeMessage(messageWire()))
+    if (handle.author !== "self") throw new Error("not the bot's message")
+    return handle
+  }
+  const foreign = (runtime: Runtime) => messageHandle(runtime, { guildId, id: textId, kind: "text" }, decodeMessage(messageWire({ author: { id: otherId, bot: true } })))
+  const announcementMessage = (runtime: Runtime) => {
+    const handle = messageHandle(runtime, { guildId, id: textId, kind: "announcement" }, decodeMessage(messageWire()))
+    if (handle.author !== "self") throw new Error("not the bot's message")
+    return handle
+  }
+  const publicThread = (runtime: Runtime) => channelHandle(runtime, { guildId, id: threadId, kind: "public-thread" })
+  const member = (runtime: Runtime) => memberHandle(runtime, guildId, Schema.decodeUnknownSync(Schemas.Member)(memberWire))
+  const messagePath = `/channels/${textId}/messages/${messageId}`
+  const memberPath = `/guilds/${guildId}/members/${otherId}`
+
+  const cases: ReadonlyArray<readonly [name: string, run: (runtime: Runtime) => Effect.Effect<unknown, { readonly _tag: string }>, expected: Sent]> = [
+    ["channel.send", (runtime) => textOf(runtime).send({ content: "hi" }), { method: "POST", path: `/channels/${textId}/messages`, body: { ...quiet, content: "hi" } }],
+    [
+      "channel.send with a file",
+      (runtime) => textOf(runtime).send({ content: "hi", files: [{ name: "lab.txt", data: new TextEncoder().encode("lab\n"), contentType: "text/plain" }] }),
+      { method: "POST", path: `/channels/${textId}/messages`, body: [{ name: "files[0]", file: { name: "lab.txt", type: "text/plain", size: 4 } }, { name: "payload_json", value: { ...quiet, content: "hi" } }] }
+    ],
+    ["message.edit", (runtime) => own(runtime).edit({ content: "edited" }), { method: "PATCH", path: messagePath, body: { ...quiet, content: "edited" } }],
+    ["message.delete (own)", (runtime) => own(runtime).delete(), { method: "DELETE", path: messagePath, body: null }],
+    ["message.delete (foreign)", (runtime) => foreign(runtime).delete(), { method: "DELETE", path: messagePath, body: null }],
+    ["message.crosspost", (runtime) => announcementMessage(runtime).crosspost(), { method: "POST", path: `${messagePath}/crosspost`, body: null }],
+    ["message.react (unicode)", (runtime) => foreign(runtime).react({ origin: "unicode", name: "👍" }), { method: "PUT", path: `${messagePath}/reactions/${encodeURIComponent("👍")}/@me`, body: null }],
+    ["message.react (guild emoji)", (runtime) => foreign(runtime).react({ origin: "guild", id: emojiId, name: "lab_emoji" }), { method: "PUT", path: `${messagePath}/reactions/lab_emoji:${emojiId}/@me`, body: null }],
+    ["message.pin", (runtime) => own(runtime).pin(), { method: "PUT", path: `/channels/${textId}/messages/pins/${messageId}`, body: null }],
+    ["message.unpin", (runtime) => own(runtime).unpin(), { method: "DELETE", path: `/channels/${textId}/messages/pins/${messageId}`, body: null }],
+    ["message.createThread", (runtime) => own(runtime).createThread({ name: "lab-thread" }), { method: "POST", path: `${messagePath}/threads`, body: { name: "lab-thread" } }],
+    ["channel.pins", (runtime) => textOf(runtime).pins(), { method: "GET", path: `/channels/${textId}/messages/pins?limit=50`, body: null }],
+    [
+      "channel.bulkDelete",
+      (runtime) => textOf(runtime).bulkDelete([recentId(2), recentId(1)]),
+      { method: "POST", path: `/channels/${textId}/messages/bulk-delete`, body: { messages: [recentId(2), recentId(1)] } }
+    ],
+    ["channel.createThread (public)", (runtime) => textOf(runtime).createThread({ name: "lab-thread" }), { method: "POST", path: `/channels/${textId}/threads`, body: { name: "lab-thread", type: 11 } }],
+    ["channel.createThread (private)", (runtime) => textOf(runtime).createThread({ name: "lab-thread", private: true }), { method: "POST", path: `/channels/${textId}/threads`, body: { name: "lab-thread", type: 12 } }],
+    [
+      "channel.createThread (announcement)",
+      (runtime) => channelHandle(runtime, { guildId, id: textId, kind: "announcement" }).createThread({ name: "lab-thread" }),
+      { method: "POST", path: `/channels/${textId}/threads`, body: { name: "lab-thread", type: 10 } }
+    ],
+    [
+      "forum.createPost",
+      (runtime) => channelHandle(runtime, { guildId, id: forumId, kind: "forum" }).createPost({ name: "lab-post", message: { content: "hi" }, tags: [tag] }),
+      { method: "POST", path: `/channels/${forumId}/threads`, body: { name: "lab-post", applied_tags: [tag], message: { ...quiet, content: "hi" } } }
+    ],
+    [
+      "forum.createPost (untagged)",
+      (runtime) => channelHandle(runtime, { guildId, id: forumId, kind: "forum" }).createPost({ name: "lab-post", message: { content: "hi" } }),
+      { method: "POST", path: `/channels/${forumId}/threads`, body: { name: "lab-post", message: { ...quiet, content: "hi" } } }
+    ],
+    ["thread.join", (runtime) => publicThread(runtime).join(), { method: "PUT", path: `/channels/${threadId}/thread-members/@me`, body: null }],
+    ["thread.leave", (runtime) => publicThread(runtime).leave(), { method: "DELETE", path: `/channels/${threadId}/thread-members/@me`, body: null }],
+    ["thread.addMember", (runtime) => publicThread(runtime).addMember(UserId.make(otherId)), { method: "PUT", path: `/channels/${threadId}/thread-members/${otherId}`, body: null }],
+    ["thread.setArchived(true)", (runtime) => publicThread(runtime).setArchived(true), { method: "PATCH", path: `/channels/${threadId}`, body: { archived: true } }],
+    ["thread.setArchived(false)", (runtime) => publicThread(runtime).setArchived(false), { method: "PATCH", path: `/channels/${threadId}`, body: { archived: false } }],
+    ["thread.setLocked(true)", (runtime) => publicThread(runtime).setLocked(true), { method: "PATCH", path: `/channels/${threadId}`, body: { locked: true } }],
+    ["thread.setLocked(false)", (runtime) => publicThread(runtime).setLocked(false), { method: "PATCH", path: `/channels/${threadId}`, body: { locked: false } }],
+    ["thread.delete", (runtime) => publicThread(runtime).delete(), { method: "DELETE", path: `/channels/${threadId}`, body: null }],
+    [
+      "channel.edit",
+      (runtime) => textOf(runtime).edit({ name: "lab-renamed", topic: "lab topic", slowmodeSeconds: 5 }),
+      { method: "PATCH", path: `/channels/${textId}`, body: { name: "lab-renamed", topic: "lab topic", rate_limit_per_user: 5 } }
+    ],
+    ["member.addRole", (runtime) => member(runtime).addRole(roleA), { method: "PUT", path: `${memberPath}/roles/${roleA}`, body: null }],
+    ["member.removeRole", (runtime) => member(runtime).removeRole(roleA), { method: "DELETE", path: `${memberPath}/roles/${roleA}`, body: null }],
+    ["member.setNickname", (runtime) => member(runtime).setNickname("lab-nick"), { method: "PATCH", path: memberPath, body: { nick: "lab-nick" } }],
+    ["member.timeout", (runtime) => member(runtime).timeout(until), { method: "PATCH", path: memberPath, body: { communication_disabled_until: until.toISOString() } }],
+    ["member.timeout(null)", (runtime) => member(runtime).timeout(null), { method: "PATCH", path: memberPath, body: { communication_disabled_until: null } }],
+    ["member.kick", (runtime) => member(runtime).kick(), { method: "DELETE", path: memberPath, body: null }],
+    ["member.ban", (runtime) => member(runtime).ban(), { method: "PUT", path: `/guilds/${guildId}/bans/${otherId}`, body: { delete_message_seconds: 0 } }],
+    ["member.ban (deleteMessageSeconds)", (runtime) => member(runtime).ban({ deleteMessageSeconds: 60 }), { method: "PUT", path: `/guilds/${guildId}/bans/${otherId}`, body: { delete_message_seconds: 60 } }]
+  ]
+
+  for (const [name, run, expected] of cases) {
+    it.effect(`${name}: ${expected.method} ${expected.path}`, () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(now)
+        const { runtime, sent } = yield* runtimeWith({ before: state, answer: answerFor })
+        const exit = yield* run(runtime).pipe(Effect.provideService(Preflight.Mode, "bypass"), Effect.exit)
+        expect(Exit.isSuccess(exit) ? "succeeded" : Cause.pretty(exit.cause)).toBe("succeeded")
+        expect(sent).toEqual([expected])
+      })
+    )
+  }
 })
