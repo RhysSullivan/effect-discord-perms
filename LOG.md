@@ -1532,3 +1532,8 @@ Live, in order (each alone under the lock):
   - the third full run, `run --write` (486 rows, 3,224 s, 11,065 requests, 2,420 writes, 588 invalid, 7 reaction and
     1 channel 429s retried by dfx): 0 mismatches, every row `agree`, 229 rows with a recompute; the table was
     committed (`df28ad2`).
+- Exit evidence:
+  - `bun run verify:live` (`run --write --compare`, on `df28ad2` and its LOG commit): exit 0; 486 scenarios in
+    3,131 s, 11,068 requests, 2,421 writes, 592 invalid, 429s retried by dfx on reactions (11) and one channel edit;
+    oracle available; `mismatches: 0` (so no `preflight-wiring` and no `recompute-vs-preflight` row); `compare:
+    identical to the previous table`; `run ok`. The guild's role bucket had 89 edits at its start.
