@@ -6,7 +6,8 @@
  * the permission state, and it can change between a check and a request.
  *
  * This barrel is the public API. Internal modules (the bot build's `BotInternals`, the handle constructors, the
- * harness's seams) are not exported.
+ * harness's seams) are not exported. `CustomId` is exported as a type only: a `custom_id` is built by a
+ * `ComponentRoute` (§2.9), never by its schema's `make`.
  */
 export * from "./Snowflake.ts"
 export * from "./errors/index.ts"
@@ -49,7 +50,7 @@ export type { CreateMessage, CreateMessageV2, EditMessage, Embed, Emoji, FileUpl
 export {
   type ActionRow,
   type Button,
-  CustomId,
+  type CustomId,
   type InteractiveButton,
   type Invalid,
   type LinkButton,

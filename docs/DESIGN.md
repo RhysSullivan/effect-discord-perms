@@ -559,7 +559,8 @@ size.
 - `linkButton(input)` and `premiumButton(input)` still give excess-property
   errors for pre-declared buttons (`'customId' does not exist in type 'LinkButtonInput'`).
 - A `customId` is a branded `CustomId`, produced only by a `ComponentRoute`
-  (§2.9).
+  (§2.9). (After the M6 verifier) The public barrel exports `CustomId` as a type
+  only, so its schema's `make` is not public API.
 
 **`allowed_mentions` and flags at the wire.** `ToDfx` always sends
 `allowed_mentions: { parse: [] }`, plus the explicit opt-ins:
@@ -2617,7 +2618,7 @@ the families leave without a first-failure row a flip control can be made of,
 one row is derived from the first family row of that operation in ID order (not
 timed out, no administrator grant): every flag the request needs granted, then
 that flag taken away, kept only when the prediction's failures are exactly that
-flag and its flip passes. 23 rows (for example ViewChannel in voice pins, thread
+flag and its flip passes. 24 rows (for example ViewChannel in voice pins, thread
 unarchive and thread message edits; ManageMessages for foreign deletes and bulk
 deletes; PinMessages for unpinning; ModerateMembers for a timeout). A key whose
 family rows are all blind (a thread under a parent that hides View resolves
