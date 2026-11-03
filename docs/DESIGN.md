@@ -1513,7 +1513,9 @@ The stages run in this order:
    nothing, H-004):
    - obfuscated (or unseen) means no View;
    - a private thread is visible only to members and to holders of
-     ManageThreads (threads.mdx; H-033, H-047): otherwise no View;
+     ManageThreads (threads.mdx; H-033, H-047): otherwise no View. (M6 live,
+     `timeoutHidesPrivateThreads`: the timeout counts first, so a timed-out
+     member's ManageThreads shows it no private thread it is not in.);
    - no View means nothing (H-012);
    - on non-thread channels, no Send masks MentionEveryone, SendTTSMessages,
      AttachFiles and EmbedLinks (H-013, docs version, D22);
@@ -2565,7 +2567,7 @@ had no ViewChannel flip control).
 
 The expected total is 234 pairwise rows, about 110 targeted rows, about 45
 flip rows, about 95 rule rows and about 16 intent sessions, roughly **500
-scenarios**. (M6: 485 scenarios in the phase-1 catalog: 304 family rows, 23
+scenarios**. (M6: 486 scenarios in the phase-1 catalog: 304 family rows, 24
 coverage rows, 94 flip controls and 64 rule rows; the intent sessions come in
 M7.) (M4 has 229 pairwise rows, 72 targeted rows and 62 flip controls, 363
 scenarios in all; the rule rows and intent sessions come in M6-M8.)

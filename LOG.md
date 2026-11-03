@@ -327,6 +327,17 @@ registry expects, and where Discord accepted what the types forbade, the types c
   the replay holds to these rows.
 - **M6: a message create aimed at a bot's user ID answers 404 10003** (`R-ids-distinct`'s invalid side).
 
+M6, the whole matrix:
+- **M6, H-047 refined: a timed-out member's ManageThreads shows it no private thread it is not in.** The first full
+  M6 run had one mismatch, `flip-control: flip/thread/private/delete/subject/view/timed-out/not-member`: the
+  subject, timed out, holding View and ManageThreads, creator of a private thread it is not in, got 50001 for
+  `getChannel` on the thread (step (a), `masks unseen`) and for the delete, where the resolver predicted it could see
+  the thread as a moderator and delete it as the creator. The oracle listed ManageThreads missing (the timeout
+  removes it, H-020). `ResolverRules.timeoutHidesPrivateThreads` (source `live`) applies the timeout before the
+  private-thread rule; the blind flip is then no longer clean, so the catalog drops it, and `catalog/coverage.ts`
+  derives `coverage/thread/announcement-thread/delete/subject/op-flag/normal/member/without-ViewChannel` and its
+  flip for (thread.delete, ViewChannel) instead (486 scenarios).
+
 ## dfx deviations
 
 Where dfx got in the way and we wrapped or adapted it, and why.
@@ -879,7 +890,7 @@ the same commit.
   (ViewChannel in thread sends, edits, joins, reactions, pins, deletes, member adds, archives and locks), thread
   deletes by someone other than the creator, and the role-mention rule. `catalog/coverage.ts` derives one row per
   missing pair from a family row (every needed flag granted, then that flag removed, kept only when the prediction's
-  failures are exactly that flag and its flip passes; 23 rows), `flips.ts` takes a blind row's flip when the
+  failures are exactly that flag and its flip passes; 24 rows), `flips.ts` takes a blind row's flip when the
   prediction shows it clean (its failures the original's minus the first), the threads catalog gains
   `thread/targeted/delete-harness-thread` on a new `harness-thread` fixture (a throwaway thread the harness creates,
   since deleting a provisioned thread mid-run is not possible), and the send catalog gains
