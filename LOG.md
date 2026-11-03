@@ -1537,3 +1537,12 @@ Live, in order (each alone under the lock):
     3,131 s, 11,068 requests, 2,421 writes, 592 invalid, 429s retried by dfx on reactions (11) and one channel edit;
     oracle available; `mismatches: 0` (so no `preflight-wiring` and no `recompute-vs-preflight` row); `compare:
     identical to the previous table`; `run ok`. The guild's role bucket had 89 edits at its start.
+  - then a fresh `bun --no-env-file harness/main.ts run --compare` (a new process, an hour later): exit 0; 486
+    scenarios in 3,123 s, 11,072 requests, 2,423 writes, 593 invalid, 13 reaction 429s retried by dfx; oracle
+    available; `mismatches: 0`; `compare: identical to the previous table`; `run ok`.
+  - `bun run rules`: `rules ok 43 rule(s) (38 live pair, 0 escalated, 3 pure-typing, 2 other not-live), 9 fail
+    fixture(s), 76 live sides checked against the table, flag coverage over 422 matrix row(s)`; the M7 events check
+    is "not checked yet" (it needs `src/gateway/Intents.ts` and the intent sessions).
+  - `bun run verify:offline` exited 0 (gen:errors up to date; typecheck; 1,330 tests in 42 files, the replay's 422
+    matrix rows and 64 rule rows among them; test:types 8 pass and 9 fail fixtures, 51 diagnostics, largest gated
+    498 characters; hover 3 files, 13 markers; rules as above; budget nothing to measure yet).
