@@ -61,3 +61,8 @@ export type EmojiId = typeof EmojiId.Type
 export const StickerId = SnowflakeString.pipe(Schema.brand("StickerId"))
 /** A sticker ID. */
 export type StickerId = typeof StickerId.Type
+
+/** A forum or media channel's tag ID (a post's `applied_tags`). */
+export const ForumTagId = SnowflakeString.pipe(Schema.brand("ForumTagId"))
+/** A forum or media channel's tag ID (a post's `applied_tags`). */
+export type ForumTagId = typeof ForumTagId.Type

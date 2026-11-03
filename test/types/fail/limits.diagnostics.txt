@@ -1,0 +1,23 @@
+L27:53 TS2345
+Argument of type '"ContentTooLong"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingSendMessages" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RateLimited" | "RequestTimedOut" | "UnknownChannel" | readonly [...]'.
+
+L30:53 TS2345
+Argument of type '"EmbedTooLarge"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingSendMessages" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RateLimited" | "RequestTimedOut" | "UnknownChannel" | readonly [...]'.
+
+L33:53 TS2345
+Argument of type '"PollTooLarge"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingSendMessages" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RateLimited" | "RequestTimedOut" | "UnknownChannel" | readonly [...]'.
+
+L36:64 TS2345
+Argument of type '"NameTooLong"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MaximumActiveThreads" | "MissingCreatePublicThreads" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RequestTimedOut" | "UnknownChannel" | readonly [...]'.
+
+L39:54 TS2345
+Argument of type '"TopicTooLong"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingManageChannels" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RequestTimedOut" | "TwoFactorRequired" | "UnknownChannel" | readonly [...]'.
+
+L42:57 TS2345
+Argument of type '"SlowmodeOutOfRange"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingManageChannels" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RequestTimedOut" | "TwoFactorRequired" | "UnknownChannel" | readonly [...]'.
+
+L45:47 TS2345
+Argument of type '"NicknameTooLong"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingManageNicknames" | "NetworkError" | "PermissionDeniedUnattributed" | "RequestTimedOut" | "TargetAboveInHierarchy" | "UnknownMember" | readonly [...]'.
+
+L48:43 TS2345
+Argument of type '"TimeoutTooLong"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingModerateMembers" | "NetworkError" | "PermissionDeniedUnattributed" | "RequestTimedOut" | "TargetAboveInHierarchy" | "TargetIsAdministrator" | "UnknownMember" | readonly [...]'.

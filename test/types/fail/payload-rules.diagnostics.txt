@@ -1,0 +1,26 @@
+L15:11 TS2741
+Property '"a message needs content, embeds, files, stickers, a poll or components"' is missing in type '{}' but required in type '{ readonly "a message needs content, embeds, files, stickers, a poll or components": never; }'.
+
+L18:11 TS2345
+Argument of type '{ content: ""; embeds: []; }' is not assignable to parameter of type 'CreateArg<{ readonly content: ""; readonly embeds: readonly []; }>'.
+  Property '"a message needs content, embeds, files, stickers, a poll or components"' is missing in type '{ content: ""; embeds: []; }' but required in type '{ readonly "a message needs content, embeds, files, stickers, a poll or components": never; }'.
+
+L21:38 TS2322
+Type '"hi"' is not assignable to type '"hi" & Invalid<"content is not allowed in a componentsV2 message">'.
+  Type 'string' is not assignable to type 'Invalid<"content is not allowed in a componentsV2 message">'.
+
+L24:38 TS2322
+Type '[{ title: "a title"; description: "a fairly long description to see the size"; }]' is not assignable to type 'readonly [{ readonly title: "a title"; readonly description: "a fairly long description to see the size"; }] & Invalid<"embeds is not allowed in a componentsV2 message">'.
+  Property '[InvalidId]' is missing in type '[{ title: "a title"; description: "a fairly long description to see the size"; }]' but required in type 'Invalid<"embeds is not allowed in a componentsV2 message">'.
+
+L27:28 TS2322
+Type 'true' is not assignable to type 'true & Invalid<"ephemeral is not valid when creating a message">'.
+  Type 'boolean' is not assignable to type 'Invalid<"ephemeral is not valid when creating a message">'.
+
+L30:27 TS2322
+Type 'true' is not assignable to type 'true & Invalid<"suppressNotifications is not valid when editing a message">'.
+  Type 'boolean' is not assignable to type 'Invalid<"suppressNotifications is not valid when editing a message">'.
+
+L33:28 TS2322
+Type '{ parse: ["everyone"]; }' is not assignable to type '{ readonly parse: readonly ["everyone"]; } & Invalid<"allowed_mentions is not valid when creating a message">'.
+  Property '[InvalidId]' is missing in type '{ parse: ["everyone"]; }' but required in type 'Invalid<"allowed_mentions is not valid when creating a message">'.

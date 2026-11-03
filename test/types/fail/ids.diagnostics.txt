@@ -1,0 +1,9 @@
+L11:14 TS2345
+Argument of type 'string & Brand<"UserId">' is not assignable to parameter of type 'string & Brand<"ChannelId">'.
+  Type 'string & Brand<"UserId">' is not assignable to type 'Brand<"ChannelId">'.
+    Types of property '[TypeId]' are incompatible.
+      Property 'ChannelId' is missing in type '{ readonly UserId: "UserId"; }' but required in type '{ readonly ChannelId: "ChannelId"; }'.
+
+L14:14 TS2345
+Argument of type 'string' is not assignable to parameter of type 'string & Brand<"ChannelId">'.
+  Type 'string' is not assignable to type 'Brand<"ChannelId">'.

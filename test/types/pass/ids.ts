@@ -1,12 +1,13 @@
 // Branded snowflake IDs (DESIGN §2.1): each brand is its own type, none is assignable to another or from a
-// plain string, and every one is still a string. The fail fixture with the mixing diagnostics comes with the
-// rule's live pair (R-ids-distinct, M6).
+// plain string, and every one is still a string. The fail side, with the mixing diagnostics, is
+// test/types/fail/ids.ts (R-ids-distinct, whose live pair is in harness/scenario/catalog/rules.ts).
 import { expectTypeOf } from "vitest"
 import {
   ApplicationId,
   ChannelId,
   CommandId,
   EmojiId,
+  ForumTagId,
   GuildId,
   InteractionId,
   MessageId,
@@ -16,7 +17,7 @@ import {
 } from "../../../src/Snowflake.ts"
 
 /** Every brand, as a tuple of the ID types. */
-type Ids = [ChannelId, GuildId, UserId, RoleId, MessageId, ApplicationId, CommandId, InteractionId, EmojiId, StickerId]
+type Ids = [ChannelId, GuildId, UserId, RoleId, MessageId, ApplicationId, CommandId, InteractionId, EmojiId, StickerId, ForumTagId]
 
 /** The pairs (I, J), I != J, where the I-th ID type is assignable to the J-th. */
 type Assignable = {
@@ -41,3 +42,4 @@ expectTypeOf(CommandId.make).returns.toEqualTypeOf<CommandId>()
 expectTypeOf(InteractionId.make).returns.toEqualTypeOf<InteractionId>()
 expectTypeOf(EmojiId.make).returns.toEqualTypeOf<EmojiId>()
 expectTypeOf(StickerId.make).returns.toEqualTypeOf<StickerId>()
+expectTypeOf(ForumTagId.make).returns.toEqualTypeOf<ForumTagId>()

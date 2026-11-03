@@ -1,0 +1,30 @@
+L13:40 TS2322
+Type 'InteractiveButton' is not assignable to type 'InteractiveButton & Invalid<"an action row holds 1 to 5 buttons">'.
+  Property '[InvalidId]' is missing in type 'InteractiveButton' but required in type 'Invalid<"an action row holds 1 to 5 buttons">'.
+
+L22:3 TS2322
+Type '{ kind: "button"; style: "link"; label: "Docs"; url: "https://example.com/docs"; }' is not assignable to type '{ readonly kind: "button"; readonly style: "link"; readonly label: "Docs"; readonly url: "https://example.com/docs"; } & Invalid<"an action row holds 1 to 5 buttons">'.
+  Property '[InvalidId]' is missing in type '{ kind: "button"; style: "link"; label: "Docs"; url: "https://example.com/docs"; }' but required in type 'Invalid<"an action row holds 1 to 5 buttons">'.
+
+L27:27 TS2322
+Type 'StringSelect' is not assignable to type 'StringSelect & Invalid<"a select menu must be alone in its row">'.
+  Property '[InvalidId]' is missing in type 'StringSelect' but required in type 'Invalid<"a select menu must be alone in its row">'.
+
+L27:35 TS2322
+Type 'InteractiveButton' is not assignable to type 'InteractiveButton & Invalid<"a select menu must be alone in its row">'.
+  Property '[InvalidId]' is missing in type 'InteractiveButton' but required in type 'Invalid<"a select menu must be alone in its row">'.
+
+L30:108 TS2322
+Type 'string & Brand<"CustomId">' is not assignable to type 'string & Brand<"CustomId"> & Invalid<"link buttons have no customId">'.
+  Type 'string & Brand<"CustomId">' is not assignable to type 'Invalid<"link buttons have no customId">'.
+    Property '[InvalidId]' is missing in type 'String & Brand<"CustomId">' but required in type 'Invalid<"link buttons have no customId">'.
+
+L33:85 TS2322
+Type '"Buy"' is not assignable to type '"Buy" & Invalid<"premium buttons have no label">'.
+  Type 'string' is not assignable to type 'Invalid<"premium buttons have no label">'.
+
+L36:77 TS2353
+Object literal may only specify known properties, and 'customId' does not exist in type 'LinkButtonInput'.
+
+L39:52 TS2353
+Object literal may only specify known properties, and 'label' does not exist in type 'PremiumButtonInput'.

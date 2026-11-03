@@ -1,0 +1,32 @@
+L31:51 TS2345
+Argument of type '"MissingEmbedLinks"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingSendMessages" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RateLimited" | "RequestTimedOut" | "UnknownChannel" | readonly [...]'.
+
+L34:51 TS2345
+Argument of type '"MissingAttachFiles"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingSendMessages" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RateLimited" | "RequestTimedOut" | "UnknownChannel" | readonly [...]'.
+
+L37:51 TS2345
+Argument of type '"MissingSendPolls"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingSendMessages" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RateLimited" | "RequestTimedOut" | "UnknownChannel" | readonly [...]'.
+
+L40:51 TS2345
+Argument of type '"MissingReadMessageHistory"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingSendMessages" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RateLimited" | "RequestTimedOut" | "UnknownChannel" | readonly [...]'.
+
+L43:111 TS2345
+Argument of type '"MissingUseExternalStickers"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingSendMessages" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RateLimited" | "RequestTimedOut" | "UnknownChannel" | readonly [...]'.
+
+L46:53 TS2345
+Argument of type '"MissingSendMessages"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingSendMessagesInThreads" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RateLimited" | "RequestTimedOut" | "ThreadLocked" | "UnknownChannel" | readonly [...]'.
+
+L49:35 TS2345
+Argument of type '"MissingManageMessages"' is not assignable to parameter of type '"DiscordUnavailable" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RequestTimedOut" | "UnknownMessage" | readonly ["DiscordUnavailable" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "RequestTimedOut" | "UnknownMessage", ...("DiscordUnavailable" | ... 4 more ...'.
+
+L52:72 TS2345
+Argument of type 'readonly "SendTTSMessages"[]' is not assignable to parameter of type 'readonly "nothing dropped"[]'.
+  Type '"SendTTSMessages"' is not assignable to type '"nothing dropped"'.
+
+L55:91 TS2345
+Argument of type 'readonly "UseExternalEmojis"[]' is not assignable to parameter of type 'readonly "nothing dropped"[]'.
+  Type '"UseExternalEmojis"' is not assignable to type '"nothing dropped"'.
+
+L58:119 TS2345
+Argument of type 'readonly "MentionEveryone"[]' is not assignable to parameter of type 'readonly "nothing dropped"[]'.
+  Type '"MentionEveryone"' is not assignable to type '"nothing dropped"'.
