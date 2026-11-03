@@ -1615,3 +1615,55 @@ Live, in order (each alone under the lock):
   - `bun run verify:offline` exited 0 (gen:errors up to date; typecheck; 1,330 tests in 42 files, the replay's 422
     matrix rows and 64 rule rows among them; test:types 8 pass and 9 fail fixtures, 51 diagnostics, largest gated
     498 characters; hover 3 files, 13 markers; rules as above; budget nothing to measure yet).
+
+#### After the M6 verifier
+
+The verifier passed the milestone's runs but found one major and five minor problems. Each is fixed (details under
+"Live findings" and "Design deviations", "After the M6 verifier"):
+
+- **Nothing checked the request an operation sends** (major): `RouteCheck` holds every request to its declared
+  method and route; every matrix row compares the library's request with the raw call's (`request-wiring`
+  otherwise); `operations-runtime.test.ts` asserts the method, path and body of 35 operations and
+  `request-check.test.ts` runs the comparison over the catalog's 158 (operation, lab channel) pairs offline.
+- **`Permissions.require` granted what it did not check** (minor): it fails with `UnknownChannel` when the state
+  cannot resolve the channel; `perform`'s unchecked send in that state is documented (§4.7).
+- **The pins readback dropped its `Transient`** (minor): the `Transient` fails the call.
+- **§2.3 said a literal over a limit is a defect** (minor): §2.3 describes what is built.
+- **The content-length pair did not settle open question 7** (minor): the invalid side is 2001 ASCII characters,
+  and Discord refused it, so content is counted in code points (H-121, "Live findings").
+- **Two inaccuracies** (minor): `CustomId` is exported as a type only; §5.9 counts 24 coverage rows.
+
+Unit tests: 1,380 in 44 files (M6 ended with 1,330 in 42; new `route-check.test.ts` and `request-check.test.ts`).
+Mutation checks (each reverted, each failed the tests named): the verifier's five (unpin as `createPin`,
+`removeRole` as `addGuildMemberRole`, `setLocked` as `{ archived: locked }`, `setArchived` as `{ archived: true }`,
+a private thread as type 11) each fail `operations-runtime.test.ts` and `request-check.test.ts`; unpin declared
+`PUT` fails both; the route check disabled fails `route-check.test.ts`; `require` granting on an undecidable state
+and the pins readback dropping its `Transient` each fail their `operations-runtime.test.ts` case.
+
+Live, in order (each alone under the lock, on minisforum):
+
+- `run --only 'rule/**'` (64 scenarios, 398 s, 1,306 requests, 277 writes, no 429): 0 mismatches;
+  `rule/text-send/raw-content-over` (2001 ASCII characters) was refused with 400 50035 `BASE_TYPE_MAX_LENGTH` on
+  `content`, and `typed-content-max` (2000 emoji) succeeded;
+- `verify:live` at 09:25 stopped before any scenario: `LabCheckFailed role budget` (61 edits left, 85 needed);
+- `verify:live` on the first request-check design ((c) and (d) re-run over the stub) was stopped by SIGINT at row
+  88 after row 74's `recompute-vs-preflight` (step (d) `RequestTimedOut`; "Design deviations"); the table was not
+  written;
+- **exit run W** on `91b6e47`: `bun run verify:live` (`run --write --compare`) exited 0: role budget 94 left (85
+  needed), 486 scenarios in 3,243 s, 11,087 requests, 2,430 writes, 596 invalid, 429s retried by dfx on one channel
+  edit and 15 reactions, oracle available, **0 mismatches**, `compare: identical to the previous table`; it wrote
+  the same bytes (`da6876af...c937`, 607,611 bytes, committed in `df28ad2`). The request check ran on 420 rows and
+  found every request the same: 191 compared step (b) (preflight passed, no (d)), 229 compared step (d), none needed
+  the dry fallback; the other 66 are the 64 rule rows (probes) and the two `setup-unsupported` rows.
+- **exit run B**, after the bucket refilled, same code (`446d476`, only LOG.md and DESIGN.md changed since W): `bun
+  --no-env-file harness/main.ts run --compare` in a fresh process exited 0: role budget 93 left (85 needed), 486
+  scenarios in 3,177 s, 11,077 requests, 2,418 writes, 588 invalid, 429s retried by dfx on one channel edit and 7
+  reactions, oracle available, **0 mismatches**, `compare: identical to the previous table`, `run ok`. The request
+  check again found every request the same on 420 rows (191 by step (b), 229 by step (d), no fallback), and the
+  content pair repeated (2001 ASCII characters refused with `BASE_TYPE_MAX_LENGTH`, 2000 emoji accepted). The lock
+  was gone afterwards.
+- After B: `bun run verify:offline` exited 0 (gen:errors up to date; typecheck; 1,380 tests in 44 files; test:types
+  8 pass and 9 fail fixtures, 51 diagnostics, largest gated 498 characters; hover 3 files, 13 markers; rules; budget
+  nothing to measure yet), and `bun run rules` gave `rules ok 43 rule(s) (38 live pair, 0 escalated, 3 pure-typing,
+  2 other not-live), 9 fail fixture(s), 76 live sides checked against the table, flag coverage over 422 matrix
+  row(s)`, with the M7 events check "not checked yet".
