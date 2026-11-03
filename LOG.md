@@ -956,6 +956,54 @@ the same commit.
   type fixtures (`operations-table.ts`, `channels.ts`), one diagnostic snapshot and two hover snapshots change
   with it. No live row deletes a channel under a message, so this rests on the shared 10003 of every channel
   route (H-080) rather than on a recorded answer.
+- **After the M6 verifier: nothing checked the request an operation sends** (major; §4.8 and §5.10 updated). Each
+  `Plan` declares its route apart from its dfx `call`; step (b) only required the dry-run stub to be reached; a
+  success row's live request is step (c)'s alone; and a wrong request on a refused row is usually refused for the same
+  reason. The verifier's five mutations each kept all 1,330 tests green and would have passed the live matrix: unpin
+  sent as `createPin`, `removeRole` as `addGuildMemberRole`, `setLocked` as `{ archived }`, `setArchived(false)` as
+  `{ archived: true }`, and a private thread created as type 11. M6's line "(c) and (d) are one request" (below) was
+  a claim nothing verified. Three fixes:
+  - `RouteCheck` (`src/rest/RouteCheck.ts`): `Request.send` declares its route around the dfx call, and the bot
+    build's base client requires the request dfx builds to have that method and a path the template matches, else a
+    defect naming the declared route and the path's shape (`{…}` for every segment that is not a lowercase word, so
+    an interaction token in a path never reaches it). It checks the library and the harness's raw calls alike.
+  - The request check in every matrix row: the operation again in bypass mode over the stub (step (d)'s request),
+    and the raw call over the stub; the stub records the method, the path with its IDs and sorted query, and the
+    body (a multipart body by its parts). The library's request, and step (b)'s when it reached the stub, must equal
+    the raw call's, or the row is the new mismatch kind `request-wiring`. Nothing of it is sent; the guard judges it
+    with `LabGuard.checkDry`, the live verdict with the target's kick or ban treated as permitted, using no permit
+    (the dry raw call of a kick row would otherwise have been refused, or used up the permit the live call needs).
+  - Tests: `operations-runtime.test.ts` runs 35 operations (every handle method, both `setArchived` and `setLocked`
+    values, both thread visibilities and the announcement thread, a file send, a tagged and an untagged post, both
+    `timeout` and `ban` forms) through a route-checked client and asserts the exact method, path and body of each;
+    `request-check.test.ts` runs the matrix's request check offline through `Identities.compose` for one scenario of
+    each of the catalog's 158 (operation, lab channel) pairs. Each of the five mutations, and a Drivers unpin sent as
+    a pin, now fails both (the method swaps as route-check defects, the body swaps as `request-wiring` differences).
+- **After the M6 verifier: `Permissions.require` no longer grants what it did not check** (minor; §2.6 and §4.7
+  updated). When even a refresh left the state unable to resolve the channel, `require` succeeded with
+  `decided?.decision.failures ?? []`, returning a handle whose checked flags were marked granted, so their later
+  refusals would have come back as `PermissionRevokedSinceCheck`. It now fails with `UnknownChannel` (the row
+  declares it) and logs the reason. `perform`'s unchecked send in the same state stays, now documented: Discord
+  decides, and a refusal goes through the error map and the recompute, which finds the state as short and gives the
+  code's own tag, so nothing is guessed (§4.7). `decisionOf` returns `Decided | Undecidable` instead of `undefined`.
+- **After the M6 verifier: the pins readback keeps its `Transient`** (minor; §4.12 updated). Its state lookup was
+  `Effect.catch(() => Effect.succeed(undefined))`, so a refresh that got no answer reported an empty list as fully
+  readable; the `Transient`, which `pins` declares, now fails the call. With a state that cannot decide (above) the
+  readback still reports nothing degraded, logged.
+- **After the M6 verifier: §2.3 described a literal over a limit as a defect** (minor; §2.3 updated to what is
+  built, as the M6 entry "a request declares every limit field it carries" above already said). The verifier's
+  alternative, a flag the typed overload passes to the implementation, cannot be built: an overload is a signature
+  only, the implementation receives the same value, and the run time cannot tell a literal from a computed string of
+  the same value. So the local check fails with the limit's tag, which the literal's type does not declare.
+- **After the M6 verifier: the content-length pair separates the two counts** (minor; §8 item 7 updated). The valid
+  side, 2000 non-BMP emoji (4000 UTF-16 units), and the old invalid side, 2001 emoji (4002 units), have the same
+  answers under "2000 code points" and the OpenAPI spec's "4000 UTF-16 units", so the pair did not settle open
+  question 7, and `harness/Probes.ts` wrongly said only one count accepts them. The invalid side is now 2001 ASCII
+  characters, which a 4000-unit limit accepts and only a 2000 limit refuses (`asciiString`); its table row is the
+  same if Discord refuses it the same way (the live result is in the M6 milestone, "After the M6 verifier").
+- **After the M6 verifier: smaller corrections.** The public barrel exports `CustomId` as a type only, so a
+  `custom_id` comes only from a `ComponentRoute` (`Components.ts`'s comment holds); §5.9 counted 23 coverage rows,
+  the catalog and the table have 24.
 
 ## Escalated rules
 
