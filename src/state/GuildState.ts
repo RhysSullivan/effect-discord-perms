@@ -9,10 +9,11 @@
  * overwrites it. `stale` is cleared by a refresh that committed everything, or by a gateway event.
  *
  * `getChannel` answering 50001 or 10003 records the channel as unseen (no View): evidence, not a defect
- * (§3.1). The mark holds until a gateway event that can change what the bot sees retires it (`Reducer.ts`); a
- * guild channel keeps the gateway's copy meanwhile, a thread's is dropped. Any other Discord answer to a refresh
- * read is an unmapped code, a defect. `refreshGuild` makes the same
- * reads without a channel, for guild-level operations.
+ * (§3.1). A 50001 for a voice or stage channel the state holds is not: Discord answers it without Connect too,
+ * and the resolver's Connect mask decides there. The mark holds until a gateway event that can change what the
+ * bot sees retires it (`Reducer.ts`); a guild channel keeps the gateway's copy meanwhile, a thread's is dropped.
+ * Any other Discord answer to a refresh read is an unmapped code, a defect. `refreshGuild` makes the same reads
+ * without a channel, for guild-level operations.
  */
 import type { DiscordRestService } from "dfx/DiscordREST"
 import { Context, Duration, Effect, Option, Schema, Stream, SubscriptionRef } from "effect"
@@ -21,7 +22,7 @@ import { type Answered, send } from "../rest/Request.ts"
 import type { ChannelId, GuildId, UserId } from "../Snowflake.ts"
 import * as Schemas from "../rest/Schemas.ts"
 import { reduce, toBotMember, toChannel, toRole } from "./Reducer.ts"
-import { type ChannelSnap, emptySnapshot, type EntityKey, entityKey, generationOf, type GuildSnap, type Snapshot } from "./Snapshot.ts"
+import { type ChannelSnap, emptySnapshot, type EntityKey, entityKey, generationOf, type GuildSnap, isVoiceKind, type Snapshot } from "./Snapshot.ts"
 
 /** What one refresh did. */
 export interface Refreshed {
@@ -60,11 +61,12 @@ const decodeOrDie =
       Effect.orDie
     )
 
-/** A channel as a refresh found it: its wire object, or unseen. */
-type Fetched = { readonly _tag: "Seen"; readonly wire: Schemas.Channel; readonly channel: ChannelSnap | undefined } | { readonly _tag: "Unseen" }
+/** A channel as a refresh found it: its wire object, or unseen with the code `getChannel` answered. */
+type Fetched = { readonly _tag: "Seen"; readonly wire: Schemas.Channel; readonly channel: ChannelSnap | undefined } | { readonly _tag: "Unseen"; readonly code: UnseenCode }
 
 /** The codes `getChannel` answers when the bot cannot see the channel (H-080, H-087). */
-const unseenCodes: ReadonlySet<number> = new Set([50001, 10003])
+type UnseenCode = 50001 | 10003
+const isUnseenCode = (code: number): code is UnseenCode => code === 50001 || code === 10003
 
 /**
  * Builds the service over `rest` (the bot's own dfx client), for the bot `botUserId`. `deadline` bounds each
@@ -92,8 +94,9 @@ export const make = (rest: DiscordRestService, botUserId: UserId, deadline: Dura
       send("/channels/{channel.id}", "GET", rest.getChannel(id), deadline).pipe(
         Effect.flatMap((answer) => {
           if (answer._tag === "Rejected") {
-            return unseenCodes.has(answer.response.code)
-              ? Effect.succeed<Fetched>({ _tag: "Unseen" })
+            const code = answer.response.code
+            return isUnseenCode(code)
+              ? Effect.succeed<Fetched>({ _tag: "Unseen", code })
               : Effect.die(new Error(`GuildState.refresh: unmapped answer to getChannel: ${answer.response.status} ${answer.response.code}`))
           }
           return decodeOrDie(Schemas.Channel, "/channels/{channel.id}")(answer.body).pipe(
@@ -151,6 +154,10 @@ export const make = (rest: DiscordRestService, botUserId: UserId, deadline: Dura
           const commit = (id: ChannelId, fetched: Fetched) => {
             if (!unchanged(entityKey.channel(id))) return
             if (fetched._tag === "Unseen") {
+              const held = channels.get(id)
+              // a voice or stage channel answers 50001 without Connect as well as without View (M6 live, H-152), so
+              // the answer says nothing the gateway's copy does not: the resolver's Connect mask decides there
+              if (held !== undefined && isVoiceKind(held.kind) && fetched.code === 50001) return
               unseen.add(id)
               // a thread's copy is dropped: the gateway sends nothing for a thread the bot cannot see. A guild
               // channel keeps the gateway's copy, which GUILD_CREATE and CHANNEL_* keep current whether or not

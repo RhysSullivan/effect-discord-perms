@@ -294,6 +294,26 @@ describe("GuildState", () => {
     })
   )
 
+  it.effect("leaves a voice channel unmarked on 50001, which Discord also answers without Connect (M6 live), but marks it on 10003", () =>
+    Effect.gen(function* () {
+      const voice = ChannelId.make(ids.voice)
+      const refreshed = (code: number) =>
+        Effect.gen(function* () {
+          const state = yield* make(
+            scriptedRestEffect((method, path) => Effect.succeed(restAnswers(() => json(code === 50001 ? 403 : 404, { code, message: "refused" }))(method, path)))
+          )
+          yield* state.apply("READY", ready)
+          yield* state.apply("GUILD_CREATE", guildCreate)
+          yield* state.refresh(guildId, voice)
+          return guildOf(yield* state.snapshot)
+        })
+      const missingAccess = yield* refreshed(50001)
+      expect(missingAccess.unseen.has(voice)).toBe(false)
+      expect(missingAccess.channels.get(voice)?.kind).toBe("voice")
+      expect((yield* refreshed(10003)).unseen.has(voice)).toBe(true)
+    })
+  )
+
   it.effect("sets the bot's thread membership from the REST thread's member field, and commits the thread's parent", () =>
     Effect.gen(function* () {
       const parentOverwrites = [overwrite(ids.roleA, 0, "2048", "0")]
