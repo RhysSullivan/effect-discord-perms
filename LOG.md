@@ -1268,8 +1268,16 @@ Live, in order (each alone under the lock):
   tags (op-errors), not checking the status (error-map), 50035 not sorting by tier 7 (error-map), D8's revocation
   dropped (recompute), the interceptor treating code 0 as coded (discord-api), and the interceptor left out of the
   bot build (bot-build: dfx retried the coded 429 until the test's timeout).
+- Live, once, after the M5 commit (`f948f45`), which changed the subject's build (the interceptor) and the raw call
+  (the prior-send proof): `bun --no-env-file harness/main.ts run --only 'send/targeted/slowmode-second-send*'`
+  exited 0: 2 scenarios in 61 s, 158 requests, 14 writes, 0 invalid, no 429, oracle available, 0 mismatches; the run
+  log records each prior send's message ID before the created one (`raw success 200 0 after prior send <id>
+  created <later id>`). The guild's role-edit bucket had 39 edits left at its start (the self-tests and this run
+  used some), so a full run waits for the bucket to refill (about 1.8 hours from empty; the runner says how long).
 - For M6: the message, reaction and pin rows do not list `UnknownChannel`, so a request on a message whose channel
   was deleted (10003) is an unmapped defect today; M6, which builds those operations and their live rows, decides
   whether the rows gain it. No row of the M4 matrix met 10003.
-- Exit evidence: `bun run verify:offline` (below, in the final run).
+- Exit evidence, on the final code: `bun run verify:offline` exited 0 (gen:errors up to date, 52 flags and 54 classes;
+  typecheck; 1,079 tests in 40 files, the replay's 374 among them; test:types 5 pass and 2 fail fixtures, largest
+  gated 325 characters; hover 3 markers; rules 2 rules; budget nothing to measure yet).
 
