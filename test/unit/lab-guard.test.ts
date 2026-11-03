@@ -65,6 +65,16 @@ describe("the guard's verdict", () => {
     expect(decide("POST", `/channels/${labChannel}/followers`)).toBe("Refuse")
   })
 
+  it("admits a message create aimed at a bot's user ID, which names no channel (R-ids-distinct), and nothing else there or at a human's ID", () => {
+    expect(decide("POST", `/channels/${target}/messages`)).toBe("Allow")
+    expect(decide("POST", `/channels/${subject}/messages`)).toBe("Allow")
+    expect(decide("POST", `/channels/${rhys}/messages`)).toBe("Refuse")
+    expect(decide("POST", `/channels/${harness}/messages`)).toBe("Refuse")
+    expect(decide("PATCH", `/channels/${target}`, json({ name: "lab-x" }))).toBe("Refuse")
+    expect(decide("POST", `/channels/${target}/messages/1/crosspost`)).toBe("Refuse")
+    expect(decide("POST", `/channels/${target}/messages`, undefined, { ...armed, armed: Option.none() })).toBe("Refuse")
+  })
+
   it("creates only lab-named channels under lab parents, and never reorders or re-parents the guild's channels", () => {
     expect(decide("POST", `/guilds/${guild}/channels`, json({ name: "lab-text", type: 0, parent_id: labChannel }))).toBe("Allow")
     expect(decide("POST", `/guilds/${guild}/channels`, json({ name: "lab", type: 4 }))).toBe("Allow")

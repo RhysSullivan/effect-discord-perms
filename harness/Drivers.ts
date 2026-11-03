@@ -1,7 +1,8 @@
 /**
  * Step (c) per operation (DESIGN §5.10): the raw call through `SubjectRaw`, with no check, its outcome, and
- * what the call created that cleanup must delete. Each call is the request the library's operation will send
- * for it (M6), bounded by the request deadline; a missing answer is the runner's infrastructure abort.
+ * what the call created that cleanup must delete. Each call is the request the library's operation sends for it
+ * (the bodies come from `ToDfx` and the same field choices, so steps (c) and (d) send the same request), bounded
+ * by the request deadline; a missing answer is the runner's infrastructure abort.
  */
 import type { DiscordRESTError } from "dfx/DiscordREST"
 import { Duration, Effect, Option, Schema } from "effect"
@@ -15,6 +16,7 @@ import { emoji, type PriorSend, priorSendProblem } from "./Fixtures.ts"
 import * as LabIds from "./LabIds.ts"
 import type * as Materialize from "./Materialize.ts"
 import * as Outcome from "./Outcome.ts"
+import * as ToDfx from "../src/payload/ToDfx.ts"
 import { wirePayload } from "./scenario/catalog/send.ts"
 import type { Scenario } from "./scenario/Dsl.ts"
 import type { RawOutcome } from "./TruthTable.ts"
@@ -84,7 +86,7 @@ export const rawCall = (scenario: Pick<Scenario, "operation" | "setup">, context
     })
     switch (operation._tag) {
       case "send": {
-        const wire = wirePayload(operation.payload, { replyTo: context.harnessMessage, stickerId: context.stickerId })
+        const wire = wirePayload(operation.payload, { replyTo: context.harnessMessage, stickerId: context.stickerId, unmentionableRole: context.ids.roles.get("lab-unmentionable") })
         const request = subject.createMessage(channel, wire.request)
         return done(yield* call("/channels/{channel.id}/messages", "POST", wire.files.length > 0 ? subject.withFiles(wire.files)(request) : request))
       }
@@ -94,7 +96,7 @@ export const rawCall = (scenario: Pick<Scenario, "operation" | "setup">, context
           yield* call(
             "/channels/{channel.id}/threads",
             "POST",
-            subject.createThread(channel, { name: LabIds.createdThreadName, applied_tags: tags, message: { content: "lab post", allowed_mentions: { parse: [] } } })
+            subject.createThread(channel, { name: LabIds.createdThreadName, ...(tags.length === 0 ? {} : { applied_tags: tags }), message: ToDfx.createRequest({ content: "lab post" }).request })
           )
         )
       }
@@ -102,7 +104,7 @@ export const rawCall = (scenario: Pick<Scenario, "operation" | "setup">, context
         const route = "/channels/{channel.id}/messages/{message.id}"
         switch (operation.action) {
           case "edit-own":
-            return done(yield* call(route, "PATCH", subject.updateMessage(channel, yield* need(context.subjectMessage, "subject message"), { content: "lab edited", allowed_mentions: { parse: [] } })))
+            return done(yield* call(route, "PATCH", subject.updateMessage(channel, yield* need(context.subjectMessage, "subject message"), ToDfx.editRequest({ content: "lab edited" }))))
           case "delete-own":
             return done(yield* call(route, "DELETE", subject.deleteMessage(channel, yield* need(context.subjectMessage, "subject message"))))
           case "delete-foreign":
@@ -143,14 +145,14 @@ export const rawCall = (scenario: Pick<Scenario, "operation" | "setup">, context
         if (operation.fromMessage) {
           const message = yield* need(context.harnessMessage, "harness message")
           return creating(
-            yield* call("/channels/{channel.id}/messages/{message.id}/threads", "POST", subject.createThreadFromMessage(channel, message, { name, auto_archive_duration: LabIds.threadAutoArchiveMinutes }))
+            yield* call("/channels/{channel.id}/messages/{message.id}/threads", "POST", subject.createThreadFromMessage(channel, message, { name }))
           )
         }
         return creating(
           yield* call(
             "/channels/{channel.id}/threads",
             "POST",
-            subject.createThread(channel, { name, type: threadTypeOf(context.state, operation.visibility), auto_archive_duration: LabIds.threadAutoArchiveMinutes })
+            subject.createThread(channel, { name, type: threadTypeOf(context.state, operation.visibility) })
           )
         )
       }
@@ -186,6 +188,8 @@ export const rawCall = (scenario: Pick<Scenario, "operation" | "setup">, context
         }
       }
       // fallthrough is impossible: the inner switch returns on every field
+      case "rule":
+        return yield* Effect.die(new Error("drivers: a rule row runs its probe (harness/Probes.ts), not a matrix call"))
       case "member": {
         const guild = context.ids.guildId
         const target = context.ids.targetUserId

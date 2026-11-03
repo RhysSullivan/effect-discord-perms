@@ -4,8 +4,8 @@
  * with a canned 2xx body from `fixtures/canned/` instead of being sent; nothing is paced or counted, because
  * nothing reaches Discord. A request without a canned body is a defect.
  *
- * M6 runs the real public operation in `"enforce"` mode under it, so the matrix exercises the user-facing path
- * without an extra Discord request. Until then step (b) is `Preflight.decide` alone (§6 M3).
+ * The matrix's step (b) runs the real public operation in `"enforce"` mode under it (M6), so the run exercises the
+ * user-facing path without an extra Discord request.
  */
 import { Context, Effect, FileSystem, Option, Ref, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
@@ -29,17 +29,44 @@ export interface Recorder {
 /** The switch: `None` (the default) sends every request; a recorder answers them instead. */
 export const DryRun = Context.Reference<Option.Option<Recorder>>("harness/DryRun", { defaultValue: () => Option.none() })
 
-/** The canned 2xx bodies, by route (`fixtures/canned/`). */
+/**
+ * The canned 2xx bodies, by route (`fixtures/canned/`): one per route the library's operations send (M6), each
+ * decoding with the operation's response schema (`src/rest/Schemas.ts`). Routes answered with no content take
+ * `empty.json`, which dfx ignores.
+ */
 export const cannedFiles: Readonly<Record<string, string>> = {
-  "POST /channels/{id}/messages": "create-message.json"
+  "POST /channels/{id}/messages": "create-message.json",
+  "PATCH /channels/{id}/messages/{id}": "create-message.json",
+  "DELETE /channels/{id}/messages/{id}": "empty.json",
+  "POST /channels/{id}/messages/{id}/crosspost": "create-message.json",
+  "POST /channels/{id}/messages/bulk-delete": "empty.json",
+  "PUT /channels/{id}/messages/{id}/reactions/{emoji}/@me": "empty.json",
+  "PUT /channels/{id}/messages/pins/{id}": "empty.json",
+  "DELETE /channels/{id}/messages/pins/{id}": "empty.json",
+  "GET /channels/{id}/messages/pins": "pins.json",
+  "POST /channels/{id}/threads": "thread.json",
+  "POST /channels/{id}/messages/{id}/threads": "thread.json",
+  "PUT /channels/{id}/thread-members/@me": "empty.json",
+  "DELETE /channels/{id}/thread-members/@me": "empty.json",
+  "PUT /channels/{id}/thread-members/{id}": "empty.json",
+  "PATCH /channels/{id}": "channel.json",
+  "DELETE /channels/{id}": "channel.json",
+  "PUT /guilds/{id}/members/{id}/roles/{id}": "empty.json",
+  "DELETE /guilds/{id}/members/{id}/roles/{id}": "empty.json",
+  "PATCH /guilds/{id}/members/{id}": "member.json",
+  "DELETE /guilds/{id}/members/{id}": "empty.json",
+  "PUT /guilds/{id}/bans/{id}": "empty.json"
 }
+
+/** The route a canned body is looked up by: `routeKey`, with a reaction's emoji segment as `{emoji}`. */
+export const cannedRoute = (method: string, url: string): string => routeKey(method, url).replace(/\/reactions\/[^/]+\/@me$/, "/reactions/{emoji}/@me")
 
 /** A recorder over `bodies` (route to canned body). */
 export const makeRecorder = (bodies: ReadonlyMap<string, unknown>): Effect.Effect<Recorder> =>
   Effect.gen(function* () {
     const log = yield* Ref.make<ReadonlyArray<Recorded>>([])
     return {
-      record: (request) => Ref.update(log, (entries) => [...entries, { method: request.method, route: routeKey(request.method, request.url) }]),
+      record: (request) => Ref.update(log, (entries) => [...entries, { method: request.method, route: cannedRoute(request.method, request.url) }]),
       recorded: Ref.get(log),
       canned: (route) => Option.fromUndefinedOr(bodies.get(route))
     }

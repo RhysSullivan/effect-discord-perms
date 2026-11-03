@@ -2,8 +2,8 @@
  * Agreement (DESIGN §5.10): pure, from one row to `agree` or the first mismatch kind, in this order. Shared by
  * the live runner and the offline replay.
  *
- * - `preflight-wiring`: step (b) is not the first of `preflightSet` (in M3 and M4 step (b) is `Preflight.decide`
- *   itself; M6 runs the real operation over the dry-run stub).
+ * - `preflight-wiring`: step (b), the real operation over the dry-run stub (M6), does not fail with the first of
+ *   `preflightSet` (the runner also requires its tag and categories to equal `Preflight.decide`'s error).
  * - `preflight-vs-raw`: preflight passed while the raw call neither succeeded nor degraded, or failed while it
  *   succeeded, or the raw code's mapped tag is not in `preflightSet` (§3.2).
  * - `level-vs-raw` (H-080): a raw 50001 or 50013 that is not the code `Observed.expectedCode` gives the
@@ -20,12 +20,13 @@
  *   (`implicit=false`) does not model thread membership and reads View there.
  *
  * `flip-control` (§5.9) needs two rows: {@link flipAgreement} judges a flip control against its original once
- * both have run. Rule observations (M6) are judged where their rows are built.
+ * both have run. A rule row is judged by {@link ruleAgreement} alone (`rule-observation`).
  */
 import type { PermissionFlag } from "../src/errors/Missing.generated.ts"
 import { expectedCode, Observed } from "../src/permissions/Observed.ts"
 import type { OpName } from "../src/permissions/Operations.ts"
 import { ResolverRules } from "../src/permissions/ResolverRules.ts"
+import type { Observation } from "./scenario/Dsl.ts"
 import type { AgreementKind, Row } from "./TruthTable.ts"
 
 /** What agreement needs to know about the operation beyond the row. */
@@ -99,6 +100,21 @@ export const flipAgreement = (original: Omit<Row, "agreement">, flip: Row): Agre
   if (next === undefined) return rawSucceeded(flip.raw) ? "agree" : "flip-control"
   return !rawSucceeded(flip.raw) && flip.preflightSet[0] === next ? "agree" : "flip-control"
 }
+
+/**
+ * A rule row's agreement (§5.5): its observation equals the registry's full expectation in every field, or it is
+ * `rule-observation`. A rule row without an expectation is a catalog bug.
+ */
+export const ruleAgreement = (observation: Observation, expect: Observation | undefined): AgreementKind => {
+  if (expect === undefined) throw new Error("a rule row without the registry's expectation")
+  return JSON.stringify(canonical(observation)) === JSON.stringify(canonical(expect)) ? "agree" : "rule-observation"
+}
+
+/** An observation with its inner errors sorted, so equal observations compare equal. */
+const canonical = (observation: Observation): Observation =>
+  observation._tag === "Rejected"
+    ? { ...observation, inner: [...observation.inner].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : a.code < b.code ? -1 : a.code > b.code ? 1 : 0)) }
+    : observation
 
 /**
  * A private thread the subject does not belong to: the oracle (`implicit=false`) computes it from the parent's

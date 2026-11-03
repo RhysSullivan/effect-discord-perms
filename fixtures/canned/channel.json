@@ -1,0 +1,10 @@
+{
+  "flags": 0,
+  "guild_id": "100000000000000004",
+  "id": "100000000000000003",
+  "name": "lab-text",
+  "parent_id": "100000000000000005",
+  "permission_overwrites": [],
+  "rate_limit_per_user": 0,
+  "type": 0
+}

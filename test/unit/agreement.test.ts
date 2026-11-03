@@ -167,6 +167,7 @@ describe("the raw outcome", () => {
     id: MessageId.make("600000000000000001"),
     tts: false,
     mention_everyone: false,
+    mention_roles: [],
     embeds: [],
     attachments: [],
     ...overrides

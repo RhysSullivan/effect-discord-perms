@@ -43,13 +43,17 @@ import { requiredFlags } from "../src/permissions/Preflight.ts"
 import { type FromSnapshot, guildInputFromSnapshot, inputFromSnapshot, resolve } from "../src/permissions/Resolver.ts"
 import * as Oracle from "../src/rest/Oracle.ts"
 import { send } from "../src/rest/Request.ts"
-import type { ChannelId, EmojiId, RoleId, StickerId } from "../src/Snowflake.ts"
+import * as Schemas from "../src/rest/Schemas.ts"
+import { type ChannelId, type EmojiId, ForumTagId, type MessageId, type RoleId, type StickerId } from "../src/Snowflake.ts"
 import { isThreadKind } from "../src/state/Snapshot.ts"
 import { escalatedRules } from "../scripts/lib/rules.ts"
 import { rules } from "../test/rules.ts"
-import { agreement, flipAgreement } from "./Agreement.ts"
+import { agreement, flipAgreement, ruleAgreement } from "./Agreement.ts"
 import * as Converge from "./Converge.ts"
 import * as Drivers from "./Drivers.ts"
+import * as DryRun from "./DryRun.ts"
+import * as Library from "./Library.ts"
+import * as Probes from "./Probes.ts"
 import * as Fixtures from "./Fixtures.ts"
 import { HarnessRest } from "./Identities.ts"
 import type { IdentityReport } from "./IdentityCheck.ts"
@@ -64,6 +68,7 @@ import * as Reset from "./Reset.ts"
 import * as Catalog from "./scenario/catalog/index.ts"
 import { operationKey, type Scenario, Setup } from "./scenario/Dsl.ts"
 import * as Facts from "./scenario/Facts.ts"
+import { probes } from "./scenario/Probes.ts"
 import { families, selectionProblems } from "./scenario/Pairwise.ts"
 import * as Safety from "./scenario/Safety.ts"
 import * as TruthTable from "./TruthTable.ts"
@@ -228,7 +233,16 @@ interface Context {
    * channel is at baseline since the opening reset.
    */
   readonly dirty: Set<LabIds.ChannelName>
+  /** The dry-run stub's canned bodies (step (b)). */
+  readonly canned: ReadonlyMap<string, unknown>
 }
+
+/** Whether step (b)'s record is the one `Preflight.decide` gives (tag and categories). */
+const sameStep = (a: Library.Step, b: TruthTable.StepRecords["preflight"]): boolean =>
+  a === "pass" || b === "pass" ? a === b : a.tag === b.tag && a.categories.join() === b.categories.join()
+
+/** Whether Discord refused the raw call with 50013, 50001 or a dedicated code, which step (d) re-sends (§5.10). */
+const refusedForRecompute = (raw: TruthTable.RawOutcome): boolean => raw.class === "50013" || raw.class === "50001" || (raw.class === "other-error" && raw.mappedTag !== "n/a")
 
 const infrastructure = (what: string) => (error: Transient) => Effect.die(new Error(`infrastructure abort: ${what}: ${error._tag}`))
 
@@ -248,9 +262,10 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
   Effect.gen(function* () {
     const { setup, operation } = scenario
     const staticFacts = Facts.staticFactsOf(scenario)
-    const base = { setup, operation: operationKey(operation), recompute: "n/a" as const }
+    const base = { setup, operation: operationKey(operation) }
     const unsupportedRow = (raw: TruthTable.RawOutcome): TruthTable.Row => ({
       ...base,
+      recompute: "n/a",
       resolver: { required: Flags.sortFlags(requiredFlags(staticFacts.op, staticFacts.args)), missing: [], missingBeforeMasks: [], masks: [], level: "none" },
       preflight: "n/a",
       preflightSet: [],
@@ -333,23 +348,70 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
     const settled = yield* Wait.settle({ scenario: scenario.id, state, ids, guildState: runtime.guildState, guildId: ids.guildId, channel: channelId, readOracle, channels })
     yield* lap("wait")
 
-    // 4. (a) the resolver over the subject's state, and (b) preflight
+    // the fixtures' messages as the harness reads them (author, reactions), for the library's handles, and the
+    // target member as the subject reads it (as the library's `Members.get` does)
+    const readWire = (id: MessageId | undefined): Effect.Effect<Schemas.Message | undefined, LabRequestFailed> =>
+      id === undefined ? Effect.succeed(undefined) : rest.getMessage(channelId, id).pipe(labStep("library: read a fixture message"), Effect.flatMap(Wire.decode(Schemas.Message, "getMessage")))
+    const readTarget = send("/guilds/{guild.id}/members/{user.id}", "GET", subjectRaw.getGuildMember(ids.guildId, ids.targetUserId), Drivers.deadline).pipe(
+      Effect.catch(infrastructure("the subject's read of the target")),
+      Effect.flatMap((answer) => (answer._tag === "Ok" ? Wire.decode(Schemas.Member, "getGuildMember")(answer.body) : Effect.die(new Error(`the subject's read of the target: ${answer.response.code}`))))
+    )
     const now = yield* Clock.currentTimeMillis
+
+    // a rule row runs its probe instead of steps (a) to (d) (§5.5)
+    if (operation._tag === "rule") {
+      const meta = probes[operation.probe]
+      const probed = yield* Probes.run(operation.probe, {
+        runtime,
+        ids,
+        channelId,
+        channel: state.channel,
+        subjectMessage: yield* readWire(own.subjectMessage),
+        harnessMessage: yield* readWire(posted.harnessMessage),
+        secondHarnessMessage: posted.secondHarnessMessage,
+        stickerId: context.stickerId,
+        target: staticFacts.onTarget ? yield* readTarget : undefined,
+        now
+      }).pipe(Effect.catch((error) => (error._tag === "LabRequestFailed" ? Effect.fail(error) : infrastructure(`${scenario.id}: the probe`)(error))))
+      yield* lap("probe")
+      for (const thread of probed.created) yield* rest.deleteChannel(thread).pipe(labStepUnless("cleanup: delete the probe's thread", [10003]))
+      for (const touched of meta.touches) {
+        context.dirty.add(touched)
+        if (touched !== "lab-forum" && touched !== "lab-media") yield* Converge.cleanMessages({ id: yield* lookupId(ids, touched), name: touched }, botAuthors(ids, harnessUserId))
+      }
+      yield* cleanup
+      yield* lap("cleanup")
+      yield* context.log(`${scenario.id}: probe ${JSON.stringify(probed.observation)}; ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}`)
+      const row: Omit<TruthTable.Row, "agreement"> = {
+        ...base,
+        resolver: { required: [], missing: [], missingBeforeMasks: [], masks: [], level: "none" },
+        preflight: "n/a",
+        preflightSet: [],
+        raw: probed.raw,
+        recompute: "n/a",
+        oracle: "not-applicable",
+        observation: probed.observation
+      }
+      return { ...row, agreement: ruleAgreement(probed.observation, scenario.expect) }
+    }
+
+    // 4. (a) the resolver over the subject's state, refreshed first when a dispatch left it stale: the operation of
+    // step (b) would refresh it itself, and the dry-run stub answers only the operation's own routes
+    if ((yield* runtime.guildState.snapshot).guilds.get(ids.guildId)?.stale === true) {
+      yield* (staticFacts.scope === "guild" ? runtime.guildState.refreshGuild(ids.guildId) : runtime.guildState.refresh(ids.guildId, channelId)).pipe(Effect.catch(infrastructure("refresh")))
+    }
     let fromState: FromSnapshot
     let hierarchy: Facts.Hierarchy | undefined
+    let targetWire: Schemas.Member | undefined
     if (staticFacts.scope === "guild") {
       fromState = guildInputFromSnapshot(yield* runtime.guildState.snapshot, ids.guildId, now)
       if (fromState._tag === "NeedsRefresh") return yield* Effect.die(new Error(`${scenario.id}: the subject's state lacks ${fromState.reason}`))
-      // the library reads the target member it acts on (Members.get, M6); the subject reads it here the same way
-      const target = yield* send("/guilds/{guild.id}/members/{user.id}", "GET", subjectRaw.getGuildMember(ids.guildId, ids.targetUserId), Drivers.deadline).pipe(
-        Effect.catch(infrastructure("the subject's read of the target")),
-        Effect.flatMap((answer) => (answer._tag === "Ok" ? Wire.decode(Wire.Member, "getGuildMember")(answer.body) : Effect.die(new Error(`the subject's read of the target: ${answer.response.code}`))))
-      )
+      targetWire = yield* readTarget
       const assigned = Materialize.assignedRoleOf(setup)
       hierarchy = {
         guild: fromState.input.guild,
         bot: fromState.input.member,
-        target: { userId: ids.targetUserId, roleIds: target.roles, timedOutUntil: target.communication_disabled_until ?? null },
+        target: { userId: ids.targetUserId, roleIds: targetWire.roles, timedOutUntil: targetWire.communication_disabled_until ?? null },
         role: assigned === undefined ? undefined : ids.roles.get(assigned)
       }
     } else {
@@ -364,6 +426,31 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
     const resolution = resolve(fromState.input)
     const facts = Facts.complete(staticFacts, resolution, hierarchy)
     const records = TruthTable.stepRecords(facts, resolution, "matrix")
+
+    // 5. (b) the real public operation in enforce mode over the dry-run stub; it must decide what decide does
+    const forumTag =
+      operation._tag === "createPost" && operation.tagged
+        ? (yield* rest.getChannel(channelId).pipe(labStep("the forum's tags"), Effect.flatMap(Wire.decode(TagsOf, "getChannel")))).available_tags?.find((tag) => tag.name === "lab-tag")?.id
+        : undefined
+    const assigned = Materialize.assignedRoleOf(setup)
+    const roleId = assigned === undefined ? undefined : ids.roles.get(assigned)
+    const library: Library.LibraryContext = {
+      runtime,
+      ids,
+      state,
+      channelId,
+      subjectMessage: yield* readWire(own.subjectMessage),
+      harnessMessage: yield* readWire(posted.harnessMessage),
+      secondHarnessMessage: posted.secondHarnessMessage,
+      stickerId: context.stickerId,
+      emojiId: context.emojiId,
+      forumTag: forumTag === undefined ? undefined : ForumTagId.make(forumTag),
+      roleId,
+      target: targetWire,
+      now
+    }
+    const stepB = yield* Library.preflightStep(operation, library, yield* DryRun.makeRecorder(context.canned))
+    const wired = sameStep(stepB, records.preflight)
 
     // 8. the oracle (read during the wait), restricted to the required flags
     const oracleValue = settled.oracle
@@ -383,16 +470,14 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
         return yield* Effect.die(new Error(`Safety: ${scenario.id} would mention @everyone while the oracle shows the subject may ping everyone`))
       }
     }
-    if (operation._tag === "member" && (operation.action === "kick" || operation.action === "ban")) {
+    const kickOrBan = operation._tag === "member" && (operation.action === "kick" || operation.action === "ban") ? operation.action : undefined
+    const permitKickOrBan = Effect.gen(function* () {
+      if (kickOrBan === undefined) return
       const roles = yield* rest.listGuildRoles(ids.guildId).pipe(labStep("kick/ban: list roles"), Effect.flatMap(Wire.decode(Schema.Array(Wire.Role), "listGuildRoles")))
       const member = (user: string) => rest.getGuildMember(ids.guildId, user).pipe(labStep("kick/ban: get a member"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
-      yield* guard.permitKickOrBan(operation.action, { guildId: ids.guildId, roles, subject: yield* member(ids.subjectUserId), target: yield* member(ids.targetUserId) })
-    }
-    const forumTag =
-      operation._tag === "createPost" && operation.tagged
-        ? (yield* rest.getChannel(channelId).pipe(labStep("the forum's tags"), Effect.flatMap(Wire.decode(TagsOf, "getChannel")))).available_tags?.find((tag) => tag.name === "lab-tag")?.id
-        : undefined
-    const assigned = Materialize.assignedRoleOf(setup)
+      yield* guard.permitKickOrBan(kickOrBan, { guildId: ids.guildId, roles, subject: yield* member(ids.subjectUserId), target: yield* member(ids.targetUserId) })
+    })
+    yield* permitKickOrBan
     const called = yield* Drivers.rawCall(scenario, {
       ids,
       state,
@@ -403,24 +488,39 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
       stickerId: context.stickerId,
       emojiId: context.emojiId,
       forumTag,
-      roleId: assigned === undefined ? undefined : ids.roles.get(assigned),
+      roleId,
       now,
       priorSend: prior
     }).pipe(Effect.catch(infrastructure(`${scenario.id}: the raw call`)))
     created = called.created
     if (created !== undefined && called.answer._tag === "Ok") yield* guard.admitChannel({ id: created, name: LabIds.createdThreadName })
     const raw = yield* Drivers.outcomeOf(scenario, called)
+
+    // 7. (d) the library's operation with preflight bypassed, live, where Discord refused the raw call with a
+    // permission-like or dedicated code: the recompute must give what (b) gave
+    let recompute: TruthTable.Row["recompute"] = "n/a"
+    if (refusedForRecompute(raw)) {
+      yield* permitKickOrBan
+      const stepD = yield* Library.recomputeStep(operation, library)
+      recompute = stepD.record
+      if (stepD.created !== undefined) {
+        yield* guard.admitChannel({ id: stepD.created, name: LabIds.createdThreadName })
+        if (created === undefined) created = stepD.created
+        else yield* rest.deleteChannel(stepD.created).pipe(labStepUnless("cleanup: delete the thread step (d) created", [10003]))
+      }
+    }
     yield* lap("steps")
 
     // 9. cleanup
     yield* cleanup
     yield* lap("cleanup")
     const message = operation._tag === "send" || operation._tag === "createPost" || operation._tag === "createThread" ? Drivers.createdMessageOf(called) : undefined
+    const stepText = (step: "n/a" | "pass" | TruthTable.RecordedError) => (typeof step === "string" ? step : `${step.tag}[${step.categories.join(",")}]`)
     yield* context.log(
-      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${prior._tag === "Sent" ? ` after prior send ${prior.messageId}` : ""}${message === undefined ? "" : ` created ${message}`}; preflight ${records.preflightSet.join(",") || "pass"}; masks ${records.resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}`
+      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${prior._tag === "Sent" ? ` after prior send ${prior.messageId}` : ""}${message === undefined ? "" : ` created ${message}`}; preflight ${records.preflightSet.join(",") || "pass"}; (b) ${stepText(stepB)}; (d) ${stepText(recompute)}; masks ${records.resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}`
     )
-    const row: Omit<TruthTable.Row, "agreement"> = { ...base, resolver: records.resolver, preflight: records.preflight, preflightSet: records.preflightSet, raw, oracle }
-    return { ...row, agreement: agreement(row, facts) }
+    const row: Omit<TruthTable.Row, "agreement"> = { ...base, resolver: records.resolver, preflight: stepB, preflightSet: records.preflightSet, raw, recompute, oracle }
+    return { ...row, agreement: wired ? agreement(row, facts) : "preflight-wiring" }
   })
 
 const lookupId = (ids: Materialize.Ids, name: Materialize.LabName): Effect.Effect<ChannelId> => {
@@ -448,6 +548,21 @@ export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenari
     const now = yield* Clock.currentTimeMillis
     const violations = [...Safety.checkCatalog(scenarios), ...scenarios.flatMap((scenario) => Safety.checkMaterialized(scenario, Materialize.desired(scenario.setup, ids), ids, now))]
     if (violations.length > 0) return yield* Effect.die(new Error(`Safety: ${violations.map((violation) => `${violation.scenario} ${violation.rule}: ${violation.detail}`).join("; ")}`))
+    // a probe that mentions a lab role pings its holders: Rhys (the owner) must hold none of them (§5.6)
+    const mentionedRoles = new Set<LabIds.RoleName>(
+      scenarios.flatMap((scenario): ReadonlyArray<LabIds.RoleName> =>
+        scenario.operation._tag === "rule" ? probes[scenario.operation.probe].mentions.roles : scenario.operation._tag === "send" && scenario.operation.payload === "mention-role" ? ["lab-unmentionable"] : []
+      )
+    )
+    if (mentionedRoles.size > 0) {
+      const harnessRest = yield* HarnessRest
+      const owner = yield* harnessRest.getGuildMember(ids.guildId, ids.ownerId).pipe(labStep("Safety: read the owner's roles"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
+      const held = [...mentionedRoles].filter((name) => {
+        const id = ids.roles.get(name)
+        return id === undefined || owner.roles.includes(id)
+      })
+      if (held.length > 0) return yield* Effect.die(new Error(`Safety: the owner holds ${held.join(", ")}, which a rule probe mentions`))
+    }
 
     const rest = yield* HarnessRest
     const roles = yield* rest.listGuildRoles(context.guildId).pipe(
@@ -457,7 +572,8 @@ export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenari
     const everyone = roles.find((role) => role.id === context.guildId)
     const everyoneBaseline = everyone === undefined ? [] : Flags.toSortedNames(Flags.fromBits(BigInt(everyone.permissions)))
 
-    const runContext: Context = { ids, stickerId: state.sticker, emojiId: state.emoji, log, oracleSeen: { unavailable: false }, dirty: new Set() }
+    const canned = yield* DryRun.loadCanned.pipe(Effect.provide(BunFileSystem.layer))
+    const runContext: Context = { ids, stickerId: state.sticker, emojiId: state.emoji, log, oracleSeen: { unavailable: false }, dirty: new Set(), canned }
     const ordered = order(scenarios)
     const rows: Record<string, TruthTable.Row> = {}
     const pacing = yield* Pacing

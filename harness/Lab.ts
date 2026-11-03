@@ -10,6 +10,8 @@
  *
  * **What it asserts.** Any violation is a defect that aborts the run before the request is sent:
  * - the host is discord.com, and every guild route (read or write) names `DISCORD_TEST_GUILD_ID`;
+ * - a channel write targets an admitted lab channel, except a message create aimed at a bot's user ID (which
+ *   names no channel: R-ids-distinct's invalid side, M6);
  * - nothing is written before `arm` (the identity checks have run and found the lab's protected channels);
  * - a channel write targets an admitted lab channel: named `lab` or `lab-*`, in the lab guild, and never
  *   `#rules`, `#mod-updates` or the guild's rules or public-updates channel; a new channel or thread has a lab
@@ -208,6 +210,9 @@ const guildWrite = (state: GuardState, armed: Armed, method: string, route: stri
 }
 
 const channelWrite = (state: GuardState, armed: Armed, method: string, route: string, channel: string | undefined, rest: ReadonlyArray<string>, body: RequestBody): Verdict => {
+  // R-ids-distinct's invalid side (M6): a message create aimed at a bot's user ID, which names no channel (Discord
+  // answers 10003), so it can reach nothing; snowflakes are unique, so no channel has that ID
+  if (method === "POST" && rest.length === 1 && rest[0] === "messages" && (channel === armed.subjectUserId || channel === armed.targetUserId)) return allow
   if (channel === undefined || !state.channels.has(channel)) return refuse(`${route}: not a lab channel`)
   if (armed.protectedChannels.has(channel)) return refuse(`${route}: a protected channel`)
   const [area, target, sub] = rest

@@ -4,7 +4,8 @@
  *
  * - 2xx: `success`, or `degraded` with the flags whose effect the response lacks: no embeds (EmbedLinks), no
  *   attachments (AttachFiles), no `message_reference` (ReadMessageHistory, for a reply), `tts: false`
- *   (SendTTSMessages), no poll (SendPolls), `mention_everyone: false` (MentionEveryone, H-100). Every requested
+ *   (SendTTSMessages), no poll (SendPolls), `mention_everyone: false` (MentionEveryone, H-100), an empty
+ *   `mention_roles` for a role mention (MentionEveryone, H-101). Every requested
  *   feature is read back whatever `PayloadRules.mode` says, so a feature Discord drops instead of refusing is
  *   found (open question 4).
  * - A Discord error answer: `50013`, `50001` or `other-error`, with the status, code and the sorted inner 50035
@@ -26,6 +27,7 @@ export const CreatedMessage = Schema.Struct({
   id: MessageId,
   tts: Schema.Boolean,
   mention_everyone: Schema.Boolean,
+  mention_roles: Schema.Array(Schema.String),
   embeds: Schema.Array(Schema.Unknown),
   attachments: Schema.Array(Schema.Unknown),
   poll: Schema.optionalKey(Schema.NullOr(Schema.Unknown)),
@@ -55,6 +57,10 @@ export const degradedFlags = (payload: SendPayload, message: CreatedMessage): Re
       break
     case "mention-everyone":
       if (!message.mention_everyone) dropped.push("MentionEveryone")
+      break
+    case "mention-role":
+      // the payload mentions one role: Discord dropped it when `mention_roles` is empty (H-101)
+      if (message.mention_roles.length === 0) dropped.push("MentionEveryone")
       break
     case "plain":
     case "guild-sticker":

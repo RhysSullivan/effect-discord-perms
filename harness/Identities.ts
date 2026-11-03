@@ -28,7 +28,7 @@ import { Bot, type BotRuntime } from "../src/bot/Bot.ts"
 import { BotInternals, type SubjectRaw } from "../src/bot/Internals.ts"
 import type { StartupFailed } from "../src/bot/Startup.ts"
 import { Credentials, type IdentityCredentials, type LabCredentials, layer as credentialsLayer } from "../src/config/Credentials.ts"
-import { DryRun } from "./DryRun.ts"
+import { cannedRoute, DryRun } from "./DryRun.ts"
 import * as Lab from "./Lab.ts"
 import * as PacingModule from "./Pacing.ts"
 
@@ -67,7 +67,7 @@ export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpCli
         yield* guard.check(request)
         const dry = yield* DryRun
         if (Option.isNone(dry)) return yield* sent.execute(request)
-        const route = PacingModule.routeKey(request.method, request.url)
+        const route = cannedRoute(request.method, request.url)
         const body = dry.value.canned(route)
         if (Option.isNone(body)) return yield* Effect.die(new Error(`dry run: no canned body for ${route}`))
         yield* dry.value.record(request)

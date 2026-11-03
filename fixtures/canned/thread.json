@@ -1,0 +1,11 @@
+{
+  "flags": 0,
+  "guild_id": "100000000000000004",
+  "id": "100000000000000006",
+  "name": "lab-created-thread",
+  "owner_id": "100000000000000002",
+  "parent_id": "100000000000000003",
+  "rate_limit_per_user": 0,
+  "thread_metadata": { "archive_timestamp": "2026-11-01T00:00:00.000000+00:00", "archived": false, "auto_archive_duration": 4320, "locked": false },
+  "type": 11
+}
