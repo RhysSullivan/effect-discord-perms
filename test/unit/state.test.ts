@@ -156,6 +156,27 @@ describe("the reducer", () => {
     expect(guildOf(run([["THREAD_CREATE", threadObject(ids.privateThread, 12)]], unseen(ids.privateThread)).snapshot).unseen.size).toBe(0)
     // an event about another channel leaves it
     expect([...guildOf(run([["CHANNEL_UPDATE", channelUpdate(ids.voice, 2, [])]], unseen(ids.text)).snapshot).unseen]).toEqual([ids.text])
+    // a thread THREAD_LIST_SYNC brings is seen
+    const sync = { guild_id: ids.guild, channel_ids: [ids.text], threads: [threadObject(ids.privateThread, 12)], members: [] }
+    expect(guildOf(run([["THREAD_LIST_SYNC", sync]], unseen(ids.privateThread)).snapshot).unseen.size).toBe(0)
+  })
+
+  it("retires every unseen mark on a role, guild or bot-member change, which can change what the bot sees anywhere (M6)", () => {
+    const marked = (): Snapshot => {
+      const guild = guildOf(booted.snapshot)
+      return { ...booted.snapshot, guilds: new Map([[guildId, { ...guild, unseen: new Set([text, privateThread]) }]]) }
+    }
+    const retired = (event: string, data: unknown) => ({ event, unseen: [...guildOf(run([[event, data]], marked()).snapshot).unseen] })
+    const events: ReadonlyArray<readonly [string, unknown]> = [
+      ["GUILD_ROLE_CREATE", { guild_id: ids.guild, role: role(ids.roleB, "0", 1) }],
+      ["GUILD_ROLE_UPDATE", { guild_id: ids.guild, role: role(ids.roleB, "1024", 1) }],
+      ["GUILD_ROLE_DELETE", { guild_id: ids.guild, role_id: ids.roleB }],
+      ["GUILD_UPDATE", { id: ids.guild, owner_id: ids.owner, roles: [role(ids.guild, "3072", 0)] }],
+      ["GUILD_MEMBER_UPDATE", { ...memberObject(ids.bot, [ids.roleB]), guild_id: ids.guild }]
+    ]
+    for (const [event, data] of events) expect(retired(event, data)).toEqual({ event, unseen: [] })
+    // another member's update changes nothing the bot sees
+    expect(retired("GUILD_MEMBER_UPDATE", { ...memberObject(ids.target, [ids.roleA]), guild_id: ids.guild }).unseen).toEqual([text, privateThread])
   })
 
   it("is idempotent: replaying dispatches leaves every value unchanged and only bumps generations", () => {
@@ -258,7 +279,18 @@ describe("GuildState", () => {
       yield* state.refresh(guildId, privateThread)
       const guild = guildOf(yield* state.snapshot)
       expect(guild.unseen.has(privateThread)).toBe(true)
+      // the gateway sends nothing for a thread the bot cannot see, so its copy is dropped
       expect(guild.channels.has(privateThread)).toBe(false)
+      // a guild channel keeps the gateway's copy (GUILD_CREATE and CHANNEL_* keep it current), for when a role
+      // change retires the mark (M6 live: without it, View granted through a role never reached the state)
+      yield* state.refresh(guildId, text)
+      const after = guildOf(yield* state.snapshot)
+      expect(after.unseen.has(text)).toBe(true)
+      expect(after.channels.get(text)).toEqual(guild.channels.get(text))
+      yield* state.apply("GUILD_ROLE_UPDATE", { guild_id: ids.guild, role: role(ids.roleA, "1024", 1) })
+      const retired = guildOf(yield* state.snapshot)
+      expect([...retired.unseen]).toEqual([])
+      expect(retired.channels.get(text)?.kind).toBe("text")
     })
   )
 

@@ -9,7 +9,9 @@
  * overwrites it. `stale` is cleared by a refresh that committed everything, or by a gateway event.
  *
  * `getChannel` answering 50001 or 10003 records the channel as unseen (no View): evidence, not a defect
- * (§3.1). Any other Discord answer to a refresh read is an unmapped code, a defect. `refreshGuild` makes the same
+ * (§3.1). The mark holds until a gateway event that can change what the bot sees retires it (`Reducer.ts`); a
+ * guild channel keeps the gateway's copy meanwhile, a thread's is dropped. Any other Discord answer to a refresh
+ * read is an unmapped code, a defect. `refreshGuild` makes the same
  * reads without a channel, for guild-level operations.
  */
 import type { DiscordRestService } from "dfx/DiscordREST"
@@ -148,10 +150,19 @@ export const make = (rest: DiscordRestService, botUserId: UserId, deadline: Dura
           const threadMembership = new Map(current.threadMembership)
           const commit = (id: ChannelId, fetched: Fetched) => {
             if (!unchanged(entityKey.channel(id))) return
-            if (fetched._tag === "Unseen" || fetched.channel === undefined) {
+            if (fetched._tag === "Unseen") {
+              unseen.add(id)
+              // a thread's copy is dropped: the gateway sends nothing for a thread the bot cannot see. A guild
+              // channel keeps the gateway's copy, which GUILD_CREATE and CHANNEL_* keep current whether or not
+              // the bot can see it (obfuscated from 2026-11-16, H-160), for when the mark is retired (M6)
+              if (channels.get(id)?.thread === undefined && channels.has(id)) return
               channels.delete(id)
               threadMembership.delete(id)
-              if (fetched._tag === "Unseen") unseen.add(id)
+              return
+            }
+            if (fetched.channel === undefined) {
+              channels.delete(id)
+              threadMembership.delete(id)
               return
             }
             channels.set(id, fetched.channel)

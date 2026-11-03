@@ -14,6 +14,8 @@
  *   removed), THREAD_MEMBER_UPDATE, and the `member` field of thread objects. A private thread the bot is
  *   removed from is dropped: Discord sends no further events for it (threads.mdx), so the entry would only go
  *   stale, and a refresh brings it back if the bot can still see it.
+ * - A role created, updated or deleted, a guild update and the bot's member update retire every `unseen` mark
+ *   (a refresh's 50001 or 10003); a channel or thread event, THREAD_LIST_SYNC included, retires its channel's.
  * - Every dispatch that touches an entity bumps its generation. Each entity's value is a function of the
  *   dispatch alone, so a replay after RESUME (dfx delivers at least once) leaves every value unchanged.
  */
@@ -152,6 +154,14 @@ const withoutChannel = (guild: GuildSnap, id: ChannelId): Pick<GuildSnap, "chann
   return { channels, threadMembership }
 }
 
+/**
+ * An unseen mark (a refresh's 50001 or 10003) is evidence about the bot's permissions when it was read. A role
+ * created, updated or deleted, a guild update, or the bot's member update can change what the bot sees in every
+ * channel, and Discord sends no channel event for that (M6 live: a role change granting View brought no CHANNEL_UPDATE),
+ * so they retire every mark. A guild channel then resolves from the gateway's copy, a thread is refreshed again.
+ */
+const noUnseen: ReadonlySet<ChannelId> = new Set()
+
 const withoutUnseen = (guild: GuildSnap, id: ChannelId): ReadonlySet<ChannelId> => {
   if (!guild.unseen.has(id)) return guild.unseen
   const unseen = new Set(guild.unseen)
@@ -255,7 +265,8 @@ export const reduce = (snapshot: Snapshot, event: string, data: unknown): Reduce
         touch(snapshot, value.id, [entityKey.guild, ...value.roles.map((role) => entityKey.role(role.id))], (guild) => ({
           ...guild,
           ownerId: value.owner_id,
-          roles: new Map(value.roles.map((role) => [role.id, toRole(role)] as const))
+          roles: new Map(value.roles.map((role) => [role.id, toRole(role)] as const)),
+          unseen: noUnseen
         })))
     case "GUILD_DELETE":
       return decodeOr(GuildDelete, (value) => {
@@ -266,13 +277,13 @@ export const reduce = (snapshot: Snapshot, event: string, data: unknown): Reduce
     case "GUILD_ROLE_CREATE":
     case "GUILD_ROLE_UPDATE":
       return decodeOr(RoleEvent, (value) =>
-        touch(snapshot, value.guild_id, [entityKey.role(value.role.id)], (guild) => ({ ...guild, roles: new Map(guild.roles).set(value.role.id, toRole(value.role)) })))
+        touch(snapshot, value.guild_id, [entityKey.role(value.role.id)], (guild) => ({ ...guild, roles: new Map(guild.roles).set(value.role.id, toRole(value.role)), unseen: noUnseen })))
     case "GUILD_ROLE_DELETE":
       return decodeOr(RoleDelete, (value) =>
         touch(snapshot, value.guild_id, [entityKey.role(value.role_id)], (guild) => {
           const roles = new Map(guild.roles)
           roles.delete(value.role_id)
-          return { ...guild, roles }
+          return { ...guild, roles, unseen: noUnseen }
         }))
     case "CHANNEL_CREATE":
     case "CHANNEL_UPDATE":
@@ -305,6 +316,7 @@ export const reduce = (snapshot: Snapshot, event: string, data: unknown): Reduce
         return touch(snapshot, value.guild_id, keys, (current) => {
           const channels = new Map(current.channels)
           const threadMembership = new Map(current.threadMembership)
+          const unseen = new Set(current.unseen)
           for (const channel of cleared) {
             channels.delete(channel.id)
             threadMembership.delete(channel.id)
@@ -312,8 +324,9 @@ export const reduce = (snapshot: Snapshot, event: string, data: unknown): Reduce
           for (const channel of incoming) {
             channels.set(channel.id, channel)
             threadMembership.set(channel.id, members.has(channel.id))
+            unseen.delete(channel.id)
           }
-          return { ...current, channels, threadMembership }
+          return { ...current, channels, threadMembership, unseen }
         })
       })
     case "THREAD_MEMBERS_UPDATE":
@@ -339,7 +352,7 @@ export const reduce = (snapshot: Snapshot, event: string, data: unknown): Reduce
       return decodeOr(MemberUpdate, (value) =>
         value.user.id !== snapshot.botUserId
           ? snapshot
-          : touch(snapshot, value.guild_id, [entityKey.member], (guild) => ({ ...guild, botMember: toBotMember(value) })))
+          : touch(snapshot, value.guild_id, [entityKey.member], (guild) => ({ ...guild, botMember: toBotMember(value), unseen: noUnseen })))
     default:
       return ok(snapshot)
   }
