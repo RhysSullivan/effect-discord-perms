@@ -166,6 +166,8 @@ src/
                                  the request's `LimitFacts`; `UnmappedDiscordError`)
     Request.ts                   one bounded dfx call, its failure classified (Transient or a Discord answer) (M3)
     Coded429.ts                  base HttpClient interceptor for nonzero-coded 429s (G2)
+    RouteCheck.ts                base HttpClient check: a request `send` makes must be its declared method and route
+                                 template, else a defect (after the M6 verifier)
     Schemas.ts                   response schemas (Message incl. reactions, Channel, Thread, Member, Role, Guild); the
                                  reducer and the refresh decode with the same schemas (M5)
     Oracle.ts                    GET /channels/{c}/permissions/member/{u} etc. via rest.httpClient (harness only)
@@ -1660,6 +1662,23 @@ the handle's granted flags, the static `DecideArgs`, and what the recompute
 must read to complete them), the route template and method, the dfx call, the
 response schema and the request's `LimitFacts` (§4.9). Steps 1, 2 and 6 stay
 in the operations (M6), which share the `Target` with their preflight.
+
+(After the M6 verifier) **The declared route is checked.** A `Request` names its
+route (method and template) apart from its dfx `call`, and the span, the causes
+and the error map all use the declared route, so a `call` that sends something
+else (a `createPin` where an unpin is declared) would pass every check that reads
+the declaration. `Request.send` (the one bounded call under `execute`, `read`, the
+refresh, the recompute's reads and the harness's raw calls) provides the
+declaration as `RouteCheck.DeclaredRoute` around the dfx call, and the bot
+build's base `HttpClient` (`RouteCheck.checked`, next to the coded-429
+interceptor) requires the request dfx builds to have that method and a path the
+template matches, each `{placeholder}` one non-empty segment; anything else is a
+defect naming the declared route and the path's shape (segments that are not
+lowercase words are shown as `{…}`, since a path segment can be an interaction
+token). A request made outside `send` declares nothing and is not checked.
+`test/unit/route-check.test.ts`; `test/unit/operations-runtime.test.ts` runs every
+operation through a checked client and asserts its method, path (with the query)
+and body.
 
 ### 4.9 Error mapping and the recompute (D16)
 

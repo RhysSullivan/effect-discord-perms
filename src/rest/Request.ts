@@ -7,12 +7,15 @@
  * - A transport failure is `NetworkError`, a 5xx or a non-JSON 4xx is `DiscordUnavailable` (`classify`).
  * - A Discord JSON error answer is returned as `Rejected` with the copied `DiscordResponse`, for the caller to
  *   map: what a code means depends on the operation, and an unmapped code is the caller's defect.
+ * - The call is made under its declared route (`RouteCheck.DeclaredRoute`): a bot build's HTTP client holds the
+ *   request dfx builds to `method` and `route`, and a request that does not match them is a defect.
  */
 import type { DiscordRESTError } from "dfx/DiscordREST"
-import { Clock, Duration, Effect } from "effect"
+import { Clock, Duration, Effect, Option } from "effect"
 import { type DiscordResponse, type HttpMethod, NoResponse } from "../errors/Cause.ts"
 import { DiscordUnavailable, NetworkError, RequestTimedOut, type Transient } from "../errors/Transient.ts"
 import { classify } from "./ErrorMap.ts"
+import { DeclaredRoute } from "./RouteCheck.ts"
 
 /** A call's outcome when Discord answered. */
 export type Answered<A> =
@@ -28,6 +31,7 @@ export const send = <A>(route: string, method: HttpMethod, request: Effect.Effec
   Effect.gen(function* () {
     const started = yield* Clock.currentTimeMillis
     return yield* request.pipe(
+      Effect.provideService(DeclaredRoute, Option.some({ method, template: route })),
       Effect.map((body): Answered<A> => ({ _tag: "Ok", body })),
       Effect.catch((error) =>
         Clock.currentTimeMillis.pipe(

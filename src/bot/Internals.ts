@@ -13,7 +13,8 @@
  *
  * `SubjectRaw` is the raw `DiscordREST` of that same build, so the matrix's step (c) shares the subject's token,
  * HTTP client and rate-limit store with the library's operations. Every HTTP client in the build is the base
- * client wrapped by the coded-429 interceptor (`rest/Coded429.ts`, G2), so dfx never retries a coded 429.
+ * client wrapped by the coded-429 interceptor (`rest/Coded429.ts`, G2), so dfx never retries a coded 429, and by
+ * the declared-route check (`rest/RouteCheck.ts`), so a request that is not the route its caller declares is a defect.
  * Requests are bounded by `DiscordApiConfig`'s deadline (§4.10). `Layer.fresh` keeps two builds (two bots)
  * from sharing a memoised dfx stack (G1); services that must be shared across identities (the paced base
  * client) come from outside as requirements.
@@ -26,6 +27,7 @@ import type * as HttpClient from "effect/http/HttpClient"
 import type * as Socket from "effect/socket/Socket"
 import * as Coded429 from "../rest/Coded429.ts"
 import * as DiscordApi from "../rest/DiscordApi.ts"
+import * as RouteCheck from "../rest/RouteCheck.ts"
 import * as GuildState from "../state/GuildState.ts"
 import * as Hook from "../state/Hook.ts"
 import { type Bot, type BotConfig, BotRuntime, type Intent, intentBits, privilegedIntents } from "./Bot.ts"
@@ -86,7 +88,7 @@ export const layerWith = <I extends Intent>(
       Effect.gen(function* () {
         const token = yield* config.token
         const discordConfig = DiscordConfig.layer({ token, gateway: { intents: intentBits(bot.intents) } })
-        return build(bot, config.guildId).pipe(Layer.provide(discordConfig), Layer.provide(Coded429.layer))
+        return build(bot, config.guildId).pipe(Layer.provide(discordConfig), Layer.provide(Coded429.layer), Layer.provide(RouteCheck.layer))
       })
     )
   )
