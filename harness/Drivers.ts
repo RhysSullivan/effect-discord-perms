@@ -11,12 +11,12 @@ import type { Transient } from "../src/errors/Transient.ts"
 import { type Answered, send } from "../src/rest/Request.ts"
 import type { ChannelId, EmojiId, MessageId, RoleId, StickerId } from "../src/Snowflake.ts"
 import { ChannelId as ChannelIdSchema } from "../src/Snowflake.ts"
-import { emoji } from "./Fixtures.ts"
+import { emoji, type PriorSend, priorSendProblem } from "./Fixtures.ts"
 import * as LabIds from "./LabIds.ts"
 import type * as Materialize from "./Materialize.ts"
 import * as Outcome from "./Outcome.ts"
 import { wirePayload } from "./scenario/catalog/send.ts"
-import type { Operation, Scenario } from "./scenario/Dsl.ts"
+import type { Scenario } from "./scenario/Dsl.ts"
 import type { RawOutcome } from "./TruthTable.ts"
 
 /** Bounds every raw call (§4.10). */
@@ -39,6 +39,11 @@ export interface CallContext {
   readonly roleId: RoleId | undefined
   /** Unix milliseconds, for a timeout's end and a unique topic. */
   readonly now: number
+  /**
+   * What `Fixtures.subjectPriorSend` did (only it makes one): `Sent` exactly when the setup has
+   * `subject-prior-send`, which the raw call checks before it sends anything.
+   */
+  readonly priorSend: Exclude<PriorSend, { readonly _tag: "Refused" }>
 }
 
 /** A raw call's answer, and the thread or post it created (cleanup deletes it). */
@@ -61,9 +66,15 @@ const targetTimeoutMs = 600_000
 const threadTypeOf = (state: Materialize.Desired, visibility: "public" | "private"): 10 | 11 | 12 =>
   visibility === "private" ? 12 : state.channel === "lab-announcement" ? 10 : 11
 
-/** Runs the scenario's raw call (§5.10 step 6). */
-export const rawCall = (operation: Operation, context: CallContext): Effect.Effect<Called, Transient, SubjectRaw> =>
+/**
+ * Runs the scenario's raw call (§5.10 step 6). A prior send that does not match the setup (an H-053 row without
+ * its prior send) is a defect, before anything is sent.
+ */
+export const rawCall = (scenario: Pick<Scenario, "operation" | "setup">, context: CallContext): Effect.Effect<Called, Transient, SubjectRaw> =>
   Effect.gen(function* () {
+    const problem = priorSendProblem(scenario.setup, context.priorSend)
+    if (problem !== undefined) return yield* Effect.die(new Error(`drivers: ${problem}`))
+    const operation = scenario.operation
     const subject = yield* SubjectRaw
     const channel = context.channelId
     const done = (answer: Answered<unknown>): Called => ({ answer, created: undefined })

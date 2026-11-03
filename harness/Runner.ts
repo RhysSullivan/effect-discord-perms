@@ -7,7 +7,8 @@
  * 1. **Converge**: the subject's own fixtures first (`Fixtures.subjectObjects`, with temporary access), then
  *    the materialized desired state (`Converge.ts`, the fixed order of §5.8).
  * 2. **Fixtures**: the harness's messages, reaction and pin (`Fixtures.harnessObjects`), the subject's prior send
- *    under the setup (`Fixtures.subjectPriorSend`, H-053), then the thread's archived and locked state.
+ *    under the setup (`Fixtures.subjectPriorSend`, H-053; the raw call cannot run without its answer, and the run
+ *    log records the prior message's ID), then the thread's archived and locked state.
  * 3. **Wait** until the harness's read-back, the subject's gateway state and the oracle agree (`Wait.ts`).
  * 4. **(a) Resolver** over the subject's guild state: for a channel operation, a scenario thread is refreshed
  *    first through the library's `GuildState.refresh`, so the subject's view of it is a function of the setup;
@@ -391,7 +392,7 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
         ? (yield* rest.getChannel(channelId).pipe(labStep("the forum's tags"), Effect.flatMap(Wire.decode(TagsOf, "getChannel")))).available_tags?.find((tag) => tag.name === "lab-tag")?.id
         : undefined
     const assigned = Materialize.assignedRoleOf(setup)
-    const called = yield* Drivers.rawCall(operation, {
+    const called = yield* Drivers.rawCall(scenario, {
       ids,
       state,
       channelId,
@@ -402,7 +403,8 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
       emojiId: context.emojiId,
       forumTag,
       roleId: assigned === undefined ? undefined : ids.roles.get(assigned),
-      now
+      now,
+      priorSend: prior
     }).pipe(Effect.catch(infrastructure(`${scenario.id}: the raw call`)))
     created = called.created
     if (created !== undefined && called.answer._tag === "Ok") yield* guard.admitChannel({ id: created, name: LabIds.createdThreadName })
@@ -414,7 +416,7 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
     yield* lap("cleanup")
     const message = operation._tag === "send" || operation._tag === "createPost" || operation._tag === "createThread" ? Drivers.createdMessageOf(called) : undefined
     yield* context.log(
-      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${message === undefined ? "" : ` created ${message}`}; preflight ${records.preflightSet.join(",") || "pass"}; masks ${records.resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}`
+      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${prior._tag === "Sent" ? ` after prior send ${prior.messageId}` : ""}${message === undefined ? "" : ` created ${message}`}; preflight ${records.preflightSet.join(",") || "pass"}; masks ${records.resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}`
     )
     const row: Omit<TruthTable.Row, "agreement"> = { ...base, resolver: records.resolver, preflight: records.preflight, preflightSet: records.preflightSet, raw, oracle }
     return { ...row, agreement: agreement(row, facts) }

@@ -35,12 +35,23 @@ export interface Interface {
   readonly take: (method: string, url: string) => Effect.Effect<void>
   /**
    * Counts a response's status (and a 429's route). A 429 is also reported at once on stderr with its route
-   * template and Discord's `retry-after` (seconds), because dfx then waits that long before it retries and a
-   * long wait would otherwise look like a hang. Dies when the invalid-request count reaches the cap.
+   * template and Discord's rate-limit headers (`retry-after` in seconds, the scope and the bucket), because dfx
+   * then waits that long before it retries and a long wait would otherwise look like a hang. Dies when the
+   * invalid-request count reaches the cap.
    */
-  readonly recordStatus: (status: number, method: string, url: string, retryAfter?: string) => Effect.Effect<void>
+  readonly recordStatus: (status: number, method: string, url: string, limit?: RateLimitHeaders) => Effect.Effect<void>
   /** The counters so far. */
   readonly stats: Effect.Effect<Stats>
+}
+
+/** A 429's rate-limit headers, as Discord sent them (absent ones are `undefined`). */
+export interface RateLimitHeaders {
+  /** `retry-after`, in seconds. */
+  readonly retryAfter: string | undefined
+  /** `x-ratelimit-scope`: `user`, `global` or `shared`. */
+  readonly scope: string | undefined
+  /** `x-ratelimit-bucket`, Discord's bucket hash. */
+  readonly bucket: string | undefined
 }
 
 /** The process-wide pacing service. */
@@ -107,10 +118,16 @@ export const make = (options: Options): Effect.Effect<Interface> =>
         if (wait > 0) yield* Effect.sleep(Duration.millis(wait))
       })
 
-    const recordStatus = (status: number, method: string, url: string, retryAfter?: string): Effect.Effect<void> =>
+    const recordStatus = (status: number, method: string, url: string, limit?: RateLimitHeaders): Effect.Effect<void> =>
       status === 401 || status === 403 || status === 429
         ? Effect.andThen(
-          status === 429 ? Effect.sync(() => console.error(`rate limited: ${routeKey(method, url)} retry-after ${retryAfter ?? "(none)"} s`)) : Effect.void,
+          status === 429
+            ? Effect.sync(() =>
+              console.error(
+                `rate limited: ${routeKey(method, url)} retry-after ${limit?.retryAfter ?? "(none)"} s, scope ${limit?.scope ?? "(none)"}, bucket ${limit?.bucket ?? "(none)"}`
+              )
+            )
+            : Effect.void,
           Ref.modify(counters, (current): readonly [number, Counters] => {
           const rateLimited = new Map(current.rateLimited)
           if (status === 429) {

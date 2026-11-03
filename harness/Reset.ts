@@ -23,14 +23,15 @@
  *    (bulk delete below 14 days, single deletes above), so untracked messages from a timed-out request go too;
  *    a listed message that is already gone (10008) is skipped (`deletePlanned`).
  *    A forum post's starter message is kept, and system messages Discord does not allow deleting (a thread's
- *    "added to the thread" notices) are left. Every pinned message that is not deleted is unpinned first.
+ *    "added to the thread" notices) are left. Every pinned message that is not deleted is unpinned first. The
+ *    listing pages through those notices at the pace the per-channel bucket's headers allow (`listAllMessages`).
  * 8. The subject's guild commands to an empty list.
  * 9. AutoMod rules named `lab-*` deleted.
  *
  * Reset never touches `#rules`, `#mod-updates`, or anything outside the lab: the Lab guard refuses it.
  */
 import { BunFileSystem } from "@effect/platform-bun"
-import { Clock, Effect, Option, Schema } from "effect"
+import { Clock, Duration, Effect, Option, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { SubjectRaw } from "../src/bot/Internals.ts"
 import type { ApplicationId, ChannelId, GuildId, MessageId, RoleId, UserId } from "../src/Snowflake.ts"
@@ -241,12 +242,21 @@ const decodeArray = <S extends Schema.Codec<unknown, unknown>>(schema: S, what: 
 /** The ID stored for a lab name, if any. */
 export const stored = (record: Readonly<Record<string, string>>, name: string): string | undefined => record[name]
 
-const pages = <A>(first: Effect.Effect<{ readonly items: ReadonlyArray<A>; readonly next: Option.Option<string> }, LabRequestFailed, HarnessRest>, next: (cursor: string) => typeof first) =>
+/** One page of a paged list: its items, the cursor of the next page, and how long to wait before asking for it. */
+interface Page<A> {
+  readonly items: ReadonlyArray<A>
+  readonly next: Option.Option<string>
+  /** Before the next page (`Wire.bucketWait`); zero for lists whose pages never exhaust their bucket. */
+  readonly wait?: Duration.Duration
+}
+
+const pages = <A>(first: Effect.Effect<Page<A>, LabRequestFailed, HarnessRest>, next: (cursor: string) => typeof first) =>
   Effect.gen(function* () {
     const all: Array<A> = []
     let page = yield* first
     all.push(...page.items)
     while (Option.isSome(page.next)) {
+      if (page.wait !== undefined && Duration.isGreaterThan(page.wait, Duration.zero)) yield* Effect.sleep(page.wait)
       page = yield* next(page.next.value)
       all.push(...page.items)
     }
@@ -496,6 +506,25 @@ const messageChannels = (view: View): ReadonlyArray<{ readonly id: ChannelId; re
   return out
 }
 
+/**
+ * Every message in `channel`, newest first, paging 100 at a time. A provisioned thread keeps every "added to the
+ * thread" notice (undeletable system messages, types 1 and 2), hundreds after a few runs, so its listing pages,
+ * and each page waits for the per-channel bucket its predecessor's answer reported (`Wire.bucketWait`; M4
+ * verifier: without it the sixth page in a row answered 429).
+ */
+export const listAllMessages = (channel: { readonly id: string; readonly name: string }, step: string): Effect.Effect<ReadonlyArray<Wire.Message>, LabRequestFailed, HarnessRest> =>
+  Effect.gen(function* () {
+    const rest = yield* HarnessRest
+    const messagePage = (before: string | undefined) =>
+      Wire.listMessages(rest, `${step}: list messages in ${channel.name}`, channel.id, before).pipe(
+        Effect.map((page): Page<Wire.Message> => {
+          const last = page.messages.at(-1)?.id
+          return { items: page.messages, next: page.messages.length === 100 && last !== undefined ? Option.some(last) : Option.none(), wait: page.wait }
+        })
+      )
+    return yield* pages(messagePage(undefined), messagePage)
+  })
+
 const cleanMessages = (context: Context, view: View) =>
   Effect.gen(function* () {
     const rest = yield* HarnessRest
@@ -510,16 +539,7 @@ const cleanMessages = (context: Context, view: View) =>
             return { items: page.items, next: page.has_more && last !== undefined ? Option.some(last) : Option.none<string>() }
           })
         )
-      const messagePage = (before: string | undefined) =>
-        rest.listMessages(channel.id, { limit: 100, ...(before === undefined ? {} : { before }) }).pipe(
-          labStep(`reset: list messages in ${channel.name}`),
-          Effect.flatMap(decodeArray(Wire.Message, "listMessages")),
-          Effect.map((messages) => {
-            const last = messages.at(-1)?.id
-            return { items: messages, next: messages.length === 100 && last !== undefined ? Option.some<string>(last) : Option.none<string>() }
-          })
-        )
-      const messages = yield* pages(messagePage(undefined), messagePage)
+      const messages = yield* listAllMessages(channel, "reset")
       const plan = planDeletes(messages, bots, new Set([channel.id]), yield* Clock.currentTimeMillis)
       const pins = yield* pages(pinPage(undefined), pinPage)
       for (const id of planUnpins(pins.map((pin) => pin.message.id), plan)) yield* rest.deletePin(channel.id, id).pipe(labStep(`reset: unpin a message in ${channel.name}`))

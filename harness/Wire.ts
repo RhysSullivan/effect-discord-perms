@@ -201,3 +201,40 @@ export const ensureOk = (step: string, response: RawResponse): Effect.Effect<Opt
     })
   )
 }
+
+/**
+ * How long to wait before the next request to the bucket a response came from: Discord's
+ * `x-ratelimit-reset-after` when `x-ratelimit-remaining` is 0, otherwise nothing (M4 verifier, M5 live).
+ *
+ * dfx learns a route's bucket from its first answer and takes that answer's `remaining` as the bucket's limit
+ * for its reset window, so for the per-channel message listing (`limit 5`, `remaining 4`, `reset-after 1.000` on
+ * a first page) it allows about four pages a second, while Discord answers the sixth page in a row with a 429
+ * (`remaining 0`, `reset-after` about 4.2 s). Reading the answer's own headers keeps paging under the bucket.
+ */
+export const bucketWait = (headers: Headers.Headers): Duration.Duration => {
+  const remaining = Option.getOrUndefined(Headers.get(headers, "x-ratelimit-remaining"))
+  const resetAfter = Number(Option.getOrElse(Headers.get(headers, "x-ratelimit-reset-after"), () => "NaN"))
+  return remaining === "0" && Number.isFinite(resetAfter) && resetAfter > 0 ? Duration.millis(Math.ceil(resetAfter * 1000)) : Duration.zero
+}
+
+/** One page of a channel's messages, newest first, and how long to wait before asking for the next page. */
+export interface MessagePage {
+  readonly messages: ReadonlyArray<Message>
+  readonly wait: Duration.Duration
+}
+
+/**
+ * Lists up to 100 messages in `channel` before `before` (the newest when `undefined`) through `rest.httpClient`,
+ * so the answer's rate-limit headers are read ({@link bucketWait}). A refusal is `LabRequestFailed`; a body that
+ * does not decode is a defect.
+ */
+export const listMessages = (rest: DiscordRestService, step: string, channel: string, before: string | undefined): Effect.Effect<MessagePage, LabRequestFailed> =>
+  Effect.gen(function* () {
+    const response = yield* raw(rest, step, "GET", `/channels/${channel}/messages`, { urlParams: { limit: "100", ...(before === undefined ? {} : { before }) } })
+    const body = yield* ensureOk(step, response)
+    const messages = yield* Option.match(body, {
+      onNone: () => Effect.die(new Error(`${step}: a 2xx without a JSON body`)),
+      onSome: decode(Schema.Array(Message), "listMessages")
+    })
+    return { messages, wait: bucketWait(response.headers) }
+  })

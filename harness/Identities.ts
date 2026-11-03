@@ -52,7 +52,14 @@ export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpCli
     const sent = base.pipe(
       HttpClient.tapRequest((request) => pacing.take(request.method, request.url)),
       HttpClient.transformResponse(
-        Effect.tap((response) => pacing.recordStatus(response.status, response.request.method, response.request.url, Option.getOrUndefined(Headers.get(response.headers, "retry-after"))))
+        Effect.tap((response) => {
+          const header = (name: string) => Option.getOrUndefined(Headers.get(response.headers, name))
+          return pacing.recordStatus(response.status, response.request.method, response.request.url, {
+            retryAfter: header("retry-after"),
+            scope: header("x-ratelimit-scope"),
+            bucket: header("x-ratelimit-bucket")
+          })
+        })
       )
     )
     return HttpClient.make((request) =>

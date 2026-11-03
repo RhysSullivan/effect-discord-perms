@@ -260,6 +260,19 @@ After the M4 verifier, from the targeted rows it asked for (the targeted subset 
   `lab-voice`, the harness's listing still returned a deleted message, and deleting it answered 404 10008 (the M4
   verifier's first exit run). Cleanup now treats 10008 as done ("Design deviations").
 
+Before M5, from the M4 verifier's minor findings (read-only probes and self-test runs, each alone under the lock):
+
+- **The message-listing 429s come from paging, and the pages come from undeletable thread notices.** The three
+  provisioned threads held 707, 638 and 157 messages, all bot-authored "added to/removed from the thread" notices
+  (types 1 and 2, which Discord does not let anyone delete; reset leaves them, `undeletableTypes`), one or two per
+  scenario that changes thread membership, so every reset pages through 2 to 8 pages per thread, more each run. A
+  traced self-test showed every 429 (`GET /channels/{id}/messages`, scope `user`) on the sixth consecutive page of
+  one thread, with `limit 5`, `remaining 0` and `reset-after` 4.0 to 4.4 s. A single listing answers `limit 5`,
+  `remaining 4`, `reset-after 1.000`, and listing every lab channel in turn, twice, never 429s: the bucket is per
+  channel. dfx takes a route's first `remaining` (4) as its limit per `reset-after` window (1 s), so it let paging run
+  at the harness's 5 requests per second. Reset now reads each page's headers (`Wire.bucketWait`) and waits for the
+  bucket's reset before the next page when the bucket is empty ("Design deviations").
+
 ## dfx deviations
 
 Where dfx got in the way and we wrapped or adapted it, and why.
@@ -672,6 +685,32 @@ the same commit.
   order-locked-embed`, EmbedLinks granted), which must then meet the lock. Whether `ThreadArchived` and
   `TagRequired` also come after the payload is untested: no M4 operation has both.
 
+- **Before M5 (the M4 verifier's five minor findings):**
+  - the reset self-test after `Reset.ts` changes: the M4 implementer did not run it after `3cb095f`
+    (`deletePlanned`); it ran three times before M5 (below), each exiting 0, and its note under "Notes for every
+    milestone" now says the exit checks include it;
+  - the "Not covered by M4's rows" list now names every hypothesis of discord-semantics.md that no catalog row
+    cites, with its reason or owner (M4 milestone notes; checked by taking every H-id of the doc, removing the
+    catalog's citations and the list's, ranges expanded: none is left);
+  - the subject's prior send is now required by the raw call (§5.10 step 2 updated): `Fixtures.subjectPriorSend`
+    alone makes a `PriorSend` (a key private to `Fixtures.ts`; a forged literal is TS2322 `Property '[issued]' is
+    missing`), `Drivers.rawCall` takes it and dies before sending anything unless it is `Sent` exactly when the setup
+    has `subject-prior-send`, and the run log line records `after prior send <id>`. So `Runner.execute` cannot reach
+    the raw call without asking for the prior send (a compile error), and `test/unit/drivers.test.ts` checks the
+    order and the refusal through the fake REST seam (removing the check fails two of its cases);
+  - reset's message listing waits for the per-channel bucket between pages (§5.11 updated; the finding is under
+    "Live findings"). `test/unit/message-paging.test.ts` holds the next page back until `TestClock` passes the
+    reported `reset-after` (removing the wait fails it). `Converge.cleanMessages` and the self-test's read-back list
+    one page per channel, which never empties the bucket, so they are unchanged. The shared client's 429 report now
+    also prints the scope and the bucket;
+  - `PriorSend` has a `NotRequested` variant: a setup without the fixture no longer reports `Sent`.
+  Live, in order: a read-only probe of the listing headers (every lab message channel twice, no 429); a self-test
+  on the previous code with the 429 report's new fields (5 x 429 on `GET /channels/{id}/messages`, scope `user`,
+  as the verifier saw); the same traced, which placed each 429 on a sixth consecutive page; a read-only count of
+  each channel's messages by type; then the self-test on the fixed code: initial reset 0 writes, 13 dirt steps and
+  37 writes, 34 problems seen, reset 28 writes, at baseline, second reset 0 writes, 344 requests, **0 invalid** (no
+  429); and `harness:reset`: `writes: 0`.
+
 ## Escalated rules
 
 Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria. None yet.
@@ -710,7 +749,8 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
 - **Crossposts are rate-limited per announcement channel** (about 10 publishes per hour). A full run publishes 4
   messages in `lab-announcement` in its first few minutes, so never start more than two full runs (or runs of
   `message/**` and `flip/**`) within one hour.
-- **Reset self-test: re-run `bun run harness:selftest` whenever `Reset.ts` (or `LabIds.ts`'s baseline) changes.**
+- **Reset self-test: re-run `bun run harness:selftest` whenever `Reset.ts` (or `LabIds.ts`'s baseline) changes,
+  and record the run in that milestone's notes; it is part of the exit checks of any milestone that changes them.**
   The smoke and reset exit checks run on a clean lab, where a reset that wrote nothing would pass too. The
   self-test dirties the lab (role permissions and mentionability, a leftover role the target holds and the
   target without `lab-unmentionable`, the subject with lab roles, a nickname and a timeout, a leftover channel,
@@ -1003,6 +1043,45 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
     does not exist in discord-semantics.md (its numbering skips it), and H-107 is covered (the pins list rows
     cite it: `pins/announcement/list/read-history/role-overwrite-deny/normal`);
   - H-160, H-161 (obfuscation): M7, with the codec.
+  - Completed before M5 (the M4 verifier's second look found the list still short). Every remaining H-id of
+    discord-semantics.md is now named here or cited by a catalog row; a range such as H-120..H-131 names every ID
+    inside it. Phase-1 hypotheses inside §5.9's targeted ranges: H-002 (the owner holds everything): the owner is
+    Rhys, a human no row may act as, so it stays resolver-only (`test/unit/resolver.test.ts`); H-026 (the
+    permission endpoints reflect a timeout): its endpoint half is H-241, held to the table by
+    `Observed.oracleAppliesTimeout` and the replay's witness check, and its `app_permissions` half is phase 3;
+    H-027 (a timed-out bot answers interactions): `[human]`, the phase-3 checklist (M9); H-042 (a thread create
+    without `type` is private): the raw calls and the library always send `type`, so nothing relies on the
+    default; H-070, H-071 (editing overwrites, overwrites on channel creation): out of phase-1 scope, like
+    H-144's reaction removal (§8 item 19); H-072 (2FA): does not apply at `mfa_level` 0 (M2), so
+    `TwoFactorRequired` stays resolver-only (§8 item 16); H-073 (managed roles in the hierarchy): moot, neither
+    bot has a managed role in Perms Lab (M2), and the hierarchy rows use lab roles.
+  - Outside those ranges: H-018 (a category is viewable when a child is): no row acts on the category itself
+    (M6's channel-kind rules decide whether a category edit row is needed); H-056, H-140 (voice messages):
+    phase-1 payloads have no voice message, so SendVoiceMessages exists only in the category table; H-057
+    (UseExternalApps), H-117, H-118 (interaction responses): phase 3; H-058 (creating expressions and events):
+    outside phase 1; H-059 (the flag bits and the alias): offline, M1's generator and `gen-errors.test.ts`;
+    H-093 (coded 429s): passive only, never provoked live; M5's coded-429 interceptor and its unit tests;
+    H-094 (the invalid-request budget): `Pacing` counts every 401/403/429 and aborts at 1,500, and every run
+    prints the count (about 225); H-096, H-158 (DMs, 50007, 50003): `dm.send` has no matrix row, since a DM to a
+    human is forbidden and bot-to-bot DMs only fail; M6 decides whether `CannotMessageUser` gets a rule row;
+    H-113, H-116 (what the client shows): not observable through the API; H-114, H-115 (content and embed-field
+    stripping): no payload in the matrix depends on them; H-132, H-133, H-134 (flags per context,
+    `allowed_mentions` details, whether a reply pings without them): M6's `create-flags-only`,
+    `suppress-notifications-create-only` and `allowed-mentions-none` rows; H-136 (a reply across channels): the
+    matrix replies in the same channel only, M6 decides with the reply payload; H-137 (forwards): not a phase-1
+    operation; H-139 (poll limits, poll edits 520003): M6's `poll-limits` row, and `EditMessage` has no poll;
+    H-145 (the nonce window): with H-112; H-148 (30046, edits of old messages): passive only, `RateLimited` through
+    M5's interceptor; H-150, H-151 (forums and categories refuse messages): M6's `no-send-forum` and
+    `no-send-category` rows; H-154, H-155 (private threads only in text channels): with H-041, M6; H-156
+    (converting text and announcement channels): not a library operation; H-157 (Community channels cannot be
+    deleted): resolver-only by design, the Lab guard refuses any write to `#rules` and `#mod-updates`.
+  - Later phases and the oracle: H-170..H-182 (gateway, intents, message content): M7; H-190..H-210 (commands,
+    registration): M8; H-220..H-232 (interactions): M9 offline and the phase-3 checklist; H-240 and H-241 (the
+    permission oracle and its timeout mask): live findings of M2 and M3, used by every channel row's oracle
+    comparison; H-242 (the guild-level permissions endpoint): unused, the member rows have no oracle; H-243 (a
+    harness without Message Content): does not apply, the harness has the flag (M2); H-244 (the create response
+    against a later read): the readback reads the create response only, as §4.12 specifies, and no later read
+    is compared; H-245 (link previews arriving later): no payload carries a URL.
 - Live, in order (each alone under the lock), after the M3 verifier's fixes:
   - a trial of the 48 targeted rows (it found the cleanup order bug and the first findings), then one run per
     family (`member/**`, `message/**`, `react/**`, `pins/**`, `createThread/**`, `thread/**`, `channelEdit/**`),

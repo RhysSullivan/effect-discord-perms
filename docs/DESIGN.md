@@ -2439,7 +2439,12 @@ setup alone made 216.)
    refuses makes the row `rejected-by-discord`), the subject sends its
    `subject-prior-send` under the setup (refused: `rejected-by-discord` with the
    code), and then the harness sets the thread's archived and locked state
-   (`harness/Fixtures.ts`).
+   (`harness/Fixtures.ts`). (Before M5, the M4 verifier: only
+   `Fixtures.subjectPriorSend` can make the `PriorSend` value, `NotRequested`,
+   `Sent` with the message ID or `Refused`, through a module-private key, and
+   step (c)'s raw call takes it and dies unless it is `Sent` exactly when the
+   setup has the fixture, so the runner cannot skip the prior send; the run log
+   records the prior message's ID.)
 3. **Consistency wait** (`Wait.ts`, G9). All of these must hold, with a 15 s
    cap. On timeout the run aborts with `setup-timeout`, an infrastructure
    failure that is never recorded as a mismatch.
@@ -2568,6 +2573,14 @@ channel_types, ...) and expects one write.
   otherwise stall in its own limiter, which takes the bucket's first
   `remaining` as its limit for the whole reset window. Every lab step has a
   90 s deadline, so a stall aborts naming the step.
+- (Before M5, the M4 verifier) Reset's message listing pages through each
+  provisioned thread's undeletable "added to the thread" notices (types 1 and 2,
+  hundreds after a few runs), and the per-channel `GET /channels/{id}/messages`
+  bucket answered the sixth page in a row with a 429 (`limit 5`, `remaining 0`,
+  `reset-after` about 4.2 s): dfx took the first page's `remaining 4` as the
+  bucket's limit for its one-second window. Each page now waits for the
+  `x-ratelimit-reset-after` its predecessor's answer reported when that answer
+  left the bucket empty (`Wire.bucketWait`, `Reset.listAllMessages`).
 - (M4 live) Announcement publishing (crosspost) is limited to about 10 per
   channel per hour; a run makes 4.
 - Target duration is **at most 30 minutes**, at roughly 2 to 3.5 s per

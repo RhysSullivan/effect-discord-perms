@@ -70,13 +70,14 @@ export const fakeCredentials = Layer.succeed(
 
 /** What a scripted fake answers: JSON, a raw text body, a transport failure, or nothing at all. */
 export type Scripted =
-  | { readonly _tag: "Json"; readonly status: number; readonly body: unknown }
+  | { readonly _tag: "Json"; readonly status: number; readonly body: unknown; readonly headers?: Readonly<Record<string, string>> }
   | { readonly _tag: "Text"; readonly status: number; readonly text: string }
   | { readonly _tag: "Transport" }
   | { readonly _tag: "Never" }
 
-/** A JSON answer. */
-export const json = (status: number, body: unknown): Scripted => ({ _tag: "Json", status, body })
+/** A JSON answer, with extra response headers (rate-limit headers, for example). */
+export const json = (status: number, body: unknown, headers?: Readonly<Record<string, string>>): Scripted =>
+  headers === undefined ? { _tag: "Json", status, body } : { _tag: "Json", status, body, headers }
 
 /**
  * A dfx REST client (the real `DiscordRESTMemoryLive`, fake token) over a fake base client that answers each
@@ -101,7 +102,7 @@ const answerWith = (request: HttpClientRequest.HttpClientRequest, answer: Script
     switch (answer._tag) {
       case "Json":
         return Effect.succeed(
-          HttpClientResponse.fromWeb(request, new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "content-type": "application/json" } }))
+          HttpClientResponse.fromWeb(request, new Response(JSON.stringify(answer.body), { status: answer.status, headers: { ...answer.headers, "content-type": "application/json" } }))
         )
       case "Text":
         return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(answer.text, { status: answer.status, headers: { "content-type": "text/html" } })))

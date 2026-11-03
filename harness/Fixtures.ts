@@ -122,26 +122,47 @@ export const subjectObjects = (input: {
     return { subjectMessage, thread }
   })
 
-/** What the subject's `subject-prior-send` did. */
+/**
+ * The key only this module can write: a `PriorSend` exists only as `subjectPriorSend`'s answer, so the raw call
+ * (`Drivers.rawCall`), which needs one, cannot run unless the runner asked for the prior send first (M4 verifier:
+ * nothing offline held the runner to the H-053 rows' prior send).
+ */
+const issued: unique symbol = Symbol("Fixtures.PriorSend")
+
+/** What the subject's `subject-prior-send` did. Made only by {@link subjectPriorSend}. */
 export type PriorSend =
-  | { readonly _tag: "Sent" }
+  /** The setup has no `subject-prior-send` fixture; nothing was sent. */
+  | { readonly [issued]: true; readonly _tag: "NotRequested" }
+  /** The subject sent it; the message's ID goes to the run log. */
+  | { readonly [issued]: true; readonly _tag: "Sent"; readonly messageId: MessageId }
   /** Discord refused it (a 20016 here would be slowmode applying to the subject): the setup cannot be built. */
-  | { readonly _tag: "Refused"; readonly status: number; readonly code: number }
+  | { readonly [issued]: true; readonly _tag: "Refused"; readonly status: number; readonly code: number }
 
 /**
  * Sends the subject's `subject-prior-send` message in `channel`, after Converge, with the setup's own permissions
- * and slowmode, so the operation that follows is the subject's second send in a row (H-053). Nothing to do for a
+ * and slowmode, so the operation that follows is the subject's second send in a row (H-053). `NotRequested` for a
  * setup without the fixture. No answer within the step's deadline aborts the run.
  */
 export const subjectPriorSend = (setup: Setup, channel: ChannelId): Effect.Effect<PriorSend, LabRequestFailed, SubjectRaw> =>
   Effect.gen(function* () {
-    if (!setup.fixtures.includes("subject-prior-send")) return { _tag: "Sent" }
+    if (!setup.fixtures.includes("subject-prior-send")) return { [issued]: true, _tag: "NotRequested" }
     const subject = yield* SubjectRaw
     const sent = yield* subject.createMessage(channel, { content: "lab prior send", allowed_mentions: { parse: [] } }).pipe(labStep("fixtures: the subject's prior send"), Effect.result)
-    if (sent._tag === "Success") return { _tag: "Sent" }
+    if (sent._tag === "Success") return { [issued]: true, _tag: "Sent", messageId: (yield* Wire.decode(Created, "createMessage")(sent.success)).id }
     if (sent.failure.status === 0) return yield* Effect.fail(sent.failure)
-    return { _tag: "Refused", status: sent.failure.status, code: sent.failure.code }
+    return { [issued]: true, _tag: "Refused", status: sent.failure.status, code: sent.failure.code }
   })
+
+/**
+ * Whether `prior` is what `setup` asks for: `Sent` exactly when the setup has the `subject-prior-send` fixture.
+ * The raw call checks it, so an H-053 row cannot run its operation without the prior send.
+ */
+export const priorSendProblem = (setup: Setup, prior: PriorSend): string | undefined => {
+  const wanted = setup.fixtures.includes("subject-prior-send")
+  if (wanted && prior._tag !== "Sent") return `the setup has subject-prior-send, but the prior send is ${prior._tag}`
+  if (!wanted && prior._tag !== "NotRequested") return `the setup has no subject-prior-send, but the prior send is ${prior._tag}`
+  return undefined
+}
 
 /** Makes the harness's objects in `channel` (see the module comment); `existing-reaction` uses `emoji.existing`. */
 export const harnessObjects = (setup: Setup, channel: ChannelId): Effect.Effect<HarnessObjects, LabRequestFailed, HarnessRest> =>
