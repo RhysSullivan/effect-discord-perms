@@ -1,0 +1,35 @@
+L38:10 TS2339
+Property 'send' does not exist on type 'CategoryChannel<never>'.
+
+L41:7 TS2339
+Property 'send' does not exist on type 'ForumChannel<never>'.
+
+L44:11 TS2339
+Property 'crosspost' does not exist on type 'OwnMessage<"text">'.
+
+L47:6 TS2339
+Property 'join' does not exist on type 'TextChannel<never>'.
+
+L50:9 TS2339
+Property 'edit' does not exist on type 'ForeignMessage<"text">'.
+
+L53:7 TS2339
+Property 'createThread' does not exist on type 'VoiceChannel<never>'.
+
+L56:7 TS2339
+Property 'createThread' does not exist on type 'ForumChannel<never>'.
+
+L59:9 TS2339
+Property 'pin' does not exist on type 'ForeignMessage<"voice">'.
+
+L62:14 TS2322
+Type '"voice channels have no topic"' is not assignable to type '"voice channels have no topic" & Invalid<"topic cannot be edited on this channel kind">'.
+  Type 'string' is not assignable to type 'Invalid<"topic cannot be edited on this channel kind">'.
+
+L65:49 TS2322
+Type 'true' is not assignable to type 'true & Invalid<"announcement channels only have public threads">'.
+  Type 'boolean' is not assignable to type 'Invalid<"announcement channels only have public threads">'.
+
+L68:17 TS2345
+Argument of type '[string & Brand<"MessageId">]' is not assignable to parameter of type 'readonly [string & Brand<"MessageId">, string & Brand<"MessageId">, ...(string & Brand<"MessageId">)[]]'.
+  Source has 1 element(s) but target requires 2.

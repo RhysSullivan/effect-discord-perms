@@ -175,7 +175,8 @@ describe("which payload- and argument-derived tags each operation may declare (E
    * the error map cannot widen or narrow an operation's declared limits without this table changing too:
    * `ContentTooLong`, `EmbedTooLarge` and `MessageEmpty` on every send, a forum post and an own edit; `PollTooLarge`
    * on sends and posts (an edit carries no poll); `NameTooLong` on thread creation, posts and channel, voice and
-   * thread edits; `TopicTooLong` on channel edits only (voice, stage and threads have no topic); `SlowmodeOutOfRange`
+   * thread edits; `TopicTooLong` on channel edits and voice-row edits (a stage channel's topic, M6 live; threads have
+   * none); `SlowmodeOutOfRange`
    * on channel, voice and thread edits; `NicknameTooLong`, `TimeoutTooLong` and `TooManyMessagesToDelete` on their
    * one operation each.
    */
@@ -193,7 +194,7 @@ describe("which payload- and argument-derived tags each operation may declare (E
     "channel.createThread.public": ["name"],
     "channel.createThread.private": ["name"],
     "channel.edit": ["name", "topic", "slowmode"],
-    "voice.edit": ["name", "slowmode"],
+    "voice.edit": ["name", "topic", "slowmode"],
     "thread.edit": ["name", "slowmode"],
     "member.setNickname": ["nick"],
     "member.timeout": ["timeout"],

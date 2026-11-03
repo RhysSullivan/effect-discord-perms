@@ -1,0 +1,29 @@
+export const id = ChannelId.make("123456789012345678")
+const id: string & Brand<"ChannelId">
+
+export const literal = text.send({ content: "pong" })
+const literal: Effect.Effect<Sent<"text">, CommunicationDisabled | MissingSendMessages | MissingViewChannel | PermissionDeniedUnattributed | RateLimited | UnknownChannel | Transient, never>
+
+export const embed = text.send({ content: "hi", embeds: [{ title: "t" }] })
+const embed: Effect.Effect<Sent<"text">, CommunicationDisabled | EmbedTooLarge | MissingEmbedLinks | MissingSendMessages | MissingViewChannel | PermissionDeniedUnattributed | RateLimited | UnknownChannel | Transient, never>
+
+export const dynamicSend = text.send({ content: dynamic })
+const dynamicSend: Effect.Effect<SentDegradable<"text", "UseExternalEmojis">, CommunicationDisabled | ContentTooLong | MessageEmpty | MissingSendMessages | MissingViewChannel | PermissionDeniedUnattributed | RateLimited | UnknownChannel | Transient, never>
+
+export const widened = text.send(built)
+const widened: Effect.Effect<SentDegradable<"text", "MentionEveryone" | "SendTTSMessages" | "UseExternalEmojis">, CommunicationDisabled | ContentTooLong | EmbedTooLarge | MessageEmpty | MissingAttachFiles | MissingEmbedLinks | MissingReadMessageHistoryForReply | MissingSendMessages | MissingSendPolls | MissingUseExternalStickers | ... 5 more ... | Transient, never>
+
+export const union = anyChannel.send({ content: "pong" })
+const union: Effect.Effect<Sent<"announcement" | "announcement-thread" | "private-thread" | "public-thread" | "stage" | "text" | "voice">, CommunicationDisabled | MissingConnect | MissingSendMessages | MissingSendMessagesInThreads | MissingViewChannel | PermissionDeniedUnattributed | RateLimited | ThreadLocked | UnknownChannel | Transient, never>
+
+export const required = Permissions.require(text, ["SendMessages", "EmbedLinks"])
+const required: Effect.Effect<TextChannel<"EmbedLinks" | "SendMessages">, CommunicationDisabled | MissingEmbedLinks | MissingSendMessages | MissingViewChannel | UnknownChannel | Transient, never>
+
+export const afterRequire = checked.send({ content: "hi", embeds: [{ title: "t" }] })
+const afterRequire: Effect.Effect<Sent<"text">, CommunicationDisabled | EmbedTooLarge | MissingViewChannel | PermissionDeniedUnattributed | PermissionRevokedSinceCheck | RateLimited | UnknownChannel | Transient, never>
+
+export const pin = foreign.pin()
+const pin: Effect.Effect<void, CommunicationDisabled | MaximumPinsReached | MissingPinMessages | MissingReadMessageHistory | MissingViewChannel | PermissionDeniedUnattributed | ThreadArchived | UnknownMessage | Transient, never>
+
+export const kick = member.kick()
+const kick: Effect.Effect<void, CommunicationDisabled | MissingKickMembers | PermissionDeniedUnattributed | TargetAboveInHierarchy | TwoFactorRequired | UnknownMember | Transient, never>

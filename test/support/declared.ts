@@ -30,7 +30,7 @@ export const limitTags: { readonly [F in LimitField]: string } = {
 /** Every tag `op` declares for a request with `args` on a handle that granted `granted`. */
 export const declaredTags = (op: OpName, args: DecideArgs, granted: ReadonlyArray<PermissionFlag> = []): ReadonlySet<string> => {
   const row: OpSpec = Operations[op]
-  const flags = [...row.flags, ...errorFlags(args.payload)]
+  const flags = [...row.flags, ...errorFlags(args.payload), ...(args.extraFlags ?? [])]
   const tags = row.tags.filter((tag) => (tag === "SlowmodeActive" ? Observed.slowmodeAppliesToBots : tag === "CommunicationDisabled" ? Observed.botsCanBeTimedOut : true))
   return new Set([
     ...flags.map((flag) => `Missing${flag}`),

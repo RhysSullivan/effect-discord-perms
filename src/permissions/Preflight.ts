@@ -71,6 +71,11 @@ export interface DecideArgs {
   readonly creator?: boolean
   /** For a forum or media post: whether it carries a tag, which a channel with `REQUIRE_TAG` demands (H-044). */
   readonly tagged?: boolean
+  /**
+   * Error-mode flags the request needs beyond its row and payload: UseExternalEmojis for a reaction with another
+   * guild's emoji (§2.5), the flags `Permissions.require` checks (§2.6).
+   */
+  readonly extraFlags?: ReadonlyArray<PermissionFlag>
 }
 
 /** Preflight's verdict. */
@@ -106,15 +111,15 @@ export const degradableFlags = (op: OpName, args: DecideArgs): ReadonlyArray<Per
   return [...new Set([...degradeFlags(args.payload), ...(row.degrades ?? [])])]
 }
 
-/** The flags an operation with this request needs, in order: the row's, the payload's error-mode, then the degradable ones. */
+/** The flags an operation with this request needs, in order: the row's, the payload's error-mode, the extra ones, then the degradable ones. */
 export const requiredFlags = (op: OpName, args: DecideArgs): ReadonlyArray<PermissionFlag> => {
   const out: Array<PermissionFlag> = []
-  for (const flag of [...rowFlags(op, args), ...errorFlags(args.payload), ...degradableFlags(op, args)]) if (!out.includes(flag)) out.push(flag)
+  for (const flag of [...rowFlags(op, args), ...errorFlags(args.payload), ...(args.extraFlags ?? []), ...degradableFlags(op, args)]) if (!out.includes(flag)) out.push(flag)
   return out
 }
 
-/** The flags whose absence fails the request (the row's, as this request needs them, and the payload's error-mode flags). */
-export const errorModeFlags = (op: OpName, args: DecideArgs): ReadonlyArray<PermissionFlag> => [...new Set([...rowFlags(op, args), ...errorFlags(args.payload)])]
+/** The flags whose absence fails the request (the row's, as this request needs them, the payload's error-mode flags and the extra ones). */
+export const errorModeFlags = (op: OpName, args: DecideArgs): ReadonlyArray<PermissionFlag> => [...new Set([...rowFlags(op, args), ...errorFlags(args.payload), ...(args.extraFlags ?? [])])]
 
 /** Decides `op` over `resolution` (see the module comment). Pure. */
 export const decide = (op: OpName, resolution: Resolution, args: DecideArgs): Decision => {

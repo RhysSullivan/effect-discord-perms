@@ -18,7 +18,7 @@
  */
 import type { DiscordRESTError, DiscordRestService } from "dfx/DiscordREST"
 import { Context, Duration, Effect, Schema } from "effect"
-import type { HttpMethod } from "../errors/Cause.ts"
+import type { DiscordResponse, HttpMethod } from "../errors/Cause.ts"
 import type { Transient } from "../errors/Transient.ts"
 import * as Recompute from "../permissions/Recompute.ts"
 import type * as GuildState from "../state/GuildState.ts"
@@ -64,6 +64,21 @@ export type ApiError = CodeError | Recompute.Attributed | Transient
 export interface Interface {
   /** Runs `request` (see the module comment). */
   readonly execute: <A>(request: Request<A>) => Effect.Effect<A, ApiError>
+  /**
+   * A read that is not an operation-table row (a handle's lookup: `Channels.get`, `Members.get`), bounded by the
+   * deadline and decoded like `execute`'s. `refusal` maps the Discord answers the caller expects (an unknown or
+   * hidden object) to its errors; any other answer is an `UnmappedDiscordError` defect.
+   */
+  readonly read: <A, E>(read: Read<A, E>) => Effect.Effect<A, E | Transient>
+}
+
+/** One lookup read. */
+export interface Read<A, E> {
+  readonly route: Route
+  readonly call: (rest: DiscordRestService) => Effect.Effect<unknown, DiscordRESTError>
+  readonly response: Schema.Decoder<A>
+  /** The error an expected refusal means, or `undefined` for one the caller does not expect. */
+  readonly refusal: (response: DiscordResponse) => E | undefined
 }
 
 /** The REST wrapper of one bot build. */
@@ -111,5 +126,20 @@ export const make = (rest: DiscordRestService, guildState: GuildState.Interface)
         })
       )
 
-    return DiscordApi.of({ execute })
+    const read = <A, E>(lookup: Read<A, E>): Effect.Effect<A, E | Transient> =>
+      Effect.gen(function* () {
+        const { route } = lookup
+        const answer = yield* send(route.template, route.method, lookup.call(rest), config.requestDeadline)
+        if (answer._tag === "Ok") {
+          return yield* Schema.decodeUnknownEffect(lookup.response)(answer.body).pipe(
+            Effect.mapError((error) => new Error(`${route.method} ${route.template}: a 2xx body did not decode: ${error.message}`)),
+            Effect.orDie
+          )
+        }
+        const refused = lookup.refusal(answer.response)
+        if (refused === undefined) return yield* Effect.die(new UnmappedDiscordError({ operation: `read ${route.template}`, reason: "an answer the lookup does not expect", response: answer.response }))
+        return yield* Effect.fail(refused)
+      }).pipe(Effect.withSpan("discord.rest", { attributes: { "discord.route": lookup.route.template, "discord.method": lookup.route.method } }))
+
+    return DiscordApi.of({ execute, read })
   })

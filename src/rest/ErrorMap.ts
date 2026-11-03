@@ -333,7 +333,7 @@ export const limitFields: { readonly [Op in OpName]?: ReadonlyArray<LimitField> 
   "channel.createThread.public": ["name"],
   "channel.createThread.private": ["name"],
   "channel.edit": ["name", "topic", "slowmode"],
-  "voice.edit": ["name", "slowmode"],
+  "voice.edit": ["name", "topic", "slowmode"],
   "thread.edit": ["name", "slowmode"],
   "member.setNickname": ["nick"],
   "member.timeout": ["timeout"],

@@ -52,7 +52,9 @@ const widest = (op: OpName): { readonly args: DecideArgs; readonly limits: Limit
     ...(fields.includes("timeout") ? { timeout: true } : {}),
     ...(fields.includes("messageCount") ? { messageCount: 101 } : {})
   }
-  return { args: { payload: takesPayload ? payloadRuleNames : [] }, limits }
+  // a reaction with another guild's emoji also needs UseExternalEmojis (`extraFlags`, M6)
+  const reacts = Operations[op].variant === "reaction"
+  return { args: { payload: takesPayload ? payloadRuleNames : [], ...(reacts ? { extraFlags: ["UseExternalEmojis"] } : {}) }, limits }
 }
 
 /** One inner 50035 error per field the request declares, at the path Discord reports it (§4.9). */

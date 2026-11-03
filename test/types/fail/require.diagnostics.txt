@@ -1,0 +1,2 @@
+L14:155 TS2345
+Argument of type '"MissingSendMessages"' is not assignable to parameter of type '"CommunicationDisabled" | "DiscordUnavailable" | "MissingViewChannel" | "NetworkError" | "PermissionDeniedUnattributed" | "PermissionRevokedSinceCheck" | "RateLimited" | "RequestTimedOut" | "UnknownChannel" | readonly [...]'.
