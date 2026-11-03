@@ -1,7 +1,7 @@
 import * as fs from "node:fs"
 import { describe, expect, it } from "@effect/vitest"
 import { DiscordREST } from "dfx/DiscordREST"
-import { Cause, Effect, Exit, Option, Schema } from "effect"
+import { Cause, Effect, Exit, Logger, Option, Schema } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import * as Materialize from "../../harness/Materialize.ts"
 import * as Predict from "../../harness/Predict.ts"
@@ -115,6 +115,25 @@ describe("the recompute after 50013 and 50001", () => {
       expect(Option.map(error, (value) => value.cause)).toEqual(
         Option.some(new DiscordResponse({ status: 403, code: 50013, message: "Missing Permissions", method: "POST", route: "/channels/{channel.id}/messages", fieldErrors: [], attributedBy: "code" }))
       )
+    })
+  )
+
+  it.effect("logs the flags the bot lacks outside the request's requirements when it attributes nothing (§4.9)", () =>
+    Effect.gen(function* () {
+      const logged: Array<string> = []
+      const collector = Logger.make((options) => {
+        logged.push(`${options.logLevel}: ${[options.message].flat().join(" ")}`)
+      })
+      const { exit } = yield* run({ answer: onPost(refusal(403, 50013)), before: snapshotWithText(), after: snapshotWithText(), target: target("channel.send") }).pipe(
+        Effect.provide(Logger.layer([collector]))
+      )
+      expect(failureOf(exit)).toMatchObject({ tag: "PermissionDeniedUnattributed" })
+      const warning = logged.find((line) => line.includes("not attributed"))
+      expect(warning).toContain("Warn")
+      expect(warning).toContain("holds every flag the request needs (ViewChannel, SendMessages)")
+      // the bot lacks ManageChannels (among others): a flag outside the requirements is named, never attributed
+      expect(warning).toContain("ManageChannels")
+      expect(warning).not.toMatch(/outside them: [^\n]*\bSendMessages\b/)
     })
   )
 

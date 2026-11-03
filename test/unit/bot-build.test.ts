@@ -8,9 +8,10 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { Bot, BotRuntime, intentBits } from "../../src/bot/Bot.ts"
 import { BotInternals, SubjectRaw } from "../../src/bot/Internals.ts"
 import { StartupFailed } from "../../src/bot/Startup.ts"
+import * as DiscordApi from "../../src/rest/DiscordApi.ts"
 import { send } from "../../src/rest/Request.ts"
 import * as Schemas from "../../src/rest/Schemas.ts"
-import { ChannelId, GuildId } from "../../src/Snowflake.ts"
+import { ChannelId, GuildId, RoleId, UserId } from "../../src/Snowflake.ts"
 import { channelUpdate, guildCreate, ids, memberObject, overwrite } from "../support/dispatches.ts"
 import { makeFakeGateway } from "../support/fakeGateway.ts"
 
@@ -195,4 +196,81 @@ describe("the bot build", () => {
       expect(reasonOf(yield* Fiber.join(fiber))).toBe("guild-not-ready")
     })
   )
+
+  describe("the request deadline comes from DiscordApiConfig, for every call of the build (§4.1, §4.10)", () => {
+    /** A build whose base client never answers `stalled` paths; everything else as in `setup`. */
+    const stalledBuild = (stalled: (path: string) => boolean, deadline: Duration.Duration) =>
+      Effect.gen(function* () {
+        const client = HttpClient.make((request) => {
+          const path = new URL(request.url).pathname.replace(/^\/api\/v\d+/, "")
+          if (stalled(path)) return Effect.never
+          const answer = (status: number, body: unknown) =>
+            Effect.succeed(HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })))
+          if (path === "/users/@me") return answer(200, { id: ids.bot, username: "Perms Subject" })
+          if (path === "/applications/@me") return answer(200, { id: "100000000000000002", flags: ApplicationFlags.GatewayGuildMembers })
+          if (path === `/guilds/${ids.guild}/members/${ids.bot}`) return answer(200, memberObject(ids.bot, [ids.roleA]))
+          if (path === `/guilds/${ids.guild}`) return answer(200, guildCreate)
+          if (path === `/guilds/${ids.guild}/members/${ids.target}`) return answer(200, memberObject(ids.target, []))
+          if (path === `/guilds/${ids.guild}/members/${ids.target}/roles/${ids.roleA}`) return answer(403, { message: "Missing Permissions", code: 50013 })
+          return answer(404, { message: "404: Not Found", code: 0 })
+        })
+        const gateway = yield* makeFakeGateway({ userFor: (token) => (token === "fake-subject-token" ? ids.bot : undefined), guildsFor: () => [guildCreate] }, () => 0)
+        return BotInternals.layerWith(bot, { token: Config.succeed(Redacted.make("fake-subject-token")), guildId }).pipe(
+          Layer.provide(Layer.mergeAll(Layer.succeed(HttpClient.HttpClient, client), gateway.layer)),
+          Layer.provide(Layer.succeed(DiscordApi.DiscordApiConfig, { requestDeadline: deadline }))
+        )
+      })
+    const deadline = Duration.millis(150)
+
+    it.live("a startup check that gets no answer fails with discord-unavailable after the configured deadline", () =>
+      Effect.gen(function* () {
+        const layer = yield* stalledBuild((path) => path === "/users/@me", deadline)
+        const exit = yield* Effect.exit(Effect.provide(Effect.service(BotRuntime), layer).pipe(Effect.scoped))
+        const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error instanceof StartupFailed ? [error.reason, error.cause?._tag === "NoResponse" ? error.cause.afterMs : undefined] : error).toEqual(["discord-unavailable", 150])
+      })
+    )
+
+    it.live("a guild-state refresh read that gets no answer fails with RequestTimedOut after the configured deadline", () =>
+      Effect.gen(function* () {
+        const layer = yield* stalledBuild((path) => path === `/channels/${ids.text}`, deadline)
+        yield* Effect.gen(function* () {
+          const runtime = yield* BotRuntime
+          const exit = yield* runtime.guildState.refresh(guildId, ChannelId.make(ids.text)).pipe(Effect.exit)
+          const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+          expect(error?._tag === "RequestTimedOut" ? [error.cause.reason, error.cause.afterMs] : error).toEqual(["deadline", 150])
+        }).pipe(Effect.provide(layer), Effect.scoped)
+      })
+    )
+
+    it.live("a recompute read that gets no answer fails with RequestTimedOut after the configured deadline", () =>
+      Effect.gen(function* () {
+        // the role assignment is refused with 50013; the recompute refreshes, then reads the target, which stalls
+        let targetReads = 0
+        const layer = yield* stalledBuild((path) => path === `/guilds/${ids.guild}/members/${ids.target}` && ++targetReads > 0, deadline)
+        yield* Effect.gen(function* () {
+          const runtime = yield* BotRuntime
+          const exit = yield* runtime.api
+            .execute({
+              target: {
+                op: "member.addRole",
+                guildId,
+                scope: { _tag: "Guild" },
+                granted: [],
+                args: { payload: [] },
+                completion: { _tag: "Member", targetUserId: UserId.make(ids.target), role: RoleId.make(ids.roleA) }
+              },
+              route: { method: "PUT", template: "/guilds/{guild.id}/members/{user.id}/roles/{role.id}" },
+              call: (rest) => rest.addGuildMemberRole(ids.guild, ids.target, ids.roleA),
+              response: Schemas.Message,
+              limits: {}
+            })
+            .pipe(Effect.exit)
+          const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+          expect(error?._tag === "RequestTimedOut" ? [error.cause.route, error.cause.afterMs] : error).toEqual(["/guilds/{guild.id}/members/{user.id}", 150])
+          expect(targetReads).toBe(1)
+        }).pipe(Effect.provide(layer), Effect.scoped)
+      })
+    )
+  })
 })

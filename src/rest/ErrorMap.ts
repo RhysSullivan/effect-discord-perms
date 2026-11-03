@@ -212,8 +212,8 @@ export interface CodeEntry {
 
 /**
  * Every code the library maps (§3.1). Statuses observed by the M4 matrix: 50013 and 50001 (403), 50083 (400),
- * 40067 (400), 160002 (403), 160005 (403). The rest are discord-semantics §8.1's hypotheses, with both candidates
- * where it lists two; a status outside the list is unmapped (H-082). Phase-3 codes (InteractionExpired) and
+ * 40067 (400), 160002 (403), 160005 (403). The rest are the statuses discord-semantics §8.1 and DESIGN §3.1 give
+ * (20016: a coded 429 or 400, the only code they give two for); a status outside the list is unmapped (H-082). Phase-3 codes (InteractionExpired) and
  * command registration (30034, `DailyCommandCreateLimit`) are mapped by their own modules (M8, M9).
  */
 export const Codes: { readonly [code: number]: CodeEntry } = {
@@ -226,7 +226,7 @@ export const Codes: { readonly [code: number]: CodeEntry } = {
   10007: { statuses: [404], meaning: { _tag: "Tag", tag: "UnknownMember" } },
   10008: { statuses: [404], meaning: { _tag: "Tag", tag: "UnknownMessage" } },
   10011: { statuses: [404], meaning: { _tag: "Tag", tag: "UnknownRole" } },
-  10014: { statuses: [400, 404], meaning: { _tag: "Tag", tag: "UnknownEmoji" } },
+  10014: { statuses: [404], meaning: { _tag: "Tag", tag: "UnknownEmoji" } },
   30003: { statuses: [400], meaning: { _tag: "Tag", tag: "MaximumPinsReached" } },
   30010: { statuses: [400], meaning: { _tag: "Tag", tag: "MaximumReactionsReached" } },
   40033: { statuses: [400], meaning: { _tag: "Tag", tag: "AlreadyCrossposted" } },

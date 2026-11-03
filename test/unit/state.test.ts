@@ -214,6 +214,40 @@ describe("GuildState", () => {
     })
   )
 
+  it.effect("refreshGuild reads the bot's member and the guild only, commits the owner, roles and member, leaves the channels alone, and clears stale", () =>
+    Effect.gen(function* () {
+      const paths: Array<string> = []
+      const newOwner = "200000000000000077"
+      const state = yield* make(
+        scriptedRestEffect((method, path) =>
+          Effect.sync(() => {
+            paths.push(`${method} ${path}`)
+            if (path === `/guilds/${ids.guild}/members/${ids.bot}`) return json(200, memberObject(ids.bot, [ids.roleB], "2026-11-01T12:30:00.000000+00:00"))
+            if (path === `/guilds/${ids.guild}`) return json(200, { ...guildCreate, owner_id: newOwner, roles: [role(ids.guild, "0", 0), role(ids.roleB, "8", 3)] })
+            return json(500, { code: 0, message: "a channel read during refreshGuild" })
+          })
+        )
+      )
+      yield* state.apply("READY", ready)
+      yield* state.apply("GUILD_CREATE", guildCreate)
+      yield* state.apply("CHANNEL_UPDATE", { id: ids.text, guild_id: ids.guild, type: "text" })
+      const before = guildOf(yield* state.snapshot)
+      expect(before.stale).toBe(true)
+      expect(yield* state.refreshGuild(guildId)).toEqual({ committed: true })
+      expect([...paths].sort()).toEqual([`GET /guilds/${ids.guild}`, `GET /guilds/${ids.guild}/members/${ids.bot}`])
+      const after = guildOf(yield* state.snapshot)
+      expect(after.stale).toBe(false)
+      expect(after.ownerId).toBe(newOwner)
+      expect([...after.roles.keys()].sort()).toEqual([ids.guild, ids.roleB].sort())
+      expect(after.roles.get(RoleId.make(ids.roleB))?.permissions).toBe(Flags.fromFlags(["Administrator"]))
+      expect(after.botMember).toEqual({ roleIds: [ids.roleB], timedOutUntil: "2026-11-01T12:30:00.000000+00:00" })
+      // the channels, the unseen set and the thread membership are exactly what the gateway left
+      expect(after.channels).toEqual(before.channels)
+      expect(after.unseen).toEqual(before.unseen)
+      expect(after.threadMembership).toEqual(before.threadMembership)
+    })
+  )
+
   it.effect("records a channel getChannel answers 50001 or 10003 for as unseen, without failing", () =>
     Effect.gen(function* () {
       const state = yield* make(

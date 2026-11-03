@@ -1660,7 +1660,9 @@ listed for the operation map; any other 50035 is a defect. dfx failure shapes
 
   The cause is the real `DiscordResponse` with `attributedBy: "recompute"`. A
   missing flag outside the op's requirement list is not attributed (the result
-  is Unattributed) and is logged; the matrix should never produce one.
+  is Unattributed) and is logged (the recompute logs, at Warning, every flag the
+  bot lacks outside the requirements when it finds nothing); the matrix should
+  never produce one.
 
 **As built (M5).**
 
@@ -1668,8 +1670,9 @@ listed for the operation map; any other 50035 is a defect. dfx failure shapes
   meaning** (recompute with a fallback tag, a state tag, a coded rate limit, an
   empty message, a bulk-delete count, or 50035's fields). Statuses observed by
   the M4 matrix are exact (50013, 50001, 160002 and 160005 with 403; 50083 and
-  40067 with 400); the others are discord-semantics §8.1's hypotheses, both
-  candidates where it lists two. A status outside the list is unmapped (H-082).
+  40067 with 400); the others are the hypotheses of discord-semantics §8.1 and
+  §3.1 (20016: a coded 429, or 400 from §3.1; 10014: 404 only). A status outside
+  the list is unmapped (H-082).
 - **A code maps for a request only to a tag the request declares:** a tag of
   the operation's row, a missing flag of the request's own requirements (160002
   needs ReadMessageHistory among them, so only a reply maps it), or a

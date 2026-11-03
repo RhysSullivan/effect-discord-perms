@@ -737,8 +737,10 @@ the same commit.
   `LimitFacts`.
 - **M5: statuses.** The M4 matrix observed 403 for 50013, 50001, 160002 and 160005, and 400 for 50083 and 40067
   (`test/unit/error-map.test.ts` holds the table to every pair the truth table recorded). Every other status is a
-  hypothesis from discord-semantics §8.1, with both candidates where it lists two (10014: 400 or 404; 20016: 429 or
-  400); a status outside the list is unmapped (H-082), so M6's rows decide them. A coded rate limit maps only with
+  hypothesis from discord-semantics §8.1 and DESIGN §3.1 (20016: a coded 429 or 400, from §3.1; corrected before M6:
+  this line said 10014 came with 400 or 404 "where the research lists two", but discord-semantics §8.1 and §3.1 give
+  10014 only 404, and the 400 had no source, so `Codes` now lists 404 alone); a status outside the list is unmapped
+  (H-082), so M6's rows decide them. A coded rate limit maps only with
   status 429 and a `retry_after` (`RateLimited` needs it); 30034 (`DailyCommandCreateLimit`) and the interaction
   codes (`InteractionExpired`) are left to M8's registration and M9's runner, which own them.
 - **M5: a recompute that finds nothing returns the code's own error with `attributedBy: "code"`** (§4.9 clarified).
@@ -766,6 +768,30 @@ the same commit.
   Effect's HTTP client opens its own span below it, with `url.full` and the Authorization header redacted. Bot
   routes carry only IDs, but interaction webhook URLs carry the interaction token in their path: M9 must keep those
   requests out of that span (for example `HttpClient.TracerDisabledWhen`).
+
+- **Before M6 (the M5 verifier's six minor findings).** Each new test was checked against the verifier's mutation
+  (applied, the test failed, reverted), except where noted:
+  - `GuildState.refreshGuild` now has its own case in `test/unit/state.test.ts`, over the real state and the
+    scripted fake: it reads only the bot's member and the guild, commits the owner, roles and member, leaves the
+    channels, the unseen set and the thread membership as the gateway left them, and clears `stale` (the member read
+    dying without a channel fails it);
+  - `ErrorMap.limitFields` is pinned by a table transcribed by hand from DESIGN §3.1 and §2.3-§2.6 in
+    `test/unit/error-map.test.ts`, one case per operation row (dropping `poll` from `channel.send` or adding `topic`
+    to `thread.edit` fails it); M6's `test/types/pass/op-errors.ts` pins the type side;
+  - the deadline from `DiscordApiConfig` is tested through the real bot build with a 150 ms deadline: a stalled
+    startup check fails with `discord-unavailable` and a `NoResponse` of 150 ms, a stalled guild-state refresh and a
+    stalled recompute read (the target member of a refused role assignment) with `RequestTimedOut` after 150 ms
+    (`test/unit/bot-build.test.ts`; hard-coding 30 s in `Internals.ts` or in `DiscordApi.make` fails them);
+  - 10014's statuses are `[404]` (the LOG line under "M5: statuses" is corrected: discord-semantics §8.1 and DESIGN
+    §3.1 list only 404, and the 400 had no source); M6's rows decide it if a reaction with an unknown emoji is run;
+  - `Recompute.attribute` now logs at Warning, when it attributes nothing, every flag the bot lacks outside the
+    request's requirements (DESIGN §4.9 says so; `test/unit/recompute.test.ts` captures the line);
+  - an embeds path without an index (`embeds.title`) is unmapped (`test/unit/error-map.test.ts`), and
+    `Preflight.stateArgs` marks the guild's owner (and a holder of an Administrator role) as an Administrator target
+    (`test/unit/preflight.test.ts`). The verifier's owner mutation (removing `|| target is the owner`) still survives,
+    and cannot be killed while `ResolverRules.ownerHasAll` is `true` (H-002): the owner's base permissions are then
+    every flag, Administrator included, so the branch only matters if that rule flips. The new case pins the
+    behaviour (the owner is an Administrator target, H-067) whichever branch provides it.
 
 ## Escalated rules
 

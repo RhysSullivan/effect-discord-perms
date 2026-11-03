@@ -20,8 +20,9 @@
  *    50001, the dedicated code's tag otherwise.
  *
  * `decide` only checks the flags the operation and its payload require, so a missing flag outside them is never
- * attributed. State the refreshed snapshot still lacks (the guild was deleted meanwhile) also attributes
- * nothing, and is logged.
+ * attributed; when nothing is found, the flags the bot lacks outside the requirements are logged at Warning, so a
+ * requirement the operation table lacks shows up (§4.9). State the refreshed snapshot still lacks (the guild was
+ * deleted meanwhile) also attributes nothing, and is logged.
  */
 import type { DiscordRestService } from "dfx/DiscordREST"
 import { Clock, type Duration, Effect, Schema } from "effect"
@@ -34,6 +35,7 @@ import { send } from "../rest/Request.ts"
 import * as Schemas from "../rest/Schemas.ts"
 import type { ChannelId, EmojiId, GuildId, MessageId, RoleId, UserId } from "../Snowflake.ts"
 import type * as GuildState from "../state/GuildState.ts"
+import * as Flags from "./Flags.ts"
 import type { OpName } from "./Operations.ts"
 import { type DecideArgs, decide, type Hierarchy, type PreflightError, stateArgs, toHandleError } from "./Preflight.ts"
 import { type FromSnapshot, guildInputFromSnapshot, inputFromSnapshot, type Resolution, resolve } from "./Resolver.ts"
@@ -163,8 +165,17 @@ export const attribute = (context: Context, target: Target, response: DiscordRes
     }
     const resolution = resolve(fromState.input)
     const args = yield* complete(context, target, fromState, resolution)
-    const [first] = decide(target.op, resolution, args).failures
-    if (first === undefined) return fallback
+    const decision = decide(target.op, resolution, args)
+    const [first] = decision.failures
+    if (first === undefined) {
+      // §4.9: a flag outside the request's requirements is never attributed; it is logged, so a requirement the
+      // operation table lacks shows up (the matrix should never produce one)
+      const outside = Flags.toSortedNames(Flags.minus(Flags.all, resolution.effective)).filter((flag) => !decision.required.includes(flag))
+      yield* Effect.logWarning(
+        `recompute: ${target.op}: Discord refused with ${response.status} ${response.code}, but the refreshed state holds every flag the request needs (${decision.required.join(", ") || "none"}); not attributed. Flags the bot lacks outside them: ${outside.join(", ") || "none"}`
+      )
+      return fallback
+    }
     const cause = new DiscordResponse({ ...response, attributedBy: "recompute" })
     return toHandleError(target.op, first, target.granted, cause)
   })

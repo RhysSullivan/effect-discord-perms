@@ -4,12 +4,12 @@ import type { PermissionFlag } from "../../src/errors/Missing.generated.ts"
 import * as Flags from "../../src/permissions/Flags.ts"
 import type { OpName } from "../../src/permissions/Operations.ts"
 import { type Failure, sortFailures } from "../../src/permissions/Order.ts"
-import { decide, requiredFlags, tagOf, toError } from "../../src/permissions/Preflight.ts"
+import { decide, requiredFlags, stateArgs, tagOf, toError } from "../../src/permissions/Preflight.ts"
 import { type ChannelInput, resolve } from "../../src/permissions/Resolver.ts"
 import type { PayloadRuleName } from "../../src/payload/PayloadRules.ts"
 import { categoriesOf } from "../support/categories.ts"
 import { UserId } from "../../src/Snowflake.ts"
-import { channel, everyone, guild, guildId, known, later, member, memberOverwrite, now, role, roleOverwrite, set, thread } from "../support/guild.ts"
+import { channel, everyone, guild, guildId, known, later, member, memberOverwrite, now, otherId, ownerId, role, roleA, roleB, roleC, roleOverwrite, set, thread } from "../support/guild.ts"
 
 /**
  * Preflight (DESIGN §4.7, §3.2): every problem, most fundamental first; degrade-mode flags reported, never
@@ -203,5 +203,23 @@ describe("Preflight.decide for the M4 operations", () => {
   it("reports a read's degradation: the pins list without ReadMessageHistory (H-107)", () => {
     const resolution = resolve({ guild: granted("ViewChannel"), channel: known(channel("text")), member: member([]), now })
     expect(decide("channel.pins", resolution, { payload: [] })).toMatchObject({ failures: [], degraded: ["ReadMessageHistory"], required: ["ViewChannel", "ReadMessageHistory"] })
+  })
+})
+
+describe("Preflight.stateArgs (the arguments completed from the state, shared by step (a) and the recompute)", () => {
+  const roles = [role(everyone, set("ViewChannel")), role(roleA, set("ModerateMembers"), 5), role(roleB, set("ManageNicknames"), 1)]
+  const resolution = resolve({ guild: guild(roles), channel: { _tag: "Guild" }, member: member([roleA]), now })
+  const hierarchyFor = (target: ReturnType<typeof member>) => ({ guild: guild(roles), bot: member([roleA]), target, role: undefined })
+
+  it("marks the guild's owner as an Administrator target, whatever its roles (H-067)", () => {
+    const owner = member([], null, ownerId)
+    expect(stateArgs("member.timeout", { payload: [] }, resolution, hierarchyFor(owner)).target).toEqual({ below: false, administrator: true })
+  })
+
+  it("marks a target with an Administrator role as one, and a plain member below the bot as neither", () => {
+    const admin = guild([...roles, role(roleC, set("Administrator"), 0)])
+    const adminTarget = member([roleC], null, otherId)
+    expect(stateArgs("member.timeout", { payload: [] }, resolution, { guild: admin, bot: member([roleA]), target: adminTarget, role: undefined }).target).toEqual({ below: true, administrator: true })
+    expect(stateArgs("member.timeout", { payload: [] }, resolution, hierarchyFor(member([roleB], null, otherId))).target).toEqual({ below: true, administrator: false })
   })
 })

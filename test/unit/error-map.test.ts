@@ -9,7 +9,8 @@ import { ErrorClasses } from "../../src/errors/index.ts"
 import { ErrorCategories, PermissionFlags } from "../../src/errors/Missing.generated.ts"
 import { Observed } from "../../src/permissions/Observed.ts"
 import type { OpName } from "../../src/permissions/Operations.ts"
-import { Codes, dedicatedCodeTags, type LimitFacts, type Mapped, mapResponse, undeclarableFields } from "../../src/rest/ErrorMap.ts"
+import { Codes, dedicatedCodeTags, type LimitFacts, type LimitField, limitFields, type Mapped, mapResponse, undeclarableFields } from "../../src/rest/ErrorMap.ts"
+import { Operations } from "../../src/permissions/Operations.ts"
 import { categoriesOf } from "../support/categories.ts"
 import { declaredTags, promisedClass } from "../support/declared.ts"
 
@@ -161,7 +162,48 @@ describe("50035 refined by its inner paths (§4.9)", () => {
     expect(mapped("channel.send", 400, 50035, { limits: { embeds: true }, fieldErrors: [at("content")] })).toEqual({ unmapped: "50035 for channel.send: content is not declared" })
     expect(mapped("channel.send", 400, 50035, { limits: send, fieldErrors: [at("content"), at("allowed_mentions", "parse")] })).toEqual({ unmapped: "50035 for channel.send: allowed_mentions.parse names no limit" })
     expect(mapped("channel.send", 400, 50035, { limits: send, fieldErrors: [at("embeds", "0", "url")] })).toEqual({ unmapped: "50035 for channel.send: embeds.0.url is not a declared embed limit" })
+    // an embed field directly under `embeds` (no index) names no embed
+    expect(mapped("channel.send", 400, 50035, { limits: send, fieldErrors: [at("embeds", "title")] })).toEqual({ unmapped: "50035 for channel.send: embeds.title is not a declared embed limit" })
     expect(mapped("forum.createPost", 400, 50035, { limits: send, fieldErrors: [at("content")] })).toEqual({ unmapped: "50035 for forum.createPost: content names no limit" })
     expect(mapped("channel.send", 400, 50035, { limits: send })).toEqual({ unmapped: "a 50035 without inner errors" })
+  })
+})
+
+describe("which payload- and argument-derived tags each operation may declare (ErrorMap.limitFields)", () => {
+  /**
+   * Transcribed by hand from DESIGN §3.1's "Raised by" column and §2.3-§2.6 (not derived from `limitFields`), so
+   * the error map cannot widen or narrow an operation's declared limits without this table changing too:
+   * `ContentTooLong`, `EmbedTooLarge` and `MessageEmpty` on every send, a forum post and an own edit; `PollTooLarge`
+   * on sends and posts (an edit carries no poll); `NameTooLong` on thread creation, posts and channel, voice and
+   * thread edits; `TopicTooLong` on channel edits only (voice, stage and threads have no topic); `SlowmodeOutOfRange`
+   * on channel, voice and thread edits; `NicknameTooLong`, `TimeoutTooLong` and `TooManyMessagesToDelete` on their
+   * one operation each.
+   */
+  const send: ReadonlyArray<LimitField> = ["empty", "content", "embeds", "poll"]
+  const edit: ReadonlyArray<LimitField> = ["empty", "content", "embeds"]
+  const expected: Readonly<Record<string, ReadonlyArray<LimitField>>> = {
+    "channel.send": send,
+    "thread.send": send,
+    "voice.send": send,
+    "dm.send": send,
+    "forum.createPost": [...send, "name"],
+    "message.edit.channel": edit,
+    "message.edit.thread": edit,
+    "message.edit.voice": edit,
+    "channel.createThread.public": ["name"],
+    "channel.createThread.private": ["name"],
+    "channel.edit": ["name", "topic", "slowmode"],
+    "voice.edit": ["name", "slowmode"],
+    "thread.edit": ["name", "slowmode"],
+    "member.setNickname": ["nick"],
+    "member.timeout": ["timeout"],
+    "channel.bulkDelete": ["messageCount"],
+    "thread.bulkDelete": ["messageCount"],
+    "voice.bulkDelete": ["messageCount"]
+  }
+
+  it.each(Object.keys(Operations))("%s", (op) => {
+    const declared: Readonly<Record<string, ReadonlyArray<LimitField> | undefined>> = limitFields
+    expect([...(declared[op] ?? [])].sort()).toEqual([...(expected[op] ?? [])].sort())
   })
 })
