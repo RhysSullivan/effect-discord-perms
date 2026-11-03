@@ -273,6 +273,60 @@ Before M5, from the M4 verifier's minor findings (read-only probes and self-test
   at the harness's 5 requests per second. Reset now reads each page's headers (`Wire.bucketWait`) and waits for the
   bucket's reset before the next page when the bucket is empty ("Design deviations").
 
+M6, the rule rows (`harness/scenario/catalog/rules.ts`, one named setup per pair, `rule/<setup>/<probe>`): each
+compile-time rule's valid side (the typed library call) and invalid side (what the types forbid, sent raw). The
+first rule run (`--only 'rule/**'`, 65 rows) disagreed with 12 of the planned expectations; each is now what the
+registry expects, and where Discord accepted what the types forbade, the types changed:
+
+- **M6, H-054 refuted: an announcement channel takes a slowmode.** The subject's raw `PATCH` of
+  `rate_limit_per_user: 5` on `lab-announcement` was applied (the answer carried it). Announcement channels now
+  have `slowmodeSeconds` in `edit` (their restriction and its rule are gone).
+- **M6: a stage channel takes a topic; a voice channel does not.** The raw topic `PATCH` of `lab-stage` was applied,
+  and the same `PATCH` of `lab-voice` answered 400 50035 `CHANNEL_TOPIC_INVALID` on `topic`, so stage channels have
+  `topic` in `edit` (the `voice.edit` row declares `TopicTooLong`), and `R-no-topic-on-voice` keeps the restriction
+  for voice with that pair.
+- **M6, H-086 refined: sending to a forum answers 400 50008** (`rule/forum/raw-send-forum`), as a category does
+  (`raw-send-category`, H-151), not 40058 (`R-no-send-forum`, `R-no-send-category`). A thread created in a forum
+  without a first message answers 400 50035 `BASE_TYPE_REQUIRED` on `message` (`R-forum-threads-need-a-message`).
+- **M6, H-085 refined: crossposting in a text channel answers 403 50001**, with View, SendMessages and
+  ReadMessageHistory granted (`raw-crosspost-text`, `R-crosspost-announcement-only`); a thread in a voice channel,
+  joining a text channel as a thread, and a private thread in an announcement channel answer 400 50024
+  (`R-no-threads-on-voice`, `R-thread-ops-threads-only`, `R-announcement-public-threads-only`, H-041 confirmed).
+- **M6, H-092 refined: a bulk delete of one ID answers 400 50035 `BASE_TYPE_BAD_LENGTH` on `messages`**, not 50016
+  (`R-bulk-delete-at-least-2`).
+- **M6, H-088 and H-089 confirmed:** editing the harness's message answers 403 50005 (`R-edit-own-only`); deleting
+  it without ManageMessages 403 50013, where the subject deletes its own (`R-delete-foreign-manage`). Pinning in voice
+  text chat answers 400 50019 (`R-no-pins-in-voice`, as M4 found).
+- **M6, payloads:** with View and SendMessages only, embeds, files and a poll answer 403 50013 (`R-payload-embeds`,
+  `R-payload-files`, `R-payload-poll`), a reply 403 160002 (`R-payload-reply-rmh`), TTS is sent without it
+  (`Ignored tts`, `R-payload-tts`); in a thread with SendMessagesInThreads and no SendMessages, the thread send
+  succeeds and a send in its parent answers 403 50013 (`R-payload-thread-smit`); a guild sticker is sent, an unknown
+  sticker ID answers 400 50081 (`R-payload-guild-sticker`); `{}` answers 400 50006 (`R-nonempty`, H-083); Components V2
+  with content answers 400 50035 `MESSAGE_CANNOT_USE_LEGACY_FIELDS_WITH_COMPONENTS_V2` on `content` (`R-cv2-excludes`,
+  H-125). `R-payload-external-sticker` and `R-payload-external-emoji` need a second guild (allowlisted).
+- **M6, components (H-128, H-129):** six link buttons answer `BASE_TYPE_BAD_LENGTH` on `components.0.components`
+  (`R-row-5-buttons`); a select next to a button `COMPONENT_LAYOUT_WIDTH_EXCEEDED` on `components.0.components.1`
+  (`R-select-alone`); a link button with a `custom_id` `BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE` on both
+  `custom_id` and `url` (`R-link-no-custom-id`). **Open question 6 decided:** with a SKU the application does not own,
+  both premium buttons are refused for `BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE`, and only the labelled one also gets
+  `BUTTON_COMPONENT_SKU_ID_LABEL_MUTUALLY_EXCLUSIVE` on `label`, so the differential holds (`R-premium-no-label`).
+- **M6, mentions and flags (H-101, H-105, H-106, H-133):** the library's send of `<@target>` mentions nobody, a raw
+  one without `allowed_mentions` mentions the target (`R-allowed-mentions-none`); a mention of `lab-mentionable` stands,
+  of `lab-unmentionable` without MentionEveryone is dropped from `mention_roles`, which the library's readback reports
+  as `degraded: ["MentionEveryone"]` (`R-mention-everyone-degrades`; its `@everyone` half is forbidden-action);
+  SuppressNotifications is applied on create, EPHEMERAL ignored on create (not rejected: H-106) and SuppressNotifications
+  ignored on an edit (H-105) (`R-create-flags-only`, `R-suppress-notifications-create-only`).
+- **M6, limits (H-120, H-121, H-123, H-124, H-139, H-025), each exactly at `Limits` and one over:** content 2000
+  **code points** (2000 non-BMP emoji, 4000 UTF-16 units, were accepted: open question 7 decided, `Limits.unit` is
+  `code-point`), 2001 `BASE_TYPE_MAX_LENGTH` (`R-content-length`); an embed title 256, 257 `BASE_TYPE_MAX_LENGTH` on
+  `embeds.0.title` (`R-embed-limits`); a poll question 300, 301 `BASE_TYPE_BAD_LENGTH` on `poll.question.text`
+  (`R-poll-limits`); a thread name 100, 101 `BASE_TYPE_BAD_LENGTH` on `name` (`R-name-length`); a topic 1024, 1025
+  `BASE_TYPE_MAX_LENGTH` (`R-topic-length`); slowmode 21600, 21601 `NUMBER_TYPE_MAX` (`R-slowmode-range`); a nickname
+  32, 33 `BASE_TYPE_MAX_LENGTH` on `nick` (`R-nickname-length`); a timeout exactly 28 days ahead is accepted, an hour
+  more `INVALID_COMMUNICATION_DISABLED_TIMESTAMP` (`R-timeout-28-days`). The error map turns each into its tag, which
+  the replay holds to these rows.
+- **M6: a message create aimed at a bot's user ID answers 404 10003** (`R-ids-distinct`'s invalid side).
+
 ## dfx deviations
 
 Where dfx got in the way and we wrapped or adapted it, and why.
@@ -792,6 +846,105 @@ the same commit.
     and cannot be killed while `ResolverRules.ownerHasAll` is `true` (H-002): the owner's base permissions are then
     every flag, Administrator included, so the branch only matters if that rule flips. The new case pins the
     behaviour (the owner is an Administrator target, H-067) whichever branch provides it.
+
+- **M6: argument aliases** (§2.3 updated). The public signatures write the checked argument as `CreateArg<P>`
+  (`P & CheckCreate<P>`), `EditArg<P>`, `PatchArg<P, Fields>` and `ThreadArg<T, Private>` instead of the bare
+  intersection. Evidence (`.scratch/m6/probe.ts`): giving an overloaded implementation the interface's generic
+  signature failed with TS2322 `Type 'P & NonEmpty<P>' is not assignable to type 'P & NonEmpty<P> & NonEmpty<P &
+  NonEmpty<P>>'`: comparing two generic signatures, tsc infers `P` as the whole intersection; through an alias it
+  matches the alias's argument. The fail fixtures' diagnostics are unchanged (they name the offending property).
+- **M6: the handle interfaces' non-generic methods are overloads typed `ReturnType<Interface<G>["method"]>`.** With
+  the row's union spelled out, tsc compared `PermissionErrors[Exclude<A, G>] | PermissionErrors[Exclude<B, G>]` with
+  `PermissionErrors[Exclude<A | B, G>]` for a generic `G` and failed (TS2719); the `ReturnType` form is the
+  interface's own type, so the overload is exactly the public signature (rule 7 of §2.12 still: an overload, no cast).
+- **M6: `DecideArgs.extraFlags`** (§4.7 updated): the error-mode flags a request needs beyond its row and payload,
+  UseExternalEmojis for a reaction with another guild's emoji and the flags `Permissions.require` checks.
+  `Permissions.require` orders its own failures (View, Connect in voice, the timeout, Send or SMIT, the other flags as
+  given, then payload flags), since its row lists only View.
+- **M6: the edit fields per kind follow the rule rows** (§2.4 updated): announcement channels take a slowmode and stage
+  channels a topic (H-054 refuted, "Live findings"); `ErrorMap.limitFields["voice.edit"]` gains `topic`, and the
+  hand-transcribed table in `test/unit/error-map.test.ts` with it. `R-no-slowmode-on-announcement` and the stage half
+  of the topic rule were removed: Discord applied what they forbade.
+- **M6: rule pairs share one setup and vary what is sent** (§5.5 updated). §5.5's table says "with flag / without"
+  for the payload and delete rules, but rules-check requires both sides of a pair to run on a byte-identical setup.
+  The pairs keep the flag absent on both sides: the plain send succeeds where the payload with the feature is refused,
+  one's own delete succeeds where another's is refused. A setup is named once in `catalog/rules.ts`, and a side
+  several rules share (the plain typed send) is one scenario. The planned voice-and-forum rule is two rules
+  (`R-no-threads-on-voice`, `R-forum-threads-need-a-message`), each with its own pair.
+- **M6: the flag-coverage check needed rows the families do not have** (§5.5, §5.9 updated). Against the M4 table it
+  found 33 gaps: (operation, flag) pairs with no row where the flag is the first failure (ViewChannel in voice pins,
+  thread unarchive, thread message edits, voice bulk deletes; ManageMessages for foreign deletes and bulk deletes;
+  PinMessages for unpinning and for thread pins; ReadMessageHistory for an own crosspost; SendMessages for a foreign
+  crosspost and voice sends; ModerateMembers for a timeout), keys whose rows were all blind and so had no flip control
+  (ViewChannel in thread sends, edits, joins, reactions, pins, deletes, member adds, archives and locks), thread
+  deletes by someone other than the creator, and the role-mention rule. `catalog/coverage.ts` derives one row per
+  missing pair from a family row (every needed flag granted, then that flag removed, kept only when the prediction's
+  failures are exactly that flag and its flip passes; 23 rows), `flips.ts` takes a blind row's flip when the
+  prediction shows it clean (its failures the original's minus the first), the threads catalog gains
+  `thread/targeted/delete-harness-thread` on a new `harness-thread` fixture (a throwaway thread the harness creates,
+  since deleting a provisioned thread mid-run is not possible), and the send catalog gains
+  `send/targeted/role-mention-{with,without}-mention-everyone` on a new `mention-role` payload. Over the catalog's
+  predictions the check then finds nothing (`.scratch/m6/predicted-coverage.ts`); the live tables decide.
+  The exemptions are fixed in `scripts/lib/rules.ts`: `permissions.require` sends no request, `dm.send` has no flag
+  and no DM row is possible, kick and ban are never flipped, the external sticker and emoji rules need a second guild,
+  and granting MentionEveryone with `@everyone` would ping Rhys. A degrade-mode payload flag needs a row that holds it
+  with the feature kept and one where Discord dropped the feature (a dropped feature is no failure to flip).
+- **M6: Safety counts only name and topic edits that may apply** (§5.6 updated). The voice-topic probe is a second
+  topic or name edit of `lab-voice` next to M4's `channelEdit/targeted/rename-voice-without-connect`, which lacks
+  Connect and is refused with 50001 (the replay holds that prediction to the live answer), so it changes nothing; a
+  matrix name or topic edit preflight predicts to fail is no longer counted. The bound stays one per channel per run
+  (H-162 is about two per ten minutes).
+- **M6: step (b) builds its handles from the lab's records, not `Channels.get`** (§5.10 updated): a bot holds handles
+  it got earlier, and `Channels.get` refuses a channel the bot cannot see, while `thread.leave` needs no View (M4
+  live), so the handle of an unseen thread must still exist. `channelHandle`, `messageHandle` and `memberHandle` are
+  internal constructors (not in `src/index.ts`); the fixtures' messages come from the harness's read of them, for the
+  author and the reactions (conditional AddReactions).
+- **M6: the raw call sends what the library sends** (§5.10): its bodies come from `ToDfx` and the library's field
+  choices, so (c) and (d) are one request: a reply no longer sends `replied_user: false` (absent, it is false, H-134), an
+  untagged post no longer sends `applied_tags: []`, and thread creations no longer send `auto_archive_duration` (the
+  library leaves the channel's default).
+- **M6: `ComponentRoute.make` arrives early** (`src/components/CustomId.ts`): the component rules' valid sides need a
+  `CustomId`, which only a route builds. M8 adds the received interactions' routing and `R-custom-id-routing`.
+- **M6: `DiscordApi.read`** (§4.1): a bounded, decoded lookup outside the operation table (`Channels.get`,
+  `Members.get`), whose expected refusals the caller maps; any other answer is an `UnmappedDiscordError` defect.
+- **M6: a request declares every limit field it carries** (`LimitFacts`): the runtime cannot tell a literal from a
+  dynamic string, so a 50035 or 50006 for a field the request carries maps to its tag. Only a finite literal over a
+  limit, which the type omits the tag for, then reaches the handler undeclared (a bug in the calling code, §3.1).
+- **M6: smaller API decisions.** `ForumTagId` is a new brand (`createPost({ tags })`); text and announcement messages
+  have `createThread({ name })` (the `channel.createThread.public` row); threads have `delete()`, and
+  `setArchived(false)` uses `thread.unarchive`; an announcement channel's thread is an `AnnouncementThread`;
+  `GuildMember` carries `roleIds` and `ban()` takes optional options; a DM channel's runtime arrives with M7's DM
+  events (M6 has the type, `test/types/pass/op-errors.ts` pins `dm.send`); the wire-to-handle decoding lives in
+  `channels/Ops.ts` (no `Decode.ts`). The Lab guard admits one write outside the lab channels: a message create aimed
+  at a bot's user ID (`R-ids-distinct`), which names no channel.
+- **M6: an `unseen` mark is retired by role, guild and bot-member events, and a refresh keeps a guild channel's
+  gateway copy** (§4.5 updated). The first targeted run with step (d) failed:
+  `run FAILED: SetupTimeout {"scenario":"message/targeted/order-send-manage-crosspost","detail":"subject state:
+  lab-text missing"}`. The row before it, `send/targeted/order-view-send`, has no View; its recompute refreshed
+  `lab-text`, `getChannel` answered 50001, and the refresh deleted the channel from the state and marked it unseen.
+  The next row granted View through a role, Discord sent no channel event for `lab-text` within the wait's cap,
+  and nothing retired the mark, so the subject's state lacked the channel for good; a bot granted View through a
+  role would have been told `MissingViewChannel` until some event about that channel arrived. A role created,
+  updated or deleted, a guild update and the bot's member update now retire every mark (THREAD_LIST_SYNC retires
+  its threads'), and a refresh that finds a guild channel unseen keeps the gateway's copy (GUILD_CREATE and
+  CHANNEL_* keep it current, M3 live) while a thread's is still dropped. `test/unit/state.test.ts` pins both
+  (each fails with its half of the fix reverted).
+- **M6: a refresh's 50001 for a voice or stage channel is not evidence of no View** (§4.5 updated). The second
+  targeted run had five `recompute-vs-preflight` rows, every voice row without Connect
+  (`channelEdit/targeted/rename-voice-without-connect`, `message/targeted/voice-{delete-own,delete-foreign,edit-own}-without-connect`,
+  `pins/targeted/voice-list-without-connect`): preflight, (b) and the oracle said Connect, the recompute said
+  `MissingViewChannel`, because `getChannel` on a voice channel without Connect answers 50001 (as every other route
+  there does, H-152) and the refresh marked it unseen. The mark then made the next row
+  (`message/targeted/voice-bulk-delete-without-connect`, same role state) resolve `unseen`, a `resolver-vs-oracle`
+  row. A 50001 for a voice or stage channel the state holds now records nothing, and the resolver's Connect mask
+  decides from the gateway's copy; a 10003 still marks it.
+- **M6: every message row lists `UnknownChannel`** (§3.1, §4.7 updated; M5's note "For M6"). A message handle
+  outlives its channel: the channel can be deleted between two calls, and Discord answers a message route there
+  with 404 10003, which the error map turned into an `UnmappedDiscordError` defect for the 18 message, reaction, pin
+  and crosspost rows. They now declare it, after `ThreadArchived` and before `UnknownEmoji`/`UnknownMessage`; the
+  type fixtures (`operations-table.ts`, `channels.ts`), one diagnostic snapshot and two hover snapshots change
+  with it. No live row deletes a channel under a message, so this rests on the shared 10003 of every channel
+  route (H-080) rather than on a recorded answer.
 
 ## Escalated rules
 

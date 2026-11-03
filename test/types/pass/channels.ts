@@ -114,9 +114,9 @@ expectTypeOf<Effect.Error<typeof req>>().toEqualTypeOf<MissingViewChannel | Miss
 declare const own: OwnMessage<"text">
 declare const foreign: ForeignMessage<"text">
 const foreignDelete = foreign.delete()
-expectTypeOf<Effect.Error<typeof foreignDelete>>().toEqualTypeOf<MissingViewChannel | MissingManageMessages | TwoFactorRequired | CommunicationDisabled | PermissionDeniedUnattributed | UnknownMessage | Transient>()
+expectTypeOf<Effect.Error<typeof foreignDelete>>().toEqualTypeOf<MissingViewChannel | MissingManageMessages | TwoFactorRequired | CommunicationDisabled | PermissionDeniedUnattributed | UnknownChannel | UnknownMessage | Transient>()
 const ownDelete = own.delete()
-expectTypeOf<Effect.Error<typeof ownDelete>>().toEqualTypeOf<MissingViewChannel | PermissionDeniedUnattributed | UnknownMessage | Transient>()
+expectTypeOf<Effect.Error<typeof ownDelete>>().toEqualTypeOf<MissingViewChannel | PermissionDeniedUnattributed | UnknownChannel | UnknownMessage | Transient>()
 // a reaction adds UseExternalEmojis only when the emoji may be external (rule 4 of §2.12)
 const external: Emoji = { origin: "external", id: EmojiId.make("123456789012345678"), name: "x" }
 const externalReaction = foreign.react(external)

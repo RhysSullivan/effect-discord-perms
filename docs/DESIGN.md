@@ -153,8 +153,9 @@ src/
     Channel.ts *                 kinds, ChannelKinds<G>, the kind interfaces, DMChannel, GuildChannel, MessageChannel,
                                  SendMethod (one shared generic-`this` send), Channels.get, Channels.isMessageChannel
     Message.ts *                 OwnMessage<K>, ForeignMessage<K> (per kind), OwnMessages<K>, ForeignMessages<K> (unions)
-    Ops.ts                       implementations: each public op is an overload over a wide implementation (§4.7)
-    Decode.ts                    dfx channel/thread/message responses -> our kinds and handles (type 0..16 incl. 16)
+    Ops.ts                       implementations: each public op is an overload over a wide implementation (§4.7);
+                                 the pipeline (`perform`), the handles (`channelHandle`, `messageHandle`, internal) and
+                                 `Channels` (M6: the wire-to-handle decoding lives here too; no separate Decode.ts)
   members/
     Member.ts *                  GuildMember ops (addRole, removeRole, setNickname, timeout, kick, ban), Members.get
   rest/
@@ -213,6 +214,8 @@ harness/
   Converge.ts                    applies the minimal diff from current to desired state, in a fixed order
   Wait.ts                        consistency waits: read-back, projected subject GuildState, stable oracle
   DryRun.ts                      Context.Reference read by the shared client: record and answer canned, never send
+  Library.ts                     steps (b) and (d) through the library's public operations, on handles built from the lab (M6)
+  Probes.ts                      the rule rows' probes: a typed library call or a raw call the types forbid, and its observation (M6)
   Outcome.ts                     raw outcome classifier, degradation readback (D35)
   Agreement.ts                   pure: row -> agree | mismatch kind (shared with offline replay)
   Pacing.ts                      global token bucket, invalid-request counter and cap, write counter per route
@@ -238,7 +241,9 @@ harness/
     catalog/channelEdit.ts       slowmode family + targeted rename/topic rows (one per channel per run)
     catalog/members.ts           hierarchy family (kick/ban only where the docs model says failure)
     catalog/flips.ts             flip-control siblings (§5.9)
-    catalog/rules.ts             live valid/invalid pairs for every rule in test/rules.ts
+    catalog/rules.ts             live valid/invalid pairs for every rule in test/rules.ts: the named setups and one scenario per side
+    catalog/coverage.ts          (M6) one row per (operation row, flag) the families leave without a first-failure row
+    Probes.ts                    (M6) the probe names and what each touches, renames and mentions (pure; Facts and Safety read it)
     catalog/intents.ts           gateway sessions with and without intents, each with a canary
     catalog/commands.ts          registration rule pairs, readback and the diff check
     Safety.ts                    static checks every scenario must pass (no human pings, kick/ban must fail, edit budget)
@@ -498,7 +503,12 @@ The runtime mirror is `requiredFlags(payload)`, computed from the same table
   (`[sd:src/channels-use.ts]` §14).
 
 **Payload-shape rules** are intersected onto the argument (`CheckCreate<P>`,
-`CheckEdit<P>`). Diagnostics, all within the gate (`[sd:fail-diagnostics.txt]`,
+`CheckEdit<P>`). (M6: the argument is written through the aliases
+`CreateArg<P> = P & CheckCreate<P>` and `EditArg<P>`, and likewise `PatchArg` and
+`ThreadArg`: comparing two generic signatures that carry the bare intersection,
+tsc infers `P` as the whole intersection and fails, so an implementation could
+not carry the public signature as its overload; the alias makes it match the
+argument. The diagnostics are the same.) Diagnostics, all within the gate (`[sd:fail-diagnostics.txt]`,
 `src/fail/payload-rules.ts`):
 
 | Rule | Diagnostic (verbatim head) |
@@ -560,7 +570,8 @@ export const Operations = {
   "thread.send":  { flags: ["ViewChannel", "SendMessagesInThreads"], variant: "reply", tags: [/* ... */ "ThreadLocked", "UnknownChannel"] },
   "voice.send":   { flags: ["ViewChannel", "Connect", "SendMessages"], variant: "reply", tags: [/* as channel.send */] },
   "message.pin.thread": { flags: ["ViewChannel", "PinMessages"], variant: "default",
-    tags: ["PermissionDeniedUnattributed", "CommunicationDisabled", "MaximumPinsReached", "ThreadArchived", "UnknownMessage"] },
+    tags: ["PermissionDeniedUnattributed", "CommunicationDisabled", "MaximumPinsReached", "ThreadArchived", "UnknownChannel",
+           "UnknownMessage"] },  // M6: every message row lists UnknownChannel (the message's channel may be deleted)
   // ... 47 rows in total (40 in [sd:src/ops.ts]; M4 added thread.delete, thread.unarchive and the
   //     .thread/.voice variants of edit, delete and bulk delete from live findings, and removed
   //     message.pin.voice and message.unpin.voice: voice text chat has no pins)
@@ -655,15 +666,22 @@ characters (`[rt:bot/friction-probe.ts]` F4).
 is `OpErrors<G>[op]` plus argument-derived limit tags):
 
 - `edit(patch)`: the patch type admits only the fields the kind has
-  (text: name, topic, slowmode; announcement: name, topic; voice: name,
-  slowmode; category: name; ...). Another field fails on the property:
-  `Type '10' is not assignable to type '10 & Invalid<"slowmodeSeconds cannot be edited on this channel kind">'.`
+  (text, announcement, forum, media: name, topic, slowmode; voice: name,
+  slowmode; stage: name, topic, slowmode; threads: name, slowmode; category:
+  name). (M6 live: revision 2 gave announcement no slowmode (H-054) and stage no
+  topic; Discord applied both, `rule/text-manage-channels/raw-slowmode-announcement`
+  in the first rule run and `raw-topic-stage`, so the kinds have them, and the
+  rule's live pair is a voice channel's topic.) Another field fails on the property:
+  `Type '"…"' is not assignable to type '"…" & Invalid<"topic cannot be edited on this channel kind">'.`
   A non-literal `name` adds `NameTooLong`, `topic` adds `TopicTooLong`, and a
   non-literal `slowmodeSeconds` adds `SlowmodeOutOfRange`.
 - `createThread({ name, private? })`: the flag follows the literal
   `private: true`; a non-literal name adds `NameTooLong`. On announcement
   channels `private: true` fails with
-  `... Invalid<"announcement channels only have public threads">'.`
+  `... Invalid<"announcement channels only have public threads">'.` (M6: the
+  result is the thread's kind, an announcement thread from an announcement
+  channel; text and announcement messages have `createThread({ name })` too,
+  on the same row.)
 - `createPost({ name, message })` on forum and media: the full send-style
   union for the message (including `MessageEmpty` and `...ForReply`), plus
   `NameTooLong` and the row's `TagRequired` and `MaximumActiveThreads`
@@ -674,7 +692,8 @@ is `OpErrors<G>[op]` plus argument-derived limit tags):
   `TwoFactorRequired`, `MessagesTooOld`, `TooManyMessagesToDelete` and
   `CommunicationDisabled`.
 - Thread operations exist only on thread kinds: `join`, `leave`,
-  `addMember`, `setArchived`, `setLocked`.
+  `addMember`, `setArchived`, `setLocked`, and (M6) `delete`; `setArchived(false)`
+  uses the `thread.unarchive` row, a non-literal boolean both rows.
 - `ThreadArchived` appears on edit, react, pin and unpin, but not on send
   (C16, H-035). (M4 live: deletes and bulk deletes in an archived thread
   answer 50083 too, so their thread rows list it; joining, leaving and adding
@@ -1188,7 +1207,7 @@ so the matrix has to find it.
 | `ThreadAlreadyExists` | state | createThread from a message | 160004 | |
 | `TagRequired` | state | createPost | 40067 | H-044 |
 | `MaximumPinsReached`, `MaximumReactionsReached`, `MaximumActiveThreads` | state | pin; react; createThread, createPost | 30003; 30010; 160006 | resolver-only for 30003 (cost) |
-| `UnknownChannel`, `UnknownMessage`, `UnknownMember`, `UnknownRole`, `UnknownEmoji` | state | ops on that object | 10003, 10008, 10007, 10011, 10014 (H 404) | |
+| `UnknownChannel`, `UnknownMessage`, `UnknownMember`, `UnknownRole`, `UnknownEmoji` | state | ops on that object (M6: a message's operations also list `UnknownChannel`) | 10003, 10008, 10007, 10011, 10014 (H 404) | |
 | `CannotMessageUser` | state | DM send | 50007 | |
 | `InteractionExpired` | state | interaction continuation calls | 10062, 10015, 50027 (H) | phase 3 |
 | `DailyCommandCreateLimit` | state | command registration | 30034 (429 coded or 400) | surfaces as `StartupFailed` |
@@ -1197,7 +1216,7 @@ so the matrix has to find it.
 | `MessageEmpty` | payload | send, createPost, edit, reply, followUp when emptiness is possible | preflight; 50006 | |
 | `PollTooLarge {limit}` | payload | send, createPost with a poll | preflight; 50035 inner on `poll.*` | |
 | `NameTooLong {length, limit}` | payload | createThread, createPost, channel/thread edit with a non-literal name | preflight; 50035 inner on `name` | 1..100 |
-| `TopicTooLong {length, limit}` | payload | channel edit with a non-literal topic | preflight; 50035 inner on `topic` | 1024 (4096 forum/media) |
+| `TopicTooLong {length, limit}` | payload | channel edit with a non-literal topic (M6: stage channels have one, on the `voice.edit` row) | preflight; 50035 inner on `topic` | 1024 (4096 forum/media) |
 | `SlowmodeOutOfRange {seconds}` | payload | channel/thread edit with a non-literal slowmode | preflight; 50035 inner on `rate_limit_per_user` | 0..21600 |
 | `NicknameTooLong {length, limit}` | payload | setNickname with a non-literal string | preflight; 50035 inner on `nick` | 32 |
 | `TimeoutTooLong` | payload | timeout with a Date | preflight; 50035 inner on `communication_disabled_until` | 28 days (H-025) |
@@ -1447,6 +1466,18 @@ bot's thread membership is a map of its own, because THREAD_MEMBERS_UPDATE can a
   not visible (`unseen`, no View); it is not a defect (§3.1). A REST thread
   carries the bot's thread member object exactly when it is a member, so a
   refresh sets membership from it.
+- (M6) An `unseen` mark is evidence about the bot's permissions when the
+  refresh read it. A role created, updated or deleted, a guild update and the
+  bot's member update retire every mark (Discord sends no channel event when a
+  role grants View, M6 live); a channel or thread event, THREAD_LIST_SYNC
+  included, retires its channel's. A refresh that finds a guild channel unseen
+  keeps the gateway's copy, which GUILD_CREATE and CHANNEL_* keep current
+  whether or not the bot can see it, so the resolver has it once the mark is
+  retired; a thread's copy is dropped (the gateway sends nothing for a thread
+  the bot cannot see) and the next use refreshes it. A 50001 for a voice or
+  stage channel the state holds records nothing: Discord answers it without
+  Connect as well as without View (M6 live, H-152), and the resolver's Connect
+  mask decides from the gateway's copy.
 
 ### 4.6 Resolver (D22; H-001..H-029, H-033, H-047)
 
@@ -1563,7 +1594,11 @@ What counts as a problem (M3):
   `ThreadArchived`, only where the row lists the tag.
 
 Degrade-mode payload flags missing from the effective set are reported as
-`degraded`, never as failures. The payload's features are the `PayloadRules`
+`degraded`, never as failures. (M6: `DecideArgs.extraFlags` carries the
+error-mode flags a request needs beyond its row and payload: UseExternalEmojis for
+a reaction with another guild's emoji, and the flags `Permissions.require` checks,
+which it orders itself: View, Connect in voice, the timeout, Send or SMIT, the
+other flags in the order given, then payload flags.) The payload's features are the `PayloadRules`
 names it carries (`src/payload/PayloadRules.ts`, whose table and flag lookups
 arrive in M3; the payload types and the type-level computations arrive in M6).
 
@@ -2088,7 +2123,15 @@ byte-identical Setup, which rules-check asserts.
 - **flag coverage**: for each (operation row, flag), and each payload rule's
   flag, there is a live row where the flag is granted and one where it is the
   first missing flag, and a flip-control sibling (§5.9). Kick and ban flips are
-  `forbidden-action`;
+  `forbidden-action`; (M6, as built in `scripts/lib/rules.ts`: "first missing"
+  means preflight's first failure on a row Discord refused; a degrade-mode
+  payload flag instead needs a row that holds it with the feature kept and one
+  where Discord dropped the feature, since a dropped feature is no failure to
+  flip; the fixed exemptions are `permissions.require` (it sends no request),
+  `dm.send` (no flag, and no DM row is possible), the external sticker and emoji
+  rules (`needs-second-guild`), and the granted side of `@everyone`
+  (`forbidden-action`). The families leave some pairs without a first-failure
+  row; `catalog/coverage.ts` derives one for each, §5.9;)
 - **events**: every event in `EventIntents` has a live intent pair;
 - a non-`pure-typing` rule lacks a `LOG.md` line.
 
@@ -2099,6 +2142,20 @@ events check. Until then rules-check prints those checks as "not checked yet".
 
 The registry (`test/rules.ts`). IDs use the `R-` prefix; "raw" means through
 `SubjectRaw` with dfx's loose types.
+
+(M6: the table below is revision 2's plan; the registry holds what the live pairs
+observed, each side's full expectation. Every pair runs on one named setup of
+`harness/scenario/catalog/rules.ts`, `rule/<setup>/<probe>`. Where a row says
+"with flag / without", the pair keeps the flag absent on both sides and varies
+what is sent, because both sides must share a byte-identical setup: the plain
+send succeeds, the payload carrying the feature is refused; deleting one's own
+message succeeds where another's is refused. Observed codes that differ from the
+plan: a forum refuses a message with 400 50008 (not 40058), a crosspost in a text
+channel 403 50001, a bulk delete of one ID 400 50035 on `messages`, a select next
+to a button `COMPONENT_LAYOUT_WIDTH_EXCEEDED` on the second element. The voice
+and forum halves of no-threads-on-voice-forum are two rules,
+`R-no-threads-on-voice` and `R-forum-threads-need-a-message`, and the edit-field
+restriction is `R-no-topic-on-voice`.)
 
 | Rule | Live pair (valid / invalid, full expectation), or reason |
 |---|---|
@@ -2178,6 +2235,9 @@ The registry (`test/rules.ts`). IDs use the `R-` prefix; "raw" means through
     or a bulk ban is refused);
   - (M4) a channel PATCH that renames a channel keeps a `lab`/`lab-*` name, and
     a new guild emoji has a `lab_` name (emoji are never edited or deleted);
+  - (M6) one write outside the admitted channels: a message create aimed at a
+    bot's user ID (`R-ids-distinct`'s invalid side), which names no channel,
+    since snowflakes are unique (Discord answers 404 10003);
   - nothing is ever sent to a DM channel with a human, and nothing leaves the
     guild, edits the guild itself, global commands, webhooks or invites.
 - **Safety** (`scenario/Safety.ts`) is a pure check that runs offline over the
@@ -2191,7 +2251,13 @@ The registry (`test/rules.ts`). IDs use the `R-` prefix; "raw" means through
   - user mentions only of bot IDs; role mentions only of `lab-*` roles Rhys
     does not hold; `repliedUser` only when replying to bot messages;
   - no row's removals affect the target (§5.7);
-  - at most one name or topic edit per lab channel per run (H-162).
+  - at most one name or topic edit per lab channel per run (H-162); (M6) an
+    edit preflight predicts Discord refuses changes nothing and is not counted
+    (`channelEdit/targeted/rename-voice-without-connect` lacks Connect), and a
+    rule probe counts for the channels it may rename;
+  - (M6) a rule probe or `mention-role` payload mentions only the target bot and
+    `lab-mentionable`/`lab-unmentionable`; the runner reads the owner's roles at
+    run start and aborts if Rhys holds one.
 - **Lock** (`harness/Lock.ts`), taken by `config/Credentials.ts` for **any**
   identity and any entry point that reads a Perms Lab token, including the
   examples and dev runs. It creates `/tmp/effect-discord-perms-live.lock`
@@ -2311,6 +2377,10 @@ export class Setup extends Schema.Class<Setup>("Setup")({
 // removal takes away. M3's "target-message" and "crossposted-subject-message" had no row and were dropped.
 // `subject-prior-send` (M4 verifier, H-053) is a plain message the subject sends after Converge, under the
 // setup's own permissions and slowmode, so the send that follows is its second in a row.
+// M6: `harness-thread` makes the scenario thread a throwaway public thread the harness creates in lab-text
+// (`lab-harness-public-thread`), which the subject may delete only with ManageThreads; the operation union gains
+// `rule{probe}` (`scenario/Probes.ts`, executed by `harness/Probes.ts`), and the send payloads `mention-role`
+// (a mention of `lab-unmentionable`, targeted rows only, H-101).
 interface Scenario {
   readonly id: string                         // "<family>/<channel>/<dims...>", stable, unique
   readonly hypotheses: ReadonlyArray<`H-${number}`>
@@ -2480,10 +2550,25 @@ sibling drops F from every removal and adds it to the original's first grant
 that is not an administrator source (or a new `lab-grant` grant), and is
 judged after the run against its original's live row (`Agreement.flipAgreement`).
 
+**Coverage rows** (M6, `catalog/coverage.ts`). For each (operation row, flag)
+the families leave without a first-failure row a flip control can be made of,
+one row is derived from the first family row of that operation in ID order (not
+timed out, no administrator grant): every flag the request needs granted, then
+that flag taken away, kept only when the prediction's failures are exactly that
+flag and its flip passes. 23 rows (for example ViewChannel in voice pins, thread
+unarchive and thread message edits; ManageMessages for foreign deletes and bulk
+deletes; PinMessages for unpinning; ModerateMembers for a timeout). A key whose
+family rows are all blind (a thread under a parent that hides View resolves
+`unseen`, which hides its other problems) takes its flip from the first blind row
+whose flip the prediction shows clean (M6: thread sends, joins, reactions and pins
+had no ViewChannel flip control).
+
 The expected total is 234 pairwise rows, about 110 targeted rows, about 45
 flip rows, about 95 rule rows and about 16 intent sessions, roughly **500
-scenarios**. (M4 has 229 pairwise rows, 72 targeted rows and 62 flip controls,
-363 scenarios in all; the rule rows and intent sessions come in M6-M8.)
+scenarios**. (M6: 485 scenarios in the phase-1 catalog: 304 family rows, 23
+coverage rows, 94 flip controls and 64 rule rows; the intent sessions come in
+M7.) (M4 has 229 pairwise rows, 72 targeted rows and 62 flip controls, 363
+scenarios in all; the rule rows and intent sessions come in M6-M8.)
 
 ### 5.10 Executing one scenario
 
@@ -2547,7 +2632,14 @@ setup alone made 216.)
    `Preflight.decide`. If (b) and `decide` disagree, the row is
    `preflight-wiring`. This exercises the user-facing path (handle →
    operation row for the kind → GuildState → order → `errorFor`) without an extra
-   Discord request. Until M6 (b) is `decide` alone.
+   Discord request. Until M6 (b) is `decide` alone. (M6, `harness/Library.ts`: the
+   row's `preflight` is the operation's record, and the runner also requires its
+   tag and categories to equal `decide`'s error, else `preflight-wiring`. The
+   handles are built from what the lab knows, as a bot holds handles it got
+   earlier: the scenario channel by its kind (`Channels.get` would refuse an
+   unseen thread, which `thread.leave` needs no View for), the fixtures' messages
+   from the harness's read of them (author and reactions), the target member from
+   the subject's read. Every library route has a canned body, `DryRun.cannedFiles`.)
 6. **(c) Raw call** through `SubjectRaw`, with no check. Classify it with
    `Outcome.ts`: `success`, `degraded` (with the list), `50013`, `50001`,
    `other-error` (status, code, sorted inner codes with paths), `ignored`,
@@ -2556,7 +2648,11 @@ setup alone made 216.)
    `rejected-by-discord`). Record `mappedTag`, the tag ErrorMap gives the code.
 7. **(d) Recompute.** For rows whose (c) was 50013, 50001 or a dedicated code,
    run the library operation with `Preflight.Mode = "bypass"` and record
-   `{tag, categories}`. The Lab guard and Safety apply to (d) as to (c).
+   `{tag, categories}`. The Lab guard and Safety apply to (d) as to (c). (M6: a
+   kick or ban gets a fresh guard permit from new harness-side reads; a (d) that
+   Discord lets through records `(succeeded)`, which never equals (b), and what it
+   created is deleted. A rule row runs its probe instead of steps (a) to (d), and
+   records an empty resolver, `preflight: n/a` and its observation.)
 8. **Oracle**: `GET /channels/{c}/permissions/member/{subject}?implicit=false`
    through `rest.httpClient` (`rest/Oracle.ts`), restricted to the required
    flags. If the route returns 404 or 405 at the first use, the table header
@@ -3080,10 +3176,16 @@ fails if a constant disagrees with the table.
    differentially, by whether the `label` path appears in the field errors? If
    Discord rejects the unknown SKU first and never reports `label`, the agent
    stops and reports. Rhys decides, either by providing a SKU or by accepting
-   resolver-only coverage.
+   resolver-only coverage. (M6 live: yes. With a SKU the application does not
+   own, both buttons are refused for `BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE`,
+   and only the labelled one also gets
+   `BUTTON_COMPONENT_SKU_ID_LABEL_MUTUALLY_EXCLUSIVE` on its `label` path.)
 7. **Content-length unit and limit (H-120, H-121; 2000 vs 4000).** These are
    `Limits.contentMax` and `Limits.unit`, set from the rows and checked by the
-   replay. The probes are derived from them.
+   replay. The probes are derived from them. (M6 live: 2000, counted in code
+   points: 2000 non-BMP emoji, 4000 UTF-16 units, were accepted, 2001 refused
+   with `BASE_TYPE_MAX_LENGTH` on `content`. `Limits.content` is 2000 and
+   `Limits.unit` `code-point`.)
 8. **Is `app_permissions` exact, including timeouts (H-026)?** Interaction
    preflight uses it. If it is not exact, the recompute still attributes the
    right tag; only the preflight is less early. Verifying this needs a human, so

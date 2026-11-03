@@ -23,7 +23,7 @@ export const afterRequire = checked.send({ content: "hi", embeds: [{ title: "t" 
 const afterRequire: Effect.Effect<Sent<"text">, CommunicationDisabled | EmbedTooLarge | MissingViewChannel | PermissionDeniedUnattributed | PermissionRevokedSinceCheck | RateLimited | UnknownChannel | Transient, never>
 
 export const pin = foreign.pin()
-const pin: Effect.Effect<void, CommunicationDisabled | MaximumPinsReached | MissingPinMessages | MissingReadMessageHistory | MissingViewChannel | PermissionDeniedUnattributed | ThreadArchived | UnknownMessage | Transient, never>
+const pin: Effect.Effect<void, CommunicationDisabled | MaximumPinsReached | MissingPinMessages | MissingReadMessageHistory | MissingViewChannel | PermissionDeniedUnattributed | ThreadArchived | UnknownChannel | UnknownMessage | Transient, never>
 
 export const kick = member.kick()
 const kick: Effect.Effect<void, CommunicationDisabled | MissingKickMembers | PermissionDeniedUnattributed | TargetAboveInHierarchy | TwoFactorRequired | UnknownMember | Transient, never>
