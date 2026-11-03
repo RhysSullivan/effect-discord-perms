@@ -183,11 +183,13 @@ export const resolve = (input: ResolveInput): Resolution => {
 
   const applied: Array<Mask> = []
   let current = afterOverwrites
+  // a moderator sees every private thread, unless a timeout has taken its ManageThreads (M6 live)
+  const moderating = timeout !== undefined && ResolverRules.timeoutHidesPrivateThreads.value ? Flags.intersect(afterOverwrites, flagsOf(ResolverRules.timeoutKeeps.value)) : afterOverwrites
   const hidden =
     ResolverRules.privateThreadVisibleToMembersAndModerators.value &&
     channel.kind === "private-thread" &&
     !threadMember &&
-    !Flags.has(afterOverwrites, "ManageThreads")
+    !Flags.has(moderating, "ManageThreads")
   if (hidden) {
     return { base, afterOverwrites, beforeTimeout: Flags.empty, effective: Flags.empty, masks: ["private-thread"], timeout: undefined, thread: facts, voice, requireTag: false }
   }

@@ -220,6 +220,11 @@ describe("the resolver's masks", () => {
     expect(masksOf(known(thread("public-thread"), parent)).masks).toEqual([])
     const moderator = guild([role(everyone, Flags.union(all, set("ManageThreads")))])
     expect(resolve({ guild: moderator, channel: known(thread("private-thread"), parent), member: member([]), now }).masks).toEqual([])
+    // the timeout takes ManageThreads first, so a timed-out moderator does not see it; a timed-out member still
+    // does (M6 live, ResolverRules.timeoutHidesPrivateThreads)
+    const later = new Date(now + 60_000).toISOString()
+    expect(resolve({ guild: moderator, channel: known(thread("private-thread"), parent), member: member([], later), now }).masks).toEqual(["private-thread"])
+    expect(resolve({ guild: moderator, channel: known(thread("private-thread"), parent, true), member: member([], later), now }).masks).toEqual(["timeout"])
   })
 
   it("drops everything without View (H-012), the four Send children without Send outside threads (H-013), ManageChannels without Connect (H-015)", () => {

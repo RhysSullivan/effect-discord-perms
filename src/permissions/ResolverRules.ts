@@ -28,6 +28,12 @@ export interface Rules {
   readonly obfuscatedMeansNoView: ResolverRule<boolean>
   /** A private thread is visible only to its members and to holders of ManageThreads (H-033, H-047). */
   readonly privateThreadVisibleToMembersAndModerators: ResolverRule<boolean>
+  /**
+   * The timeout applies before that rule: a timed-out member's ManageThreads (which the timeout removes) shows it
+   * no private thread it is not in (H-020, H-047; M6 live: a timed-out creator with View and ManageThreads, not
+   * in its private thread, could not read it).
+   */
+  readonly timeoutHidesPrivateThreads: ResolverRule<boolean>
   /** Without ViewChannel every other channel permission is ignored (H-012). */
   readonly noViewMasksEverything: ResolverRule<boolean>
   /** Without SendMessages these are implicitly denied, on non-thread channels (H-013). */
@@ -59,6 +65,7 @@ export const ResolverRules: Rules = {
   overwriteAdministratorGrantsNothing: { hypotheses: ["H-004"], source: "docs", value: true },
   obfuscatedMeansNoView: { hypotheses: ["H-160"], source: "docs", value: true },
   privateThreadVisibleToMembersAndModerators: { hypotheses: ["H-033", "H-047"], source: "docs", value: true },
+  timeoutHidesPrivateThreads: { hypotheses: ["H-020", "H-047"], source: "live", value: true },
   noViewMasksEverything: { hypotheses: ["H-012"], source: "docs", value: true },
   noSendMasks: { hypotheses: ["H-013"], source: "docs", value: ["MentionEveryone", "SendTTSMessages", "AttachFiles", "EmbedLinks"] },
   noSendMasksInThreads: { hypotheses: ["H-014"], source: "docs", value: false },
