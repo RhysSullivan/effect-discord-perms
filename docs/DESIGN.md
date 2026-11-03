@@ -497,8 +497,19 @@ The runtime mirror is `requiredFlags(payload)`, computed from the same table
   The test is `` `{} extends Record<S, 1>` ``: true for `string` and
   template patterns, false for literals. `send({ content: "pong" })` carries
   no `ContentTooLong`, while `content: dynamic` and `` content: `hello ${x}` ``
-  do. A finite literal over the limit is a bug in code, so a unit test over
-  `Limits` catches it, and at run time it is a defect.
+  do. A finite literal over the limit is a bug in the calling code. (After
+  the M6 verifier; revision 2 said that at run time it would be a defect.) The
+  run time cannot tell such a literal from a computed string of the same value,
+  and the overloads give the implementation nothing else to go on, so the local
+  check (§4.8 step 1) fails with `ContentTooLong` all the same; the literal's
+  type does not declare it, so the tag reaches the handler undeclared, and
+  `catchTag("ContentTooLong")` cannot even be written for it. The same holds for
+  every limit tag `MayExceed` omits for a literal (`NameTooLong`, `TopicTooLong`,
+  `SlowmodeOutOfRange`, `NicknameTooLong`, `TimeoutTooLong`), and for a 50035
+  Discord answers for such a field, which the request still declares in its
+  `LimitFacts` (§4.9). Nothing in the library catches the bug before the first
+  run; LOG.md ("M6: a request declares every limit field it carries") records
+  the limitation.
 - `MessageEmpty` (50006) is in the union unless every member of the payload has
   a body field that is *definitely* non-empty: a required key whose type
   excludes the empty value (`"" extends string` may be empty, `"" extends "pong"`
@@ -3262,10 +3273,16 @@ fails if a constant disagrees with the table.
    `BUTTON_COMPONENT_SKU_ID_LABEL_MUTUALLY_EXCLUSIVE` on its `label` path.)
 7. **Content-length unit and limit (H-120, H-121; 2000 vs 4000).** These are
    `Limits.contentMax` and `Limits.unit`, set from the rows and checked by the
-   replay. The probes are derived from them. (M6 live: 2000, counted in code
-   points: 2000 non-BMP emoji, 4000 UTF-16 units, were accepted, 2001 refused
-   with `BASE_TYPE_MAX_LENGTH` on `content`. `Limits.content` is 2000 and
-   `Limits.unit` `code-point`.)
+   replay. The probes are derived from them. (M6 live: 2000 non-BMP emoji,
+   4000 UTF-16 units, were accepted, and 2001 refused with
+   `BASE_TYPE_MAX_LENGTH` on `content`. `Limits.content` is 2000 and
+   `Limits.unit` `code-point`. The M6 verifier: that pair did not settle the
+   question, because a limit of 4000 UTF-16 units, the OpenAPI spec's, also
+   accepts 2000 emoji and refuses 2001. The invalid side is now 2001 ASCII
+   characters, 2001 units in every count, which a 4000-unit limit accepts and
+   only a 2000 limit refuses; with the valid side, which a UTF-16 count of 2000
+   refuses, only 2000 code points fits both answers. The probe sides follow
+   `Limits`: `unitString` for the valid side, ASCII for the invalid one.)
 8. **Is `app_permissions` exact, including timeouts (H-026)?** Interaction
    preflight uses it. If it is not exact, the recompute still attributes the
    right tag; only the preflight is less early. Verifying this needs a human, so

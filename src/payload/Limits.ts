@@ -10,8 +10,9 @@
  * finds nothing.
  *
  * The type of each operation includes a limit tag only when its value may exceed the limit (`MayExceed`, §2.3):
- * a finite literal over a limit is a bug in the calling code, which `test/unit/limits.test.ts` cannot see but the
- * first run does (the tag reaches the handler undeclared, as a defect would).
+ * a finite literal over a limit is a bug in the calling code. The run time cannot tell a literal from a computed
+ * string of the same value, so the local check fails with the limit's tag all the same, and for such a literal that
+ * tag reaches the handler undeclared (§2.3).
  */
 import type { ErrorCause } from "../errors/Cause.ts"
 import { ContentTooLong, EmbedTooLarge, MessageEmpty, MessagesTooOld, NameTooLong, NicknameTooLong, PollTooLarge, SlowmodeOutOfRange, TimeoutTooLong, TooManyMessagesToDelete, TopicTooLong } from "../errors/Payload.ts"
@@ -21,7 +22,9 @@ import { type CreateMessage, type EditMessage, type Embed, isV2, type MessagePay
 /**
  * The limits. `unit` is how Discord counts a string's length (H-121): `code-point` counts each Unicode code
  * point once (an emoji outside the BMP is one), `utf16` counts UTF-16 code units (it is two). The content-length
- * rule row sends `content` code points of a non-BMP emoji, which only the code-point count accepts.
+ * rule pair sends `content` code points of a non-BMP emoji, which a UTF-16 count of 2000 refuses, and `content + 1`
+ * ASCII characters, which a UTF-16 count of 4000 accepts (`harness/Probes.ts`); Discord accepted the first and
+ * refused the second (M6 live).
  */
 export const Limits = {
   unit: "code-point",

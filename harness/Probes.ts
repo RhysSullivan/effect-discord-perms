@@ -7,8 +7,11 @@
  * - A `raw-*` probe sends what the types forbid through `SubjectRaw`, with no check (`Rejected` with the status,
  *   the code and the sorted inner 50035 codes with their paths; or `Ignored`/`Applied` for a field Discord
  *   accepted the request without, or with).
- * - Probes derive their sizes from `Limits` (`Limits.content` code points of a non-BMP emoji when `Limits.unit` is
- *   `code-point`, which only that count accepts), never a hard-coded 2001.
+ * - Probes derive their sizes from `Limits`, never a hard-coded 2001. The content-length pair separates the two
+ *   counts H-121 weighs (2000 code points against the OpenAPI spec's 4000 UTF-16 units): the valid side sends
+ *   `Limits.content` units of the character that is widest in the other count (a non-BMP emoji, two UTF-16 units,
+ *   for `code-point`), which a UTF-16 count of 2000 refuses; the invalid side sends `Limits.content + 1` ASCII
+ *   characters, one unit in every count, which a 4000-unit limit accepts. Only 2000 code points fits both answers.
  *
  * What a probe creates (threads, posts) is returned for cleanup; the channels it posts in or edits besides the
  * scenario channel are its metadata (`scenario/Probes.ts`), which the runner cleans and marks for the next
@@ -136,8 +139,14 @@ const messagesRoute = "/channels/{channel.id}/messages"
 const channelRoute = "/channels/{channel.id}"
 const threadsRoute = "/channels/{channel.id}/threads"
 
-/** A string of `count` units as `Limits.unit` counts them: a non-BMP emoji per code point, so only that count accepts `Limits.content` of them. */
+/**
+ * A string of `count` units as `Limits.unit` counts them, each the widest in the other count: a non-BMP emoji per
+ * code point (two UTF-16 units), or an ASCII character per UTF-16 unit (the valid side of the content pair).
+ */
 export const unitString = (count: number): string => (Limits.unit === "code-point" ? "😀" : "a").repeat(count)
+
+/** A string of `count` ASCII characters: one unit in every count (the invalid side of the content pair). */
+export const asciiString = (count: number): string => "a".repeat(count)
 
 const day = 86_400_000
 
@@ -280,7 +289,7 @@ export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<Prob
         return result(sent.observation, sent.raw)
       }
       case "raw-content-over":
-        return fromRaw(yield* rawCreate(here, { content: unitString(Limits.content + 1) }))
+        return fromRaw(yield* rawCreate(here, { content: asciiString(Limits.content + 1) }))
       // ---- text with EmbedLinks and SendPolls ----
       case "typed-embed-max": {
         const sent = yield* typedSend({ embeds: [{ title: "t".repeat(Limits.embeds.title) }] })
