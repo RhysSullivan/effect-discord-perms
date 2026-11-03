@@ -3008,6 +3008,10 @@ Live milestones run serially, under the lock.
     `recompute-vs-preflight` rows, then a fresh `--compare` run exits 0;
   - `bun run rules` reports every phase-1 rule complete or allowlisted;
   - `bun run verify:offline`.
+- (M6) Beyond the listed scope, for the checks to pass: the flag-coverage rows
+  and the blind-flip rule (§5.9), the `harness-thread` fixture and the
+  `mention-role` payload (§5.8), `DiscordApi.read`, `ComponentRoute.make`, and
+  the guild state's `unseen` rules the live step (d) exposed (§4.5).
 
 **M7 Gateway, Bot, intents, content** (live)
 
