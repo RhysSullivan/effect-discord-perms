@@ -3292,7 +3292,9 @@ fails if a constant disagrees with the table.
    characters, 2001 units in every count, which a 4000-unit limit accepts and
    only a 2000 limit refuses; with the valid side, which a UTF-16 count of 2000
    refuses, only 2000 code points fits both answers. The probe sides follow
-   `Limits`: `unitString` for the valid side, ASCII for the invalid one.)
+   `Limits`: `unitString` for the valid side, ASCII for the invalid one. Live,
+   Discord refused the 2001 ASCII characters with `BASE_TYPE_MAX_LENGTH` on
+   `content`, so the question is decided: 2000 code points.)
 8. **Is `app_permissions` exact, including timeouts (H-026)?** Interaction
    preflight uses it. If it is not exact, the recompute still attributes the
    right tag; only the preflight is less early. Verifying this needs a human, so

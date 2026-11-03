@@ -326,6 +326,15 @@ registry expects, and where Discord accepted what the types forbade, the types c
   more `INVALID_COMMUNICATION_DISABLED_TIMESTAMP` (`R-timeout-28-days`). The error map turns each into its tag, which
   the replay holds to these rows.
 - **M6: a message create aimed at a bot's user ID answers 404 10003** (`R-ids-distinct`'s invalid side).
+- **After the M6 verifier, H-121 settled: content is 2000 code points, not the OpenAPI spec's 4000 UTF-16 units.** The
+  M6 pair (2000 emoji accepted, 2001 emoji refused) fits both counts, so "open question 7 decided" above did not
+  follow from it. `R-content-length`'s invalid side is now 2001 ASCII characters (one unit in every count), which a
+  4000-unit limit would accept: Discord refused it with 400 50035 `BASE_TYPE_MAX_LENGTH` on `content` (the rule-row
+  subset run and the exit run below, both `rule/text-send/raw-content-over`), and the valid side still succeeded. A
+  2000 UTF-16 count is ruled out by the valid side (4000 units accepted) and a 4000 one by the invalid side, so only
+  a count where a non-BMP emoji and an ASCII character are one each, with limit 2000, fits; code points are that count
+  (a grapheme count would too, which no lab row separates; it would accept more than the library allows, never less).
+  The row's table bytes did not change: the observation is the same refusal.
 
 M6, the whole matrix:
 - **M6, H-047 refined: a timed-out member's ManageThreads shows it no private thread it is not in.** The first full
