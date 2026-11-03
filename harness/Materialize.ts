@@ -434,8 +434,11 @@ export const projectionProblems = (projection: Projection, snapshot: Snapshot, g
   if (thread !== undefined) {
     const channel = guild.channels.get(thread.id)
     if (channel !== undefined) {
-      if (channel.thread?.archived !== thread.archived || channel.thread?.locked !== thread.locked) problems.push(`thread ${thread.id} state differs`)
-      if ((guild.threadMembership.get(thread.id) === true) !== thread.subjectMember) problems.push(`thread ${thread.id} membership differs`)
+      if (channel.thread?.archived !== thread.archived || channel.thread?.locked !== thread.locked) {
+        problems.push(`thread ${thread.id} archived ${channel.thread?.archived} locked ${channel.thread?.locked}, not ${thread.archived} ${thread.locked}`)
+      }
+      const member = guild.threadMembership.get(thread.id) === true
+      if (member !== thread.subjectMember) problems.push(`thread ${thread.id} subject member ${member}, not ${thread.subjectMember}`)
     }
   }
   return problems

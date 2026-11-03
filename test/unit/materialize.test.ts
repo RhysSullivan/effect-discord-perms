@@ -142,8 +142,8 @@ describe("the projection", () => {
     })
     const withThread = (options: { readonly locked: boolean; readonly member: boolean }) => reduce(stateFor(visible), "THREAD_CREATE", { ...thread(options), guild_id: labGuildId }).snapshot
     expect(Materialize.projectionProblems(projection, withThread({ locked: true, member: true }), labGuildId, now)).toEqual([])
-    expect(Materialize.projectionProblems(projection, withThread({ locked: false, member: true }), labGuildId, now)).toEqual([`thread ${channelIdOf("lab-private-thread")} state differs`])
-    expect(Materialize.projectionProblems(projection, withThread({ locked: true, member: false }), labGuildId, now)).toEqual([`thread ${channelIdOf("lab-private-thread")} membership differs`])
+    expect(Materialize.projectionProblems(projection, withThread({ locked: false, member: true }), labGuildId, now)).toEqual([`thread ${channelIdOf("lab-private-thread")} archived false locked false, not false true`])
+    expect(Materialize.projectionProblems(projection, withThread({ locked: true, member: false }), labGuildId, now)).toEqual([`thread ${channelIdOf("lab-private-thread")} subject member false, not true`])
     // absent is accepted: Discord does not always sync a channel's threads when it becomes visible
     expect(Materialize.projectionProblems(projection, stateFor(visible), labGuildId, now)).toEqual([])
   })
