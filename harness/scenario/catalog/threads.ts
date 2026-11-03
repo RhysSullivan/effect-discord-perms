@@ -170,6 +170,16 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     },
     ["subject-thread"]
   ),
+  // M6 (flag coverage of thread.delete's ManageThreads): deleting a thread someone else created needs it. The
+  // harness's throwaway thread (`harness-thread`), never a provisioned one; the coverage row without the flag
+  // is derived from this one (`coverage.ts`)
+  threadTargeted(
+    "delete-harness-thread",
+    ["H-045"],
+    { _tag: "thread", action: "delete" },
+    { channel: "public-thread", grants: [{ flags: ["ViewChannel", "ManageThreads"], via: "role" }], removals: [], memberState: "normal" },
+    ["harness-thread"]
+  ),
   // H-045: archiving needs ManageThreads unless the subject created the thread; locking needs it always (M4
   // live: the creator may lock too)
   threadTargeted("archive-without-manage", ["H-045"], { _tag: "thread", action: "archive" }, {

@@ -10,8 +10,9 @@
  * - Mentions: users only the three bots, roles only `lab-mentionable`/`lab-unmentionable`, which only the
  *   target holds; a reply's `repliedUser` only towards a bot's message. The send payloads mention nobody else.
  * - No row's removals affect the target: in the scenario channel it keeps the flags it posts fixtures with.
- * - At most one name or topic edit per lab channel per run (H-162): a `channelEdit` name or topic operation,
- *   or a renamed setup (`nameVariant: "b"`).
+ * - At most one name or topic edit per lab channel per run (H-162): a `channelEdit` name or topic operation that
+ *   preflight predicts to succeed (a refused edit changes nothing), a renamed setup (`nameVariant: "b"`), or a
+ *   rule probe that may change a channel's name or topic.
  * - Every kick or ban row is one the docs model predicts to fail (`kickBanMustFail`, L1): the subject is not
  *   granted the flag (nor any administrator source), or the target does not rank below it. The Lab guard
  *   checks the same rule again from harness-side reads just before the call (§5.6).
@@ -21,8 +22,10 @@ import * as Flags from "../../src/permissions/Flags.ts"
 import { resolve } from "../../src/permissions/Resolver.ts"
 import * as LabIds from "../LabIds.ts"
 import * as Materialize from "../Materialize.ts"
+import * as Predict from "../Predict.ts"
 import type { Scenario } from "./Dsl.ts"
 import { kickBanMustFail } from "./Pairwise.ts"
+import { probes } from "./Probes.ts"
 
 /** One violation. */
 export interface Violation {
@@ -50,6 +53,12 @@ export const checkScenario = (scenario: Scenario): ReadonlyArray<Violation> => {
     add("reply-to-bots", "a reply without a bot message to reply to")
   }
   const operation = scenario.operation
+  if (operation._tag === "rule") {
+    // a probe mentions only the target bot and lab roles (which the runner checks Rhys does not hold)
+    for (const role of probes[operation.probe].mentions.roles) {
+      if (role !== "lab-mentionable" && role !== "lab-unmentionable") add("mention-lab-roles", `a probe mentions ${role}`)
+    }
+  }
   if (operation._tag === "member" && (operation.action === "kick" || operation.action === "ban")) {
     const flag = operation.action === "kick" ? "KickMembers" : "BanMembers"
     const granted = scenario.setup.grants.some((grant) => grant.via === "administrator" || grant.flags.includes(flag) || grant.flags.includes("Administrator"))
@@ -60,9 +69,23 @@ export const checkScenario = (scenario: Scenario): ReadonlyArray<Violation> => {
   return out
 }
 
-/** Whether a scenario edits a channel's name or topic (H-162 counts both). */
-const renames = (scenario: Scenario): boolean =>
-  scenario.setup.channelSettings?.nameVariant === "b" || (scenario.operation._tag === "channelEdit" && scenario.operation.field !== "slowmode")
+/** A fixed instant for the predictions: only a timeout's being in the future matters. */
+const predictedAt = Date.parse("2026-11-01T12:00:00Z")
+
+/**
+ * The lab channels whose name or topic a scenario may change (H-162 counts both): its own channel, or a probe's.
+ * A name or topic edit preflight predicts to fail changes nothing (M6: `rename-voice-without-connect` lacks
+ * Connect, and Discord refuses it with 50001; the replay holds the prediction to that live answer), so it is not
+ * counted.
+ */
+const renamed = (scenario: Scenario): ReadonlyArray<string> => {
+  const operation = scenario.operation
+  if (operation._tag === "rule") return probes[operation.probe].renames
+  if (scenario.setup.channelSettings?.nameVariant === "b") return [Materialize.labNameOf(scenario.setup)]
+  if (operation._tag !== "channelEdit" || operation.field === "slowmode") return []
+  const refused = Predict.predict(scenario, Predict.symbolicIds, predictedAt).records.decision.failures.length > 0
+  return refused ? [] : [Materialize.labNameOf(scenario.setup)]
+}
 
 /** The checks over the whole catalog: every scenario's, unique IDs, and at most one renamed setup per channel. */
 export const checkCatalog = (scenarios: ReadonlyArray<Scenario>): ReadonlyArray<Violation> => {
@@ -72,12 +95,11 @@ export const checkCatalog = (scenarios: ReadonlyArray<Scenario>): ReadonlyArray<
     if (seen.has(scenario.id)) out.push({ scenario: scenario.id, rule: "unique-ids", detail: "duplicate scenario ID" })
     seen.add(scenario.id)
   }
-  const renamed = new Map<string, Array<string>>()
+  const edits = new Map<string, Array<string>>()
   for (const scenario of scenarios) {
-    if (!renames(scenario)) continue
-    renamed.set(scenario.setup.channel, [...(renamed.get(scenario.setup.channel) ?? []), scenario.id])
+    for (const channel of renamed(scenario)) edits.set(channel, [...(edits.get(channel) ?? []), scenario.id])
   }
-  for (const [channel, ids] of renamed) {
+  for (const [channel, ids] of edits) {
     if (ids.length > 1) out.push({ scenario: channel, rule: "one-rename-per-channel", detail: `${ids.length} name or topic edits of ${channel} in one run: ${ids.join(", ")} (H-162)` })
   }
   return out

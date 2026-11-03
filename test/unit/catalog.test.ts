@@ -6,7 +6,7 @@ import { scenarios as sendScenarios, slowmodeSeconds, targetedRows, wirePayload 
 import { Setup } from "../../harness/scenario/Dsl.ts"
 import { families, kickBanMustFail, pairsOf, pairwise, selectionProblems, validPairs } from "../../harness/scenario/Pairwise.ts"
 import * as Safety from "../../harness/scenario/Safety.ts"
-import { MessageId, StickerId } from "../../src/Snowflake.ts"
+import { MessageId, RoleId, StickerId } from "../../src/Snowflake.ts"
 import { fakeIds } from "../support/lab.ts"
 
 /**
@@ -97,11 +97,16 @@ describe("the send catalog", () => {
   })
 
   it("sends allowed_mentions with nothing parsed, except the one @everyone payload", () => {
-    const context = { replyTo: MessageId.make("600000000000000001"), stickerId: StickerId.make("700000000000000001") }
-    for (const payload of ["plain", "embed", "file", "reply", "tts", "poll", "guild-sticker"] as const) {
+    const role = RoleId.make("400000000000000077")
+    const context = { replyTo: MessageId.make("600000000000000001"), stickerId: StickerId.make("700000000000000001"), unmentionableRole: role }
+    for (const payload of ["plain", "embed", "file", "reply", "tts", "poll", "guild-sticker", "mention-role"] as const) {
       expect(wirePayload(payload, context).request.allowed_mentions?.parse, payload).toEqual([])
     }
-    expect(wirePayload("reply", context).request.allowed_mentions?.replied_user).toBe(false)
+    // a role mention pings exactly that role, by its explicit opt-in
+    expect(wirePayload("mention-role", context).request.allowed_mentions?.roles).toEqual([role])
+    expect(wirePayload("plain", context).request.allowed_mentions?.roles).toBeUndefined()
+    // the reply pings nobody: `replied_user` is sent only for `mentions.repliedUser` (H-134: it defaults to false)
+    expect(wirePayload("reply", context).request.allowed_mentions?.replied_user).toBeUndefined()
     expect(wirePayload("mention-everyone", context).request.allowed_mentions?.parse).toEqual(["everyone"])
   })
 

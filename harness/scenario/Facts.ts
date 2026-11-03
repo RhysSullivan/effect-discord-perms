@@ -16,6 +16,7 @@ import type { DecideArgs } from "../../src/permissions/Preflight.ts"
 import type { Resolution } from "../../src/permissions/Resolver.ts"
 import type { PayloadRuleName } from "../../src/payload/PayloadRules.ts"
 import type { LabChannel, Operation, Scenario, SendPayload } from "./Dsl.ts"
+import { probes } from "./Probes.ts"
 
 /** Where the operation's permissions are resolved. */
 export type Scope = "channel" | "guild"
@@ -67,6 +68,8 @@ export const featuresOf = (payload: SendPayload): ReadonlyArray<PayloadRuleName>
       return ["poll"]
     case "mention-everyone":
       return ["mentionsEveryone"]
+    case "mention-role":
+      return ["unmentionableRole"]
   }
 }
 
@@ -130,6 +133,8 @@ export const opOf = (operation: Operation, channel: LabChannel): OpName => {
       }
     case "channelEdit":
       return byKind(channel, { channel: "channel.edit", thread: "thread.edit", voice: "voice.edit" })
+    case "rule":
+      return probes[operation.probe].op
     case "member":
       switch (operation.action) {
         case "add-role":
@@ -152,7 +157,7 @@ export const opOf = (operation: Operation, channel: LabChannel): OpName => {
 export const staticFactsOf = (scenario: Pick<Scenario, "setup" | "operation">): StaticFacts => {
   const { operation, setup } = scenario
   const op = opOf(operation, setup.channel)
-  const member = operation._tag === "member"
+  const member = operation._tag === "member" || (operation._tag === "rule" && probes[operation.probe].op.startsWith("member."))
   const args: DecideArgs = {
     payload: operation._tag === "send" ? featuresOf(operation.payload) : [],
     ...(operation._tag === "react" ? { reaction: operation.emoji === "unicode-existing" ? ("existing" as const) : ("new" as const) } : {}),
@@ -163,7 +168,7 @@ export const staticFactsOf = (scenario: Pick<Scenario, "setup" | "operation">): 
     scope: member ? "guild" : "channel",
     args,
     onTarget: member,
-    assignsRole: member && (operation.action === "add-role" || operation.action === "remove-role")
+    assignsRole: operation._tag === "member" && (operation.action === "add-role" || operation.action === "remove-role")
   }
 }
 

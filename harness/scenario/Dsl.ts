@@ -5,6 +5,7 @@
  */
 import { Schema } from "effect"
 import { PermissionFlags } from "../../src/errors/Missing.generated.ts"
+import { ProbeName } from "./Probes.ts"
 
 /** The lab channel a scenario acts in (the three thread kinds are the provisioned threads; §5.7). */
 export const LabChannel = Schema.Literals([
@@ -56,6 +57,8 @@ export const Rank = Schema.Literals(["below", "equal", "above"])
  * - `guild-sticker`: the lab's sticker (send);
  * - `subject-thread`: the scenario thread is one the subject created (before Converge, with temporary access),
  *   instead of the provisioned one of that kind;
+ * - `harness-thread`: the scenario thread is a throwaway public thread the harness created in `lab-text` (M6: a
+ *   thread the subject may delete only with ManageThreads, which no provisioned thread may be);
  * - `target-role`: the target holds the role of `roleRank` (a role removal's subject);
  * - `subject-prior-send`: the subject has just sent a plain message in the scenario channel, after Converge and
  *   with the setup's own permissions and slowmode, so a send that follows is its second in a row (H-053). Discord
@@ -69,6 +72,7 @@ export const Fixture = Schema.Literals([
   "pinned-harness-message",
   "guild-sticker",
   "subject-thread",
+  "harness-thread",
   "target-role",
   "subject-prior-send"
 ])
@@ -102,8 +106,11 @@ export class Setup extends Schema.Class<Setup>("Setup")({
   fixtures: Schema.Array(Fixture)
 }) {}
 
-/** A send payload variant (the send family's payload dimension, §5.9). */
-export const SendPayload = Schema.Literals(["plain", "embed", "file", "reply", "tts", "poll", "guild-sticker", "mention-everyone"])
+/**
+ * A send payload variant (the send family's payload dimension, §5.9; `mention-role`, a mention of the
+ * non-mentionable `lab-unmentionable`, which only the target holds, is used by targeted rows only, M6).
+ */
+export const SendPayload = Schema.Literals(["plain", "embed", "file", "reply", "tts", "poll", "guild-sticker", "mention-everyone", "mention-role"])
 /** A send payload variant. */
 export type SendPayload = typeof SendPayload.Type
 
@@ -132,7 +139,9 @@ export const Operation = Schema.Union([
   Schema.TaggedStruct("channelEdit", { field: EditField }),
   Schema.TaggedStruct("member", { action: MemberAction }),
   /** A forum or media post, with or without a tag (H-031, H-044). */
-  Schema.TaggedStruct("createPost", { tagged: Schema.Boolean })
+  Schema.TaggedStruct("createPost", { tagged: Schema.Boolean }),
+  /** One side of a compile-time rule's live pair (§5.5): a typed library call, or a raw call the types forbid. */
+  Schema.TaggedStruct("rule", { probe: ProbeName })
 ])
 /** An operation. */
 export type Operation = typeof Operation.Type
@@ -158,6 +167,8 @@ export const operationKey = (operation: Operation): string => {
       return `member:${operation.action}`
     case "createPost":
       return `createPost:${operation.tagged ? "tagged" : "untagged"}`
+    case "rule":
+      return `rule:${operation.probe}`
   }
 }
 
@@ -191,7 +202,7 @@ export interface Scenario {
   readonly hypotheses: ReadonlyArray<`H-${number}`>
   readonly setup: Setup
   readonly operation: Operation
-  /** Rule rows only (M6); matrix rows have no expectation, agreement decides. */
+  /** Rule rows only: the registry's full expectation (§5.5); matrix rows have none, agreement decides. */
   readonly expect?: Observation
   /** A flip control's original row (§5.9): this row is its setup with only the original's first missing flag granted. */
   readonly flipOf?: string

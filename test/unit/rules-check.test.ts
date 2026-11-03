@@ -1,7 +1,7 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { describe, expect, it } from "vitest"
-import { escalatedRules, openQuestionsOf, registryProblems, type RepositoryView, waitingForRhys } from "../../scripts/lib/rules.ts"
+import { type CoverageRow, coverageProblems, escalatedRules, openQuestionsOf, type PairRowView, registryProblems, type RepositoryView, waitingForRhys } from "../../scripts/lib/rules.ts"
 import type { Rule } from "../rules.ts"
 
 const failSource = ["import { x } from 'y'", "// @valid", "x.ok()", "// @expect-error TS2345 Beta", "x.bad()"].join("\n")
@@ -21,6 +21,9 @@ const view = (overrides: Partial<RepositoryView> = {}): RepositoryView => ({
   failFixtures: [{ path: "test/types/fail/catch.ts", source: failSource, snapshot }],
   openQuestions: new Set([17, 18]),
   log: "# LOG\n\n## Waiting for Rhys\n\nNothing yet.\n\n## Live findings\n",
+  ruleCatalog: new Map(),
+  table: new Map(),
+  canonical: (observation) => JSON.stringify(observation),
   ...overrides
 })
 
@@ -81,20 +84,103 @@ describe("registryProblems", () => {
     ])
   })
 
-  it("fails closed on a live pair until the catalog and truth table can be read", () => {
-    const rule: Rule = {
+  describe("a live pair", () => {
+    const pairRule: Rule = {
       ...pureTyping,
       id: "R-ids-distinct",
       live: {
         kind: "pair",
-        setup: "send-granted",
-        valid: { scenario: "rule/ids/send-with-channel-id", expect: { _tag: "Succeeded" } },
-        invalid: { scenario: "rule/ids/raw-send-with-user-id", expect: { _tag: "Rejected", status: 404, code: 10003, inner: [] } }
+        setup: "text-send",
+        valid: { scenario: "rule/text-send/typed-send", expect: { _tag: "Succeeded" } },
+        invalid: { scenario: "rule/text-send/raw-send-user-id", expect: { _tag: "Rejected", status: 404, code: 10003, inner: [] } }
       }
     }
-    const problems = registryProblems([rule], view({ log: "R-ids-distinct" }))
-    expect(problems).toHaveLength(1)
-    expect(problems[0]).toMatch(/^R-ids-distinct: has a live pair, which this rules-check cannot verify yet/)
+    const catalog = new Map([
+      ["rule/text-send/typed-send", "text-send"],
+      ["rule/text-send/raw-send-user-id", "text-send"]
+    ])
+    const row = (observation: unknown, setup = "S"): PairRowView => ({ setup, observation: JSON.stringify(observation) })
+    const table = new Map<string, PairRowView>([
+      ["rule/text-send/typed-send", row({ _tag: "Succeeded" })],
+      ["rule/text-send/raw-send-user-id", row({ _tag: "Rejected", status: 404, code: 10003, inner: [] })]
+    ])
+    const base = { log: "R-ids-distinct", ruleCatalog: catalog, table }
+
+    it("passes when both sides are catalog rule rows of the setup, with rows observing exactly the expectations on one setup", () => {
+      expect(registryProblems([pairRule], view(base))).toEqual([])
+    })
+
+    it("fails a side missing from the catalog or running on another setup", () => {
+      expect(registryProblems([pairRule], view({ ...base, ruleCatalog: new Map([["rule/text-send/typed-send", "text-send"]]) }))).toEqual([
+        "R-ids-distinct: the invalid side rule/text-send/raw-send-user-id is not a scenario of harness/scenario/catalog/rules.ts"
+      ])
+      expect(registryProblems([pairRule], view({ ...base, ruleCatalog: new Map([...catalog, ["rule/text-send/typed-send", "forum"]]) }))).toEqual([
+        "R-ids-distinct: the valid side rule/text-send/typed-send runs on setup forum, not the pair's text-send"
+      ])
+    })
+
+    it("fails a missing table or row, an observation that differs in any field, and two setups", () => {
+      expect(registryProblems([pairRule], view({ ...base, table: undefined }))).toEqual(["R-ids-distinct: there is no truth table (fixtures/truth-table.json) to read the pair's rows from"])
+      expect(registryProblems([pairRule], view({ ...base, table: new Map([...table].slice(0, 1)) }))).toEqual([
+        "R-ids-distinct: the invalid side rule/text-send/raw-send-user-id has no row in fixtures/truth-table.json"
+      ])
+      const wrongCode = new Map([...table, ["rule/text-send/raw-send-user-id", row({ _tag: "Rejected", status: 404, code: 10008, inner: [] })]])
+      expect(registryProblems([pairRule], view({ ...base, table: wrongCode }))[0]).toMatch(/observed .*10008.*, but the registry expects .*10003/)
+      const wrongInner = new Map([...table, ["rule/text-send/raw-send-user-id", row({ _tag: "Rejected", status: 404, code: 10003, inner: [{ path: "x", code: "y" }] })]])
+      expect(registryProblems([pairRule], view({ ...base, table: wrongInner }))).toHaveLength(1)
+      const unobserved = new Map<string, PairRowView>([...table, ["rule/text-send/typed-send", { setup: "S", observation: undefined }]])
+      expect(registryProblems([pairRule], view({ ...base, table: unobserved }))).toEqual(["R-ids-distinct: the valid side rule/text-send/typed-send recorded no observation"])
+      const twoSetups = new Map([...table, ["rule/text-send/typed-send", row({ _tag: "Succeeded" }, "T")]])
+      expect(registryProblems([pairRule], view({ ...base, table: twoSetups }))).toEqual(["R-ids-distinct: the two sides ran on different setups"])
+    })
+  })
+})
+
+describe("coverageProblems", () => {
+  const row = (overrides: Partial<CoverageRow>): CoverageRow => ({
+    id: "r",
+    op: "channel.pins",
+    flipOf: undefined,
+    ran: true,
+    granted: [],
+    first: undefined,
+    refused: false,
+    degraded: [],
+    features: [],
+    ...overrides
+  })
+  const ofPins = (problems: ReadonlyArray<string>) => problems.filter((problem) => problem.startsWith("channel.pins:"))
+
+  it("wants, per operation row's flag, a row that holds it, a refused row with it first, and that row's flip control", () => {
+    const held = row({ id: "held", granted: ["ViewChannel"] })
+    const first = row({ id: "first", first: "MissingViewChannel", refused: true })
+    const flip = row({ id: "flip/first", flipOf: "first" })
+    expect(ofPins(coverageProblems([held, first, flip]))).toEqual([])
+    expect(ofPins(coverageProblems([first, flip]))).toEqual(["channel.pins: no live row holds ViewChannel"])
+    expect(ofPins(coverageProblems([held, flip]))).toEqual(["channel.pins: no live row has ViewChannel as its first missing flag"])
+    expect(ofPins(coverageProblems([held, first]))).toEqual(["channel.pins: no flip control of a row with ViewChannel first (first)"])
+    // a row that did not run, or that Discord did not refuse, is no evidence
+    expect(ofPins(coverageProblems([held, { ...first, ran: false }, flip]))).toEqual(["channel.pins: no live row has ViewChannel as its first missing flag"])
+    expect(ofPins(coverageProblems([held, { ...first, refused: false }, flip]))).toEqual(["channel.pins: no live row has ViewChannel as its first missing flag"])
+  })
+
+  it("exempts require and DMs entirely, and kick and ban from flips only", () => {
+    const problems = coverageProblems([])
+    expect(problems.some((problem) => problem.startsWith("permissions.require") || problem.startsWith("dm.send"))).toBe(false)
+    const kick = coverageProblems([row({ op: "member.kick", granted: ["KickMembers"] }), row({ id: "k", op: "member.kick", first: "MissingKickMembers", refused: true })])
+    expect(kick.filter((problem) => problem.startsWith("member.kick"))).toEqual([])
+  })
+
+  it("wants a degrade-mode payload flag held with the feature kept, and missing with it dropped; never the external rules", () => {
+    const tts = (problems: ReadonlyArray<string>) => problems.filter((problem) => problem.includes("rule tts"))
+    const kept = row({ op: "channel.send", features: ["tts"], granted: ["SendTTSMessages"] })
+    const dropped = row({ op: "channel.send", features: ["tts"], degraded: ["SendTTSMessages"] })
+    expect(tts(coverageProblems([kept, dropped]))).toEqual([])
+    expect(tts(coverageProblems([kept]))).toEqual(["payload rule tts: no live row where Discord dropped the feature without SendTTSMessages"])
+    expect(tts(coverageProblems([dropped]))).toEqual(["payload rule tts: no live row holds SendTTSMessages and keeps the feature"])
+    // granting MentionEveryone with @everyone would ping Rhys: only the dropped side is wanted
+    expect(coverageProblems([]).filter((problem) => problem.includes("mentionsEveryone"))).toEqual(["payload rule mentionsEveryone: no live row where Discord dropped the feature without MentionEveryone"])
+    expect(coverageProblems([]).some((problem) => problem.includes("externalSticker") || problem.includes("externalEmojiInContent"))).toBe(false)
   })
 })
 

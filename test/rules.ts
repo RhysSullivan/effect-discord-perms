@@ -41,7 +41,28 @@ export interface Rule {
   readonly remainder?: NotLive
 }
 
-/** The registry. */
+const succeeded: Observation = { _tag: "Succeeded" }
+const refused = (status: number, code: number, inner: ReadonlyArray<{ readonly path: string; readonly code: string }> = []): Observation => ({ _tag: "Rejected", status, code, inner })
+const ignored = (field: string): Observation => ({ _tag: "Ignored", field })
+const applied = (field: string): Observation => ({ _tag: "Applied", field })
+
+/** A live pair whose sides are the probes `valid` and `invalid` of the catalog's setup `setup` (`rule/<setup>/<probe>`). */
+const pair = (setup: string, valid: readonly [probe: string, expect: Observation], invalid: readonly [probe: string, expect: Observation]): LivePair => ({
+  kind: "pair",
+  setup,
+  valid: { scenario: `rule/${setup}/${valid[0]}`, expect: valid[1] },
+  invalid: { scenario: `rule/${setup}/${invalid[0]}`, expect: invalid[1] }
+})
+
+const typedSend = ["typed-send", succeeded] as const
+
+/**
+ * The registry. Phase 1's rules (DESIGN §5.5): every type restriction of §2.1-§2.6 and its live pair, in which
+ * both sides run on one setup of `harness/scenario/catalog/rules.ts` and differ only in what they send. Where
+ * §5.5's table says "with flag / without", the pair keeps the flag absent on both sides and varies the payload
+ * (the feature that needs the flag is what the type adds the flag for), because both sides must share a
+ * byte-identical setup (LOG.md "Design deviations", M6).
+ */
 export const rules: ReadonlyArray<Rule> = [
   {
     id: "R-catch-tag-exact",
@@ -59,5 +80,360 @@ export const rules: ReadonlyArray<Rule> = [
     fail: "test/types/fail/catch-category-exact.ts",
     claims: ["payload", "transient"],
     live: { kind: "not-live", reason: "pure-typing" }
+  },
+  {
+    id: "R-require-narrows",
+    statement: "on a handle Permissions.require returned, a checked flag's Missing* becomes PermissionRevokedSinceCheck",
+    pass: "test/types/pass/channels.ts",
+    fail: "test/types/fail/require.ts",
+    claims: ["MissingSendMessages"],
+    live: { kind: "not-live", reason: "pure-typing" }
+  },
+  // ---- IDs and channel kinds (§2.1, §2.4, §2.5) ----
+  {
+    id: "R-ids-distinct",
+    statement: "snowflake ID brands cannot be mixed, and a plain string is no ID",
+    pass: "test/types/pass/ids.ts",
+    fail: "test/types/fail/ids.ts",
+    claims: ["ChannelId"],
+    live: pair("text-send", typedSend, ["raw-send-user-id", refused(404, 10003)])
+  },
+  {
+    id: "R-no-send-category",
+    statement: "categories have no send",
+    pass: "test/types/pass/op-errors.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["CategoryChannel"],
+    live: pair("text-send", typedSend, ["raw-send-category", refused(400, 50008)])
+  },
+  {
+    id: "R-no-send-forum",
+    statement: "forum and media channels have no send; they take posts",
+    pass: "test/types/pass/op-errors.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["'send' does not exist on type 'ForumChannel"],
+    live: pair("forum", ["typed-post", succeeded], ["raw-send-forum", refused(400, 50008)])
+  },
+  {
+    id: "R-forum-threads-need-a-message",
+    statement: "forum and media channels have no createThread: a post carries its first message",
+    pass: "test/types/pass/op-errors.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["'createThread' does not exist on type 'ForumChannel"],
+    live: pair("forum", ["typed-post", succeeded], ["raw-thread-forum", refused(400, 50035, [{ path: "message", code: "BASE_TYPE_REQUIRED" }])])
+  },
+  {
+    id: "R-crosspost-announcement-only",
+    statement: "crosspost exists only on announcement messages",
+    pass: "test/types/pass/op-errors.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["crosspost"],
+    live: pair("announcement", ["typed-crosspost", succeeded], ["raw-crosspost-text", refused(403, 50001)])
+  },
+  {
+    id: "R-thread-ops-threads-only",
+    statement: "thread operations (join, leave, members, archive, lock) exist only on threads",
+    pass: "test/types/pass/op-errors.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["'join' does not exist on type 'TextChannel"],
+    live: pair("thread", ["typed-join", succeeded], ["raw-join-text", refused(400, 50024)])
+  },
+  {
+    id: "R-no-threads-on-voice",
+    statement: "voice and stage channels have no threads",
+    pass: "test/types/pass/op-errors.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["'createThread' does not exist on type 'VoiceChannel"],
+    live: pair("text-threads", ["typed-thread-name-max", succeeded], ["raw-thread-voice", refused(400, 50024)])
+  },
+  {
+    id: "R-announcement-public-threads-only",
+    statement: "announcement channels have public threads only",
+    pass: "test/types/pass/channels.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["announcement channels only have public threads"],
+    live: pair("announcement", ["typed-announcement-thread", succeeded], ["raw-private-announcement-thread", refused(400, 50024)])
+  },
+  {
+    id: "R-bulk-delete-at-least-2",
+    statement: "a bulk delete takes at least two message IDs",
+    pass: "test/types/pass/op-errors.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["target requires 2"],
+    live: pair("text-manage", ["typed-bulk-delete-two", succeeded], ["raw-bulk-delete-one", refused(400, 50035, [{ path: "messages", code: "BASE_TYPE_BAD_LENGTH" }])])
+  },
+  {
+    id: "R-edit-own-only",
+    statement: "edit exists only on the bot's own messages",
+    pass: "test/types/pass/channels.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["'edit' does not exist on type 'ForeignMessage"],
+    live: pair("text-messages", ["typed-edit-own", succeeded], ["raw-edit-foreign", refused(403, 50005)])
+  },
+  {
+    id: "R-delete-foreign-manage",
+    statement: "deleting another user's message adds MissingManageMessages; deleting one's own does not",
+    pass: "test/types/pass/channels.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["MissingManageMessages"],
+    live: pair("text-messages", ["typed-delete-own", succeeded], ["raw-delete-foreign", refused(403, 50013)])
+  },
+  {
+    id: "R-no-pins-in-voice",
+    statement: "voice and stage text chat has no pins: their messages have no pin or unpin",
+    pass: "test/types/pass/op-errors.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["'pin' does not exist"],
+    live: pair("text-pins", ["typed-pin-text", succeeded], ["raw-pin-voice", refused(400, 50019)])
+  },
+  {
+    id: "R-no-topic-on-voice",
+    statement: "voice channels have no topic to edit (a stage channel has one, M6 live)",
+    pass: "test/types/pass/channels.ts",
+    fail: "test/types/fail/channel-kinds.ts",
+    claims: ["topic cannot be edited on this channel kind"],
+    live: pair("text-manage-channels", ["typed-topic-max", succeeded], ["raw-topic-voice", refused(400, 50035, [{ path: "topic", code: "CHANNEL_TOPIC_INVALID" }])])
+  },
+  // ---- payload permissions (§2.3) ----
+  {
+    id: "R-payload-embeds",
+    statement: "embeds add MissingEmbedLinks",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["MissingEmbedLinks"],
+    live: pair("text-send", typedSend, ["raw-embed", refused(403, 50013)])
+  },
+  {
+    id: "R-payload-files",
+    statement: "files add MissingAttachFiles",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["MissingAttachFiles"],
+    live: pair("text-send", typedSend, ["raw-file", refused(403, 50013)])
+  },
+  {
+    id: "R-payload-tts",
+    statement: "TTS without SendTTSMessages is dropped: it is in `degraded`, not an error (M4: degrade mode)",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["SendTTSMessages"],
+    live: pair("text-send", typedSend, ["raw-tts", ignored("tts")])
+  },
+  {
+    id: "R-payload-poll",
+    statement: "a poll adds MissingSendPolls",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["MissingSendPolls"],
+    live: pair("text-send", typedSend, ["raw-poll", refused(403, 50013)])
+  },
+  {
+    id: "R-payload-reply-rmh",
+    statement: "a reply adds MissingReadMessageHistory (the payload variant)",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["MissingReadMessageHistory"],
+    live: pair("text-send", typedSend, ["raw-reply", refused(403, 160002)])
+  },
+  {
+    id: "R-payload-thread-smit",
+    statement: "in threads SendMessagesInThreads replaces SendMessages",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["MissingSendMessages"],
+    live: pair("thread", ["typed-thread-send", succeeded], ["raw-send-parent", refused(403, 50013)])
+  },
+  {
+    id: "R-payload-guild-sticker",
+    statement: "a guild sticker adds no flag; only an external one adds MissingUseExternalStickers",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["MissingUseExternalStickers"],
+    live: pair("text-send", ["typed-guild-sticker", succeeded], ["raw-unknown-sticker", refused(400, 50081)])
+  },
+  {
+    id: "R-payload-external-sticker",
+    statement: "an external sticker adds MissingUseExternalStickers",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["MissingUseExternalStickers"],
+    live: { kind: "not-live", reason: "needs-second-guild" }
+  },
+  {
+    id: "R-payload-external-emoji",
+    statement: "content that may carry custom-emoji markup may degrade UseExternalEmojis",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["UseExternalEmojis"],
+    live: { kind: "not-live", reason: "needs-second-guild" }
+  },
+  {
+    id: "R-mention-everyone-degrades",
+    statement: "without MentionEveryone a role mention is dropped (in `degraded`), not an error",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-flags.ts",
+    claims: ["MentionEveryone"],
+    live: pair("text-send", ["typed-mention-mentionable", applied("mention_roles")], ["typed-mention-unmentionable", ignored("mention_roles")]),
+    remainder: { kind: "not-live", reason: "forbidden-action" }
+  },
+  // ---- payload shape (§2.3) ----
+  {
+    id: "R-nonempty",
+    statement: "a message needs content, embeds, files, stickers, a poll or components",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-rules.ts",
+    claims: ["a message needs"],
+    live: pair("text-send", typedSend, ["raw-empty", refused(400, 50006)])
+  },
+  {
+    id: "R-cv2-excludes",
+    statement: "a Components V2 message has no content, embeds, stickers or poll",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-rules.ts",
+    claims: ["content is not allowed in a componentsV2 message", "embeds is not allowed in a componentsV2 message"],
+    live: pair("text-send", ["typed-cv2", succeeded], ["raw-cv2-content", refused(400, 50035, [{ path: "content", code: "MESSAGE_CANNOT_USE_LEGACY_FIELDS_WITH_COMPONENTS_V2" }])])
+  },
+  {
+    id: "R-row-5-buttons",
+    statement: "an action row holds 1 to 5 buttons",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/components.ts",
+    claims: ["1 to 5 buttons"],
+    live: pair("text-send", ["typed-five-links", succeeded], ["raw-six-links", refused(400, 50035, [{ path: "components.0.components", code: "BASE_TYPE_BAD_LENGTH" }])])
+  },
+  {
+    id: "R-select-alone",
+    statement: "a select menu is alone in its row",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/components.ts",
+    claims: ["must be alone in its row"],
+    live: pair("text-send", ["typed-select-alone", succeeded], ["raw-select-with-button", refused(400, 50035, [{ path: "components.0.components.1", code: "COMPONENT_LAYOUT_WIDTH_EXCEEDED" }])])
+  },
+  {
+    id: "R-link-no-custom-id",
+    statement: "link buttons have no customId",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/components.ts",
+    claims: ["link buttons have no customId", "customId"],
+    live: pair(
+      "text-send",
+      ["typed-five-links", succeeded],
+      [
+        "raw-link-custom-id",
+        refused(400, 50035, [
+          { path: "components.0.components.0.custom_id", code: "BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE" },
+          { path: "components.0.components.0.url", code: "BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE" }
+        ])
+      ]
+    )
+  },
+  {
+    id: "R-premium-no-label",
+    statement: "premium buttons have no label",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/components.ts",
+    claims: ["premium buttons have no label", "label"],
+    live: pair(
+      "text-send",
+      // open question 6 decided (M6 live): with a SKU the application does not own, the label's own path still appears
+      ["raw-premium-unlabelled", refused(400, 50035, [{ path: "components.0.components.0.sku_id", code: "BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE" }])],
+      [
+        "raw-premium-labelled",
+        refused(400, 50035, [
+          { path: "components.0.components.0.label", code: "BUTTON_COMPONENT_SKU_ID_LABEL_MUTUALLY_EXCLUSIVE" },
+          { path: "components.0.components.0.sku_id", code: "BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE" }
+        ])
+      ]
+    )
+  },
+  // ---- mentions and flags (§2.3) ----
+  {
+    id: "R-allowed-mentions-none",
+    statement: "allowed_mentions is not settable: the library pings nobody unless `mentions` opts in",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-rules.ts",
+    claims: ["allowed_mentions is not valid when creating a message"],
+    live: pair("text-send", ["typed-mention-user", ignored("mentions")], ["raw-mention-user", applied("mentions")])
+  },
+  {
+    id: "R-create-flags-only",
+    statement: "Ephemeral exists only on interaction responses: a create has no `ephemeral`",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-rules.ts",
+    claims: ["ephemeral is not valid when creating a message"],
+    live: pair("text-send", ["typed-suppress-notifications", applied("flags")], ["raw-ephemeral", ignored("flags")])
+  },
+  {
+    id: "R-suppress-notifications-create-only",
+    statement: "SuppressNotifications exists only on create",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/payload-rules.ts",
+    claims: ["suppressNotifications is not valid when editing a message"],
+    live: pair("text-send", ["typed-suppress-notifications", applied("flags")], ["raw-edit-suppress-notifications", ignored("flags")])
+  },
+  // ---- limits (§2.3, §2.4, §2.6), each sent at exactly `Limits` and one over ----
+  {
+    id: "R-content-length",
+    statement: "non-literal content may be too long (ContentTooLong); a literal cannot",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/limits.ts",
+    claims: ["ContentTooLong"],
+    live: pair("text-send", ["typed-content-max", succeeded], ["raw-content-over", refused(400, 50035, [{ path: "content", code: "BASE_TYPE_MAX_LENGTH" }])])
+  },
+  {
+    id: "R-embed-limits",
+    statement: "embeds may be too large (EmbedTooLarge); a payload without embeds cannot",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/limits.ts",
+    claims: ["EmbedTooLarge"],
+    live: pair("text-rich", ["typed-embed-max", succeeded], ["raw-embed-over", refused(400, 50035, [{ path: "embeds.0.title", code: "BASE_TYPE_MAX_LENGTH" }])])
+  },
+  {
+    id: "R-poll-limits",
+    statement: "a poll may be too large (PollTooLarge); a payload without a poll cannot",
+    pass: "test/types/pass/payload.ts",
+    fail: "test/types/fail/limits.ts",
+    claims: ["PollTooLarge"],
+    live: pair("text-rich", ["typed-poll-max", succeeded], ["raw-poll-over", refused(400, 50035, [{ path: "poll.question.text", code: "BASE_TYPE_BAD_LENGTH" }])])
+  },
+  {
+    id: "R-name-length",
+    statement: "a non-literal channel, thread or post name may be too long (NameTooLong)",
+    pass: "test/types/pass/channels.ts",
+    fail: "test/types/fail/limits.ts",
+    claims: ["NameTooLong"],
+    live: pair("text-threads", ["typed-thread-name-max", succeeded], ["raw-thread-name-over", refused(400, 50035, [{ path: "name", code: "BASE_TYPE_BAD_LENGTH" }])])
+  },
+  {
+    id: "R-topic-length",
+    statement: "a non-literal topic may be too long (TopicTooLong)",
+    pass: "test/types/pass/channels.ts",
+    fail: "test/types/fail/limits.ts",
+    claims: ["TopicTooLong"],
+    live: pair("text-manage-channels", ["typed-topic-max", succeeded], ["raw-topic-over", refused(400, 50035, [{ path: "topic", code: "BASE_TYPE_MAX_LENGTH" }])])
+  },
+  {
+    id: "R-slowmode-range",
+    statement: "a non-literal slowmode may be out of range (SlowmodeOutOfRange)",
+    pass: "test/types/pass/channels.ts",
+    fail: "test/types/fail/limits.ts",
+    claims: ["SlowmodeOutOfRange"],
+    live: pair("text-manage-channels", ["typed-slowmode-max", succeeded], ["raw-slowmode-over", refused(400, 50035, [{ path: "rate_limit_per_user", code: "NUMBER_TYPE_MAX" }])])
+  },
+  {
+    id: "R-nickname-length",
+    statement: "a non-literal nickname may be too long (NicknameTooLong); clearing one cannot",
+    pass: "test/types/pass/channels.ts",
+    fail: "test/types/fail/limits.ts",
+    claims: ["NicknameTooLong"],
+    live: pair("members", ["typed-nickname-max", succeeded], ["raw-nickname-over", refused(400, 50035, [{ path: "nick", code: "BASE_TYPE_MAX_LENGTH" }])])
+  },
+  {
+    id: "R-timeout-28-days",
+    statement: "a timeout date may be more than 28 days ahead (TimeoutTooLong); lifting one cannot",
+    pass: "test/types/pass/channels.ts",
+    fail: "test/types/fail/limits.ts",
+    claims: ["TimeoutTooLong"],
+    live: pair("members", ["typed-timeout-max", succeeded], ["raw-timeout-over", refused(400, 50035, [{ path: "communication_disabled_until", code: "INVALID_COMMUNICATION_DISABLED_TIMESTAMP" }])])
   }
 ]

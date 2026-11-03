@@ -62,7 +62,7 @@ export interface DesiredOverwrite {
 /** The scenario thread's desired state. */
 export interface DesiredThread {
   readonly name: LabIds.ThreadName | LabIds.ScenarioThreadName
-  /** Who created it: the harness (a provisioned thread) or the subject (the `subject-thread` fixture). */
+  /** Who created it: the harness (a provisioned thread, or `harness-thread`) or the subject (the `subject-thread` fixture). */
   readonly creator: "harness" | "subject"
   readonly archived: boolean
   readonly locked: boolean
@@ -127,8 +127,15 @@ const scenarioThreadOf: { readonly [K in Setup["channel"]]: LabIds.ScenarioThrea
   "announcement-thread": "lab-subject-announcement-thread"
 }
 
-/** The lab name a setup acts in: the provisioned channel or thread, or the subject's own thread for `subject-thread`. */
+/**
+ * The lab name a setup acts in: the provisioned channel or thread, the subject's own thread for `subject-thread`,
+ * or the harness's throwaway public thread for `harness-thread`.
+ */
 export const labNameOf = (setup: Setup): LabName => {
+  if (setup.fixtures.includes("harness-thread")) {
+    if (setup.channel !== "public-thread") throw new Error(`Materialize: a harness-thread setup is a public thread, not ${setup.channel}`)
+    return "lab-harness-public-thread"
+  }
   if (!setup.fixtures.includes("subject-thread")) return provisionedNameOf[setup.channel]
   const name = scenarioThreadOf[setup.channel]
   if (name === undefined) throw new Error(`Materialize: a subject-thread setup needs a thread kind, not ${setup.channel}`)
@@ -234,7 +241,7 @@ export const desired = (setup: Setup, ids: Ids): Desired => {
       ? undefined
       : {
         name: spec.name,
-        creator: scenarioThreadSpec(spec.name) === undefined ? "harness" : "subject",
+        creator: scenarioThreadSpec(spec.name)?.creator ?? "harness",
         archived: state === "archived" || state === "archived-locked",
         locked: state === "locked" || state === "archived-locked",
         subjectMember: setup.subjectThreadMember ?? false

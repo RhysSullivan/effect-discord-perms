@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import * as Predict from "../../harness/Predict.ts"
 import { order, roleEditsOf } from "../../harness/Runner.ts"
 import { flipSetup, flipsOf } from "../../harness/scenario/catalog/flips.ts"
-import { familyRows, flipRows, scenarios } from "../../harness/scenario/catalog/index.ts"
+import { coverageRows, familyRows, flipRows, scenarios } from "../../harness/scenario/catalog/index.ts"
 import { Setup } from "../../harness/scenario/Dsl.ts"
 import type { Operation } from "../../harness/scenario/Dsl.ts"
 import * as Facts from "../../harness/scenario/Facts.ts"
@@ -112,9 +112,12 @@ describe("the whole catalog", () => {
     expect(Safety.checkScenario({ ...kick, setup: setup({ grants: [{ flags: [], via: "administrator" }], targetRank: "below" }) }).map((violation) => violation.rule)).toEqual(["kick-ban-must-fail"])
     expect(Safety.checkScenario({ ...kick, setup: setup({ grants: [{ flags: ["KickMembers"], via: "role" }], targetRank: "equal" }) })).toEqual([])
     expect(Safety.checkScenario({ ...kick, setup: setup({ targetRank: "below" }) })).toEqual([])
-    const edit = (id: string, field: "name" | "topic") => ({ id, hypotheses: [], setup: setup(), operation: { _tag: "channelEdit", field } as const })
+    const granted = setup({ grants: [{ flags: ["ViewChannel", "ManageChannels"], via: "role" }] })
+    const edit = (id: string, field: "name" | "topic", on = granted) => ({ id, hypotheses: [], setup: on, operation: { _tag: "channelEdit", field } as const })
     expect(Safety.checkCatalog([edit("a", "name")])).toEqual([])
     expect(Safety.checkCatalog([edit("a", "name"), edit("b", "topic")]).map((violation) => violation.rule)).toEqual(["one-rename-per-channel"])
+    // an edit preflight predicts Discord refuses changes nothing, so it does not count (M6)
+    expect(Safety.checkCatalog([edit("a", "name"), edit("b", "topic", setup())])).toEqual([])
   })
 })
 
@@ -123,7 +126,8 @@ describe("the run order", () => {
     const ordered = order(scenarios)
     expect([...ordered].map((scenario) => scenario.id).sort()).toEqual(scenarios.map((scenario) => scenario.id).sort())
     expect(order(scenarios)).toEqual(ordered)
-    expect(roleEditsOf(ordered)).toBe(68)
+    // M4: 68; M6 adds the rule rows, the coverage rows and their flips
+    expect(roleEditsOf(ordered)).toBe(77)
     // the M3 order (by setup alone) changed them far more often
     const bySetup = [...scenarios].sort((a, b) => (JSON.stringify(a.setup) < JSON.stringify(b.setup) ? -1 : 1))
     expect(roleEditsOf(bySetup)).toBeGreaterThan(150)
@@ -144,9 +148,10 @@ describe("flip controls", () => {
     expect(flipSetup(setup(), "ViewChannel").grants).toEqual([{ flags: ["ViewChannel"], via: "role" }])
   })
 
-  it("make one sibling per (row, first missing flag), never for kick or ban or a blind row, and each sibling's prediction moves on", () => {
+  it("make one sibling per (row, first missing flag), never for kick or ban, and each sibling's prediction moves on (a blind row's flip passes outright)", () => {
+    const originals = [...familyRows, ...coverageRows]
     const keys = flipRows.map((flip) => {
-      const original = familyRows.find((row) => row.id === flip.flipOf)
+      const original = originals.find((row) => row.id === flip.flipOf)
       if (original === undefined) throw new Error(`${flip.id} has no original`)
       const before = Predict.predict(original, Predict.symbolicIds, now)
       const after = Predict.predict(flip, Predict.symbolicIds, now)
@@ -158,6 +163,6 @@ describe("flip controls", () => {
     })
     expect(new Set(keys).size).toBe(keys.length)
     expect(flipRows.some((flip) => flip.operation._tag === "member" && (flip.operation.action === "kick" || flip.operation.action === "ban"))).toBe(false)
-    expect(flipsOf(familyRows)).toEqual(flipRows)
+    expect(flipsOf(originals)).toEqual(flipRows)
   })
 })

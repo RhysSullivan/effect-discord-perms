@@ -3,13 +3,21 @@
  *
  *   bun run rules
  *
- * Reads `test/rules.ts`, the fail fixtures and their snapshots, DESIGN.md §8 and LOG.md. An empty registry
- * passes only when no fail fixture has a directive, because every directive must be claimed by a rule.
+ * Reads `test/rules.ts`, the fail fixtures and their snapshots, DESIGN.md §8, LOG.md, the rule rows of
+ * `harness/scenario/catalog/rules.ts` and the committed truth table (`fixtures/truth-table.json`). It checks every
+ * rule's fixtures, claims, live pair (both sides in the catalog and in the table, each observation equal to its
+ * full expectation, one setup) or allowlisted reason, and the flag coverage of the table's matrix rows.
  */
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { Schema } from "effect"
+import * as RuleCatalog from "../harness/scenario/catalog/rules.ts"
+import { scenarios } from "../harness/scenario/catalog/index.ts"
+import { Observation, Setup } from "../harness/scenario/Dsl.ts"
+import { staticFactsOf } from "../harness/scenario/Facts.ts"
+import * as TruthTable from "../harness/TruthTable.ts"
 import { rules } from "../test/rules.ts"
-import { openQuestionsOf, pendingChecks, registryProblems } from "./lib/rules.ts"
+import { type CoverageRow, coverageProblems, openQuestionsOf, type PairRowView, pendingChecks, registryProblems } from "./lib/rules.ts"
 import { listTypeScriptFiles, repoRoot } from "./lib/tsc.ts"
 import { snapshotPathOf } from "./lib/typeTests.ts"
 
@@ -30,18 +38,67 @@ const failFixtures = listTypeScriptFiles(path.join(repoRoot, "test", "types", "f
   }
 })
 
-const problems = registryProblems(rules, {
-  fileExists: (relative) => fs.existsSync(path.join(repoRoot, relative)),
-  failFixtures,
-  openQuestions: openQuestionsOf(read("docs/DESIGN.md")),
-  log: read("LOG.md")
-})
+const encodeSetup = Schema.encodeSync(Schema.toCodecJson(Setup))
+const encodeObservation = Schema.encodeSync(Schema.toCodecJson(Observation))
+const canonical = (observation: Observation): string => TruthTable.canonicalJson(encodeObservation(observation))
+
+const tablePath = path.join(repoRoot, "fixtures", "truth-table.json")
+const table = fs.existsSync(tablePath) ? Schema.decodeUnknownSync(Schema.fromJsonString(TruthTable.TruthTable))(fs.readFileSync(tablePath, "utf8")) : undefined
+const tableRows = table === undefined ? undefined : new Map(Object.entries(table.scenarios).map(([id, row]): readonly [string, PairRowView] => [
+  id,
+  { setup: TruthTable.canonicalJson(encodeSetup(row.setup)), observation: row.observation === undefined ? undefined : canonical(row.observation) }
+]))
+
+const ruleCatalog = new Map(
+  RuleCatalog.scenarios.flatMap((scenario): ReadonlyArray<readonly [string, string]> => {
+    const parsed = RuleCatalog.parseRuleScenario(scenario.id)
+    return typeof parsed === "string" ? [] : [[scenario.id, parsed.setup]]
+  })
+)
+
+const problems = [
+  ...registryProblems(rules, {
+    fileExists: (relative) => fs.existsSync(path.join(repoRoot, relative)),
+    failFixtures,
+    openQuestions: openQuestionsOf(read("docs/DESIGN.md")),
+    log: read("LOG.md"),
+    ruleCatalog,
+    table: tableRows,
+    canonical
+  })
+]
+
+// flag coverage over the committed table's matrix rows (the rule rows test rules, not flags)
+const byId = new Map(scenarios.map((scenario) => [scenario.id, scenario]))
+const coverageRows: Array<CoverageRow> = []
+if (table === undefined) problems.push("flag coverage: there is no truth table (fixtures/truth-table.json)")
+else {
+  for (const [id, row] of Object.entries(table.scenarios)) {
+    const scenario = byId.get(id)
+    if (scenario === undefined || scenario.operation._tag === "rule") continue
+    const facts = staticFactsOf(scenario)
+    coverageRows.push({
+      id,
+      op: facts.op,
+      flipOf: scenario.flipOf,
+      ran: row.raw.class !== "setup-unsupported",
+      granted: row.resolver.required.filter((flag) => !row.resolver.missing.includes(flag)),
+      first: row.preflightSet[0],
+      refused: row.raw.class === "50013" || row.raw.class === "50001" || row.raw.class === "other-error",
+      degraded: row.raw.degraded,
+      features: facts.args.payload
+    })
+  }
+  problems.push(...coverageProblems(coverageRows).map((problem) => `flag coverage: ${problem}`))
+}
 
 const byKind = (kind: string): number =>
   rules.filter((rule) => (rule.live.kind === "not-live" ? `not-live:${rule.live.reason}` : rule.live.kind) === kind).length
+const pairs = rules.filter((rule) => rule.live.kind === "pair")
 const summary =
   `${rules.length} rule(s) (${byKind("pair")} live pair, ${byKind("escalated")} escalated, ${byKind("not-live:pure-typing")} pure-typing, ` +
-  `${rules.length - byKind("pair") - byKind("escalated") - byKind("not-live:pure-typing")} other not-live), ${failFixtures.length} fail fixture(s)`
+  `${rules.length - byKind("pair") - byKind("escalated") - byKind("not-live:pure-typing")} other not-live), ${failFixtures.length} fail fixture(s), ` +
+  `${pairs.length * 2} live sides checked against the table, flag coverage over ${coverageRows.length} matrix row(s)`
 console.log(`rules: not checked yet, because their inputs do not exist:\n- ${pendingChecks.join("\n- ")}`)
 if (problems.length > 0) {
   console.error(`rules FAIL ${problems.length} problem(s); ${summary}\n- ${problems.join("\n- ")}`)

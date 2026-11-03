@@ -47,15 +47,17 @@ export const threadSpecs = [
 export type ThreadName = (typeof threadSpecs)[number]["name"]
 
 /**
- * The threads a scenario creates as the subject (the `subject-thread` fixture), one name per kind: never
- * provisioned or stored; cleanup deletes them, and reset deletes any it finds as scenario threads.
+ * The threads a scenario creates (never provisioned or stored; cleanup deletes them, and reset deletes any it
+ * finds as scenario threads): the subject's (the `subject-thread` fixture), one name per kind, and a throwaway
+ * public thread the harness creates (`harness-thread`, M6), which the subject may delete only with ManageThreads.
  */
 export const scenarioThreadSpecs = [
-  { name: "lab-subject-public-thread", parent: "lab-text", type: 11 },
-  { name: "lab-subject-private-thread", parent: "lab-text", type: 12 },
-  { name: "lab-subject-announcement-thread", parent: "lab-announcement", type: 10 },
-  { name: "lab-subject-forum-post", parent: "lab-forum", type: 11 }
-] as const satisfies ReadonlyArray<{ readonly name: string; readonly parent: ChannelName; readonly type: number }>
+  { name: "lab-subject-public-thread", parent: "lab-text", type: 11, creator: "subject" },
+  { name: "lab-subject-private-thread", parent: "lab-text", type: 12, creator: "subject" },
+  { name: "lab-subject-announcement-thread", parent: "lab-announcement", type: 10, creator: "subject" },
+  { name: "lab-subject-forum-post", parent: "lab-forum", type: 11, creator: "subject" },
+  { name: "lab-harness-public-thread", parent: "lab-text", type: 11, creator: "harness" }
+] as const satisfies ReadonlyArray<{ readonly name: string; readonly parent: ChannelName; readonly type: number; readonly creator: "subject" | "harness" }>
 
 /** A scenario thread name. */
 export type ScenarioThreadName = (typeof scenarioThreadSpecs)[number]["name"]

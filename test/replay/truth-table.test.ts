@@ -1,7 +1,7 @@
 import * as fs from "node:fs"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import { agreement, flipAgreement } from "../../harness/Agreement.ts"
+import { agreement, flipAgreement, ruleAgreement } from "../../harness/Agreement.ts"
 import * as Predict from "../../harness/Predict.ts"
 import { scenarios } from "../../harness/scenario/catalog/index.ts"
 import { operationKey, Setup } from "../../harness/scenario/Dsl.ts"
@@ -13,7 +13,9 @@ import { requiredFlags } from "../../src/permissions/Preflight.ts"
 import { ResolverRules } from "../../src/permissions/ResolverRules.ts"
 import { payloadRuleNames, PayloadRules } from "../../src/payload/PayloadRules.ts"
 import { DiscordResponse, FieldError } from "../../src/errors/Cause.ts"
-import { dedicatedCodeTags, mapResponse } from "../../src/rest/ErrorMap.ts"
+import { dedicatedCodeTags, type LimitFacts, mapResponse } from "../../src/rest/ErrorMap.ts"
+import type { OpName } from "../../src/permissions/Operations.ts"
+import { Limits } from "../../src/payload/Limits.ts"
 import * as Flags from "../../src/permissions/Flags.ts"
 import { staticFactsOf } from "../../harness/scenario/Facts.ts"
 import { categoriesOf } from "../support/categories.ts"
@@ -58,8 +60,23 @@ describe("the truth table against the catalog", () => {
   })
 })
 
+const isRuleRow = (id: string): boolean => byId.get(id)?.operation._tag === "rule"
+const matrixRows = rows.filter(([id]) => !isRuleRow(id))
+const ruleRowsOfTable = rows.filter(([id]) => isRuleRow(id))
+
+describe("the rule rows (§5.5)", () => {
+  it.each(ruleRowsOfTable)("%s: observed exactly the registry's expectation", (id, row) => {
+    const scenario = byId.get(id)
+    if (scenario === undefined) throw new Error(`${id} is not in the catalog`)
+    expect(row.observation).toBeDefined()
+    if (row.observation === undefined) return
+    expect(ruleAgreement(row.observation, scenario.expect)).toBe("agree")
+    expect(row.agreement).toBe("agree")
+  })
+})
+
 describe("the replay", () => {
-  it.each(rows)("%s: steps (a) and (b) reproduce, and agreement agrees", (id, row) => {
+  it.each(matrixRows)("%s: steps (a) and (b) reproduce, and agreement agrees", (id, row) => {
     const scenario = byId.get(id)
     if (scenario === undefined) throw new Error(`${id} is not in the catalog`)
     if (!ran(row)) {
@@ -157,12 +174,12 @@ describe("the constants the table decides (§5.13)", () => {
   })
 
   it("ErrorMap: every other code the matrix recorded has its dedicated tag", () => {
-    const unmapped = rows.filter(([, row]) => row.raw.class === "other-error" && (row.raw.mappedTag === "n/a" || dedicatedCodeTags.get(row.raw.code) !== row.raw.mappedTag))
+    const unmapped = matrixRows.filter(([, row]) => row.raw.class === "other-error" && (row.raw.mappedTag === "n/a" || dedicatedCodeTags.get(row.raw.code) !== row.raw.mappedTag))
     expect(unmapped.map(([id, row]) => `${id}: ${row.raw.status} ${row.raw.code}`)).toEqual([])
   })
 
-  it("ErrorMap covers every (operation, status, code, inner path) the matrix recorded (M5)", () => {
-    const refused = rows.filter(([, row]) => row.raw.class === "50013" || row.raw.class === "50001" || row.raw.class === "other-error")
+  it("ErrorMap covers every (operation, status, code, inner path) the matrix recorded (M5; rule rows send what the types forbid)", () => {
+    const refused = matrixRows.filter(([, row]) => row.raw.class === "50013" || row.raw.class === "50001" || row.raw.class === "other-error")
     expect(refused.length).toBeGreaterThan(0)
     const unmapped = refused.flatMap(([id, row]) => {
       const scenario = byId.get(id)
@@ -176,8 +193,11 @@ describe("the constants the table decides (§5.13)", () => {
     expect(unmapped).toEqual([])
   })
 
-  it("every recorded error has its class's categories (ErrorCategories, or the class's marker)", () => {
-    const recorded = rows.flatMap(([id, row]) => (typeof row.preflight === "object" ? [[id, row.preflight] as const] : []))
+  it("every recorded error has its class's categories (ErrorCategories, or the class's marker): step (b)'s and step (d)'s", () => {
+    const recorded = rows.flatMap(([id, row]) => [
+      ...(typeof row.preflight === "object" ? [[id, row.preflight] as const] : []),
+      ...(typeof row.recompute === "object" ? [[`${id} (d)`, row.recompute] as const] : [])
+    ])
     expect(recorded.length).toBeGreaterThan(0)
     const classes: Readonly<Record<string, object>> = ErrorClasses
     const categoryTable: Readonly<Record<string, ReadonlyArray<string>>> = ErrorCategories
@@ -187,6 +207,45 @@ describe("the constants the table decides (§5.13)", () => {
       const Class = classes[error.tag]
       if (candidates.length === 0 && Class !== undefined && "prototype" in Class && typeof Class.prototype === "object" && Class.prototype !== null) candidates.push([...categoriesOf(Class.prototype)])
       expect({ id, matches: candidates.some((categories) => categories.join() === error.categories.join()) }).toEqual({ id, matches: true })
+    }
+  })
+})
+
+describe("Limits and the 50035 paths against the limit rows (§5.13, M6)", () => {
+  /** Each limit rule's invalid side, the operation it stands for, the limits it declares, and the tag its 50035 maps to. */
+  const limitRows: ReadonlyArray<readonly [scenario: string, op: OpName, limits: LimitFacts, tag: string]> = [
+    ["rule/text-send/raw-content-over", "channel.send", { content: { length: Limits.content + 1, limit: Limits.content } }, "ContentTooLong"],
+    ["rule/text-rich/raw-embed-over", "channel.send", { embeds: true }, "EmbedTooLarge"],
+    ["rule/text-rich/raw-poll-over", "channel.send", { poll: true }, "PollTooLarge"],
+    ["rule/text-threads/raw-thread-name-over", "channel.createThread.public", { name: { length: Limits.name.max + 1, limit: Limits.name.max } }, "NameTooLong"],
+    ["rule/text-manage-channels/raw-topic-over", "channel.edit", { topic: { length: Limits.topic.channel + 1, limit: Limits.topic.channel } }, "TopicTooLong"],
+    ["rule/text-manage-channels/raw-slowmode-over", "channel.edit", { slowmode: { seconds: Limits.slowmode.max + 1 } }, "SlowmodeOutOfRange"],
+    ["rule/members/raw-nickname-over", "member.setNickname", { nick: { length: Limits.nickname + 1, limit: Limits.nickname } }, "NicknameTooLong"],
+    ["rule/members/raw-timeout-over", "member.timeout", { timeout: true }, "TimeoutTooLong"]
+  ]
+
+  it.each(limitRows)("%s: Discord refused one over the limit with a 50035 the error map turns into its tag", (id, op, limits, tag) => {
+    const row = table.scenarios[id]
+    expect(row?.raw.code).toBe(50035)
+    if (row === undefined) return
+    const fieldErrors = row.raw.inner.map((error) => new FieldError({ path: error.path.split("."), code: error.code, message: "" }))
+    const answer = new DiscordResponse({ status: row.raw.status, code: row.raw.code, message: "", method: "POST", route: "(replay)", fieldErrors, attributedBy: "code" })
+    const mapped = mapResponse({ op, args: { payload: [] }, limits }, answer, undefined)
+    expect(mapped._tag === "Fail" ? mapped.error._tag : mapped).toBe(tag)
+  })
+
+  it("the valid sides, each exactly at its limit (Limits.content in Limits.unit, the embed title, the poll question, the name, topic, slowmode, nickname and 28-day timeout), succeeded", () => {
+    for (const id of [
+      "rule/text-send/typed-content-max",
+      "rule/text-rich/typed-embed-max",
+      "rule/text-rich/typed-poll-max",
+      "rule/text-threads/typed-thread-name-max",
+      "rule/text-manage-channels/typed-topic-max",
+      "rule/text-manage-channels/typed-slowmode-max",
+      "rule/members/typed-nickname-max",
+      "rule/members/typed-timeout-max"
+    ]) {
+      expect({ id, observation: table.scenarios[id]?.observation }).toEqual({ id, observation: { _tag: "Succeeded" } })
     }
   })
 })

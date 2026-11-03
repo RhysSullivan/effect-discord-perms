@@ -1,15 +1,16 @@
 /**
  * The send catalog (DESIGN §5.9): the pairwise send family, and targeted rows for hypotheses the pairwise
- * dimensions cannot express. Also each payload variant's wire request for the raw call of step (c), which is
- * what the library's `ToDfx` will send (M6): `allowed_mentions` always `{ parse: [] }` plus explicit opt-ins
- * (§2.3).
+ * dimensions cannot express. Also each payload variant as the library's payload (steps (b) and (d)) and as the
+ * wire request of step (c), which is what the library's `ToDfx` sends for it: `allowed_mentions` always
+ * `{ parse: [] }` plus explicit opt-ins (§2.3).
  */
-import type { MessageCreateRequest } from "dfx/DiscordREST/Generated"
 import type { PermissionFlag } from "../../../src/errors/Missing.generated.ts"
 import type { OpName } from "../../../src/permissions/Operations.ts"
 import { errorModeFlags } from "../../../src/permissions/Preflight.ts"
 import { type PayloadRuleName, payloadRuleNames, PayloadRules } from "../../../src/payload/PayloadRules.ts"
-import type { MessageId, StickerId } from "../../../src/Snowflake.ts"
+import type { MessageId, RoleId, StickerId } from "../../../src/Snowflake.ts"
+import type { MessagePayload } from "../../../src/payload/Message.ts"
+import * as ToDfx from "../../../src/payload/ToDfx.ts"
 import { type Fixture, type GrantSource, type Removal, type Scenario, type SendPayload, Setup } from "../Dsl.ts"
 import { staticFactsOf } from "../Facts.ts"
 import { type Combination, families, pairwise } from "../Pairwise.ts"
@@ -65,7 +66,8 @@ const hypothesesOf = (row: Combination): ReadonlyArray<`H-${number}`> => {
     tts: ["H-013", "H-102"],
     poll: ["H-055"],
     "guild-sticker": ["H-138"],
-    "mention-everyone": ["H-013", "H-100"]
+    "mention-everyone": ["H-013", "H-100"],
+    "mention-role": ["H-101"]
   }
   add(...(payloadHypotheses[row.payload ?? ""] ?? []))
   return [...out].sort()
@@ -165,6 +167,15 @@ const slowmode = { nameVariant: "a", slowmode: slowmodeSeconds, requireTag: fals
 
 /** Hypotheses the pairwise dimensions cannot express (§5.9 targeted families, the send part). */
 export const targetedRows: ReadonlyArray<Scenario> = [
+  // H-101 (M6, flag coverage of the unmentionableRole rule): a role nobody may mention freely, mentioned without
+  // MentionEveryone, is dropped from `mention_roles`; with it, the mention stands. Only the target holds the role.
+  targeted("role-mention-without-mention-everyone", ["H-101"], "mention-role", { channel: "text", grants: [{ flags: ["ViewChannel", "SendMessages"], via: "role" }], removals: [], memberState: "normal" }),
+  targeted("role-mention-with-mention-everyone", ["H-101"], "mention-role", {
+    channel: "text",
+    grants: [{ flags: ["ViewChannel", "SendMessages", "MentionEveryone"], via: "role" }],
+    removals: [],
+    memberState: "normal"
+  }),
   // H-031: in a thread, SendMessages does nothing; SendMessagesInThreads is required
   targeted("thread-send-without-smit", ["H-031"], "plain", {
     channel: "public-thread",
@@ -364,41 +375,45 @@ export interface WireContext {
   readonly replyTo: MessageId | undefined
   /** The lab's guild sticker. */
   readonly stickerId: StickerId | undefined
+  /** `lab-unmentionable`, which a `mention-role` payload mentions (only the target holds it). */
+  readonly unmentionableRole: RoleId | undefined
 }
 
 /** A request for the raw create-message call, and the files to attach. */
-export interface WirePayload {
-  readonly request: MessageCreateRequest
-  readonly files: ReadonlyArray<File>
-}
+export type WirePayload = ToDfx.WireCreate
 
-/** The raw request for a payload variant: what the library's `ToDfx` sends for it (M6). */
-export const wirePayload = (payload: SendPayload, context: WireContext): WirePayload => {
-  const quiet = { allowed_mentions: { parse: [] } }
+/**
+ * The library payload of a send variant: what step (b) and step (d) send through the public `send` (M6). Only
+ * `mention-everyone` opts into a mention; Safety guarantees MentionEveryone is never granted with it (§5.6).
+ */
+export const typedPayload = (payload: SendPayload, context: WireContext): MessagePayload => {
   switch (payload) {
     case "plain":
-      return { request: { ...quiet, content: "lab send" }, files: [] }
+      return { content: "lab send" }
     case "embed":
-      return { request: { ...quiet, embeds: [{ title: "lab embed", description: "a lab embed" }] }, files: [] }
+      return { embeds: [{ title: "lab embed", description: "a lab embed" }] }
     case "file":
-      return { request: { ...quiet, content: "lab file" }, files: [new File(["lab file\n"], "lab.txt", { type: "text/plain" })] }
+      return { content: "lab file", files: [{ name: "lab.txt", data: new TextEncoder().encode("lab file\n"), contentType: "text/plain" }] }
     case "reply": {
       if (context.replyTo === undefined) throw new Error("send catalog: a reply needs its harness-message fixture")
-      return { request: { allowed_mentions: { parse: [], replied_user: false }, content: "lab reply", message_reference: { message_id: context.replyTo, fail_if_not_exists: true } }, files: [] }
+      return { content: "lab reply", reply: { messageId: context.replyTo } }
     }
     case "tts":
-      return { request: { ...quiet, content: "lab tts", tts: true }, files: [] }
+      return { content: "lab tts", tts: true }
     case "poll":
-      return {
-        request: { ...quiet, poll: { question: { text: "lab poll" }, answers: [{ poll_media: { text: "yes" } }, { poll_media: { text: "no" } }], duration: 1, allow_multiselect: false } },
-        files: []
-      }
+      return { poll: { question: "lab poll", answers: ["yes", "no"], durationHours: 1, allowMultiselect: false } }
     case "guild-sticker": {
       if (context.stickerId === undefined) throw new Error("send catalog: the lab has no guild sticker")
-      return { request: { ...quiet, sticker_ids: [context.stickerId] }, files: [] }
+      return { stickers: [{ origin: "guild", id: context.stickerId }] }
     }
     case "mention-everyone":
-      // the only payload that opts into a mention; Safety guarantees MentionEveryone is never granted (§5.6)
-      return { request: { allowed_mentions: { parse: ["everyone"] }, content: "@everyone lab mention" }, files: [] }
+      return { content: "@everyone lab mention", mentions: { everyone: true } }
+    case "mention-role": {
+      if (context.unmentionableRole === undefined) throw new Error("send catalog: no ID for lab-unmentionable")
+      return { content: `<@&${context.unmentionableRole}> lab mention`, mentions: { roles: [context.unmentionableRole] } }
+    }
   }
 }
+
+/** The raw request for a payload variant: exactly what the library's `ToDfx` sends for its typed payload (M6). */
+export const wirePayload = (payload: SendPayload, context: WireContext): WirePayload => ToDfx.createRequest(typedPayload(payload, context))

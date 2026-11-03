@@ -37,7 +37,7 @@ export const emoji = { existing: "✅", fresh: "👍" } as const
 export interface SubjectObjects {
   /** The subject's own plain message in the scenario channel. */
   readonly subjectMessage: MessageId | undefined
-  /** The thread the subject created (`subject-thread`), by its scenario name. */
+  /** The scenario thread made for the setup (`subject-thread` by the subject, `harness-thread` by the harness), by its name. */
   readonly thread: { readonly name: LabIds.ScenarioThreadName; readonly id: ChannelId } | undefined
 }
 
@@ -71,14 +71,25 @@ export const subjectObjects = (input: {
   readonly ids: Materialize.Ids
   readonly overwriteChannel: LabIds.ChannelName
   readonly channel: Materialize.LabName
-  readonly scenarioThread: { readonly name: LabIds.ScenarioThreadName; readonly parent: LabIds.ChannelName; readonly type: number } | undefined
+  readonly scenarioThread: { readonly name: LabIds.ScenarioThreadName; readonly parent: LabIds.ChannelName; readonly type: number; readonly creator: "subject" | "harness" } | undefined
 }): Effect.Effect<SubjectObjects, LabRequestFailed, HarnessRest | SubjectRaw | LabGuard> =>
   Effect.gen(function* () {
     const { setup, ids } = input
-    if (!needsSubject(setup)) return { subjectMessage: undefined, thread: undefined }
     const rest = yield* HarnessRest
-    const subject = yield* SubjectRaw
     const guard = yield* LabGuard
+    if (setup.fixtures.includes("harness-thread")) {
+      // the harness's throwaway thread: no temporary access needed, the harness is an administrator
+      const spec = input.scenarioThread
+      if (spec === undefined) return yield* Effect.die(new Error("fixtures: a harness-thread setup without a scenario thread"))
+      const parent = yield* lookup(ids.channels, spec.parent, spec.parent)
+      const body = yield* rest
+        .createThread(parent, { name: spec.name, type: 11, auto_archive_duration: LabIds.threadAutoArchiveMinutes })
+        .pipe(labStep(`fixtures: the harness creates ${spec.name}`), Effect.flatMap(Wire.decode(CreatedThread, "createThread")))
+      yield* guard.admitChannel(body)
+      return { subjectMessage: undefined, thread: { name: spec.name, id: body.id } }
+    }
+    if (!needsSubject(setup)) return { subjectMessage: undefined, thread: undefined }
+    const subject = yield* SubjectRaw
 
     // temporary access: no timeout, and a member overwrite allowing what the fixtures need
     const member = yield* rest.getGuildMember(ids.guildId, ids.subjectUserId).pipe(labStep("fixtures: get the subject"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))

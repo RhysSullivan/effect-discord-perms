@@ -31,21 +31,40 @@ export const flipSetup = (setup: Setup, flag: PermissionFlag): Setup => {
 /** A fixed instant for the predictions: only the timeout's being in the future matters. */
 const predictedAt = Date.parse("2026-11-01T12:00:00Z")
 
-/** The flip controls for `scenarios` (see the module comment). */
+/**
+ * The flip controls for `scenarios` (see the module comment). A key whose rows are all blind (a thread hidden by
+ * its parent's View deny resolves `unseen`, which hides every other problem) takes, in a second pass, the first
+ * blind row whose flip the prediction shows clean: its failures are the original's minus the first (M6: so
+ * ViewChannel in threads has a flip control, which the flag-coverage check requires). Keys with a row that is not
+ * blind keep M4's choice.
+ */
 export const flipsOf = (scenarios: ReadonlyArray<Scenario>): ReadonlyArray<Scenario> => {
   const seen = new Set<string>()
   const out: Array<Scenario> = []
+  const blind: Array<{ readonly scenario: Scenario; readonly key: string; readonly flag: PermissionFlag; readonly rest: ReadonlyArray<string> }> = []
   for (const scenario of byId(scenarios)) {
     if (scenario.operation._tag === "member" && (scenario.operation.action === "kick" || scenario.operation.action === "ban")) continue
+    if (scenario.operation._tag === "rule") continue
     if (scenario.setup.channel === "media") continue
     const prediction = Predict.predict(scenario, Predict.symbolicIds, predictedAt)
-    const [first] = prediction.records.decision.failures
+    const [first, ...rest] = prediction.records.decision.failures
     if (first === undefined || first._tag !== "MissingFlag") continue
-    if (prediction.resolution.masks.some((mask) => blindMasks.has(mask))) continue
     const key = `${prediction.facts.op}|${first.flag}`
+    if (prediction.resolution.masks.some((mask) => blindMasks.has(mask))) {
+      blind.push({ scenario, key, flag: first.flag, rest: rest.map((failure) => JSON.stringify(failure)) })
+      continue
+    }
     if (seen.has(key)) continue
     seen.add(key)
     out.push({ id: `flip/${scenario.id}`, hypotheses: scenario.hypotheses, setup: flipSetup(scenario.setup, first.flag), operation: scenario.operation, flipOf: scenario.id })
   }
-  return out
+  for (const candidate of blind) {
+    if (seen.has(candidate.key)) continue
+    const setup = flipSetup(candidate.scenario.setup, candidate.flag)
+    const flipped = Predict.predict({ setup, operation: candidate.scenario.operation }, Predict.symbolicIds, predictedAt).records.decision.failures.map((failure) => JSON.stringify(failure))
+    if (flipped.join("|") !== candidate.rest.join("|")) continue
+    seen.add(candidate.key)
+    out.push({ id: `flip/${candidate.scenario.id}`, hypotheses: candidate.scenario.hypotheses, setup, operation: candidate.scenario.operation, flipOf: candidate.scenario.id })
+  }
+  return byId(out)
 }
