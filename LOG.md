@@ -297,6 +297,14 @@ Where dfx got in the way and we wrapped or adapted it, and why.
   instance within the build's `Layer.fresh` (probed: the client the checks used and the one `SubjectRaw` exposes
   are the same object), so the gateway, the library and step (c) share one client. dfx has no ready signal, so
   the build waits for GUILD_CREATE in the state the hook feeds (check 4).
+- **M5: the coded-429 interceptor wraps the base client of every bot build** (`src/rest/Coded429.ts`, G2;
+  `BotInternals.layerWith` provides it over the base client it leaves open). dfx retries every 429 forever; a 429
+  whose JSON body has a nonzero `code` now fails with `HttpClientError(StatusCodeError)` carrying a `Coded429`
+  (code, message, `retry_after` in ms, global) before dfx's response handling sees it, so dfx neither retries it
+  nor updates its rate-limit bucket from that response. Uncoded 429s (and code 0) pass through unchanged and dfx
+  retries them as before. `ErrorMap.classify` turns the `StatusCodeError` back into a 429 answer with the code. The
+  harness's subject is that build, so `SubjectRaw` (step (c)) now sees a coded 429 as a refusal with its code
+  instead of a dfx retry; no M4 row met a coded 429, so no recorded row changes.
 
 ## Design deviations
 
@@ -710,6 +718,54 @@ the same commit.
   each channel's messages by type; then the self-test on the fixed code: initial reset 0 writes, 13 dirt steps and
   37 writes, 34 problems seen, reset 28 writes, at baseline, second reset 0 writes, 344 requests, **0 invalid** (no
   429); and `harness:reset`: `writes: 0`.
+
+- **M5: `DiscordApi` is §4.8's steps 3 to 5, not 2 to 5** (§4.8, §1.2 updated). Preflight (step 2) and the local
+  checks and degradation readback (steps 1 and 6) stay in the operations (M6), which build a `Request` and call
+  `DiscordApi.execute`. The request carries a `Recompute.Target`, §4.9's "handle": the operation row, the guild,
+  a channel or guild scope, the handle's granted flags, the static `DecideArgs`, and what the recompute must read
+  to complete them (`Completion`: nothing; the target member and the role for member operations; the message's
+  reactions for a reaction whose emoji state was unknown). M6's preflight takes the same `Target`, so the two
+  decide one request the same way.
+- **M5: the error map is a code table plus the request's declarations, not a literal `(operation, status, code)`
+  table** (§4.9 updated). `ErrorMap.Codes` maps each code to the statuses it comes with and its meaning; a code
+  maps for a request only to a tag the request declares: one of its row's tags, a missing flag of its own
+  requirements (160002 maps only for a reply), or a payload- or argument-derived tag its `LimitFacts` declare
+  (`ErrorMap.limitFields` lists which an operation may declare, the runtime mirror of §2.3-§2.6). The operation
+  half of the key is read from the operation table, the one source of the types, so the runtime cannot produce a
+  tag the type does not name; `test/unit/op-errors.test.ts` enumerates every operation, code and status against
+  the declared union. `Limits.ts` arrives in M6, so for now a request carries its lengths and limits in its
+  `LimitFacts`.
+- **M5: statuses.** The M4 matrix observed 403 for 50013, 50001, 160002 and 160005, and 400 for 50083 and 40067
+  (`test/unit/error-map.test.ts` holds the table to every pair the truth table recorded). Every other status is a
+  hypothesis from discord-semantics §8.1, with both candidates where it lists two (10014: 400 or 404; 20016: 429 or
+  400); a status outside the list is unmapped (H-082), so M6's rows decide them. A coded rate limit maps only with
+  status 429 and a `retry_after` (`RateLimited` needs it); 30034 (`DailyCommandCreateLimit`) and the interaction
+  codes (`InteractionExpired`) are left to M8's registration and M9's runner, which own them.
+- **M5: a recompute that finds nothing returns the code's own error with `attributedBy: "code"`** (§4.9 clarified).
+  §4.9 said the cause is the real response with `attributedBy: "recompute"`; that now holds for the errors the
+  recompute's own decision picked, and the fallback (`PermissionDeniedUnattributed`, or the dedicated code's tag)
+  says `code`, so a cause tells which of the two decided the tag.
+- **M5: `GuildState.refreshGuild`** (§4.5 updated): member operations have no channel, so the recompute refreshes
+  the bot's member, the owner and the roles alone; `refresh` and `refreshGuild` share one implementation.
+- **M5: `Preflight.stateArgs` and `Preflight.Hierarchy` move into the library** from `harness/scenario/Facts.ts`:
+  the thread's creator and the member hierarchy are what both the matrix's step (a) and the recompute complete a
+  request with, so `Facts.complete` now calls the library's function (and keeps its own preconditions). The replay
+  reproduces every row unchanged.
+- **M5: `Preflight.toError` takes any `ErrorCause`, and `Preflight.toHandleError` applies D8** (a missing flag the
+  handle granted is `PermissionRevokedSinceCheck`), for the recompute now and preflight in M6.
+- **M5: the object schemas are `src/rest/Schemas.ts`, and the reducer and the refresh use them** (§4.11): the
+  reducer's own channel, role and member schemas and the refresh's guild schema were moved there (the guild schema
+  now also reads `id`, which GUILD_UPDATE and `GET /guilds/{id}` both carry).
+- **M5: the deadline comes from `DiscordApiConfig`** (§4.1, §4.10 updated): a `Context.Reference` with the 30 s
+  default, read when a bot is built, for the operations, the startup checks, the refreshes and the recompute's
+  reads alike (`Internals.requestDeadline`, a constant, is gone).
+- **M5: `UnmappedDiscordError` lives in `src/rest/ErrorMap.ts`**, not `src/errors/`: it is only ever a defect, never
+  in an error channel, so it is not one of `ErrorClasses` (the D6 test's enumeration of error-channel classes).
+- **M5: the `discord.rest` span** (§4.13 updated): `DiscordApi.execute` opens a child span with the route template,
+  method, operation, guild and channel, below the operation's own span (M6). The recording-tracer test showed that
+  Effect's HTTP client opens its own span below it, with `url.full` and the Authorization header redacted. Bot
+  routes carry only IDs, but interaction webhook URLs carry the interaction token in their path: M9 must keep those
+  requests out of that span (for example `HttpClient.TracerDisabledWhen`).
 
 ## Escalated rules
 
@@ -1160,3 +1216,60 @@ Live, in order (each alone under the lock):
   listing, not during a scenario (no scenario line reports it), so no row could depend on it. The lock was gone
   afterwards. `bun run verify:offline` is green after it: gen:errors, typecheck, 817 tests in 34 files (373 of
   them the replay), test:types, hover, rules, budget.
+
+### M5 REST wrapper
+
+- Before M5, the M4 verifier's five minor findings (commit `2ea7c28`; "Design deviations", "Before M5"; "Live
+  findings").
+- `src/rest/Schemas.ts` (User, Overwrite, Channel, Role, Member, Guild, Reaction, Message: the object schemas,
+  shared by the reducer, the refresh and the operations), `src/rest/Coded429.ts` (the interceptor and its layer),
+  `src/rest/ErrorMap.ts` (`classify` with the coded 429; `Codes`; `LimitFacts` and `limitFields`; `mapResponse`;
+  `dedicatedCodeTags`, now derived from `Codes`; `UnmappedDiscordError`), `src/rest/DiscordApi.ts`
+  (`DiscordApiConfig`, `Request`, `ApiError`, `make`, `execute`), `src/permissions/Recompute.ts` (`Target`,
+  `Completion`, `attribute`), `GuildState.refreshGuild`, `Preflight.stateArgs`/`toHandleError`, and the wiring:
+  `BotRuntime.api`, built over the bot's client and state, and the interceptor over the build's base client.
+- Unit tests (1,079 in 40 files; M4 ended with 817 in 34, and the minor fixes added 7):
+  - `test/unit/error-map.test.ts`: every refusal the truth table recorded maps, for its operation, to its declared
+    tag (the matrix's `mappedTag`, or Unattributed) with its class's categories (`ErrorCategories` for a permission
+    class, the marker otherwise), through the recompute except 40067; every recorded `(status, code)` is in
+    `Codes`; the unmapped cases (an unknown code, a wrong status, a tag the row does not list, 160002 without a
+    reply, 20016 while slowmode does not apply to bots, a rate limit without `retry_after`, 50006 and 50016 without
+    their declarations, a field an operation cannot declare); 50035's paths, lengths, limit names and tier-7 order,
+    and the paths that stay unmapped;
+  - `test/unit/op-errors.test.ts` (§4.7): every operation's widest request against every code and status of the
+    map, every failure `Preflight.decide` gives the truth table's rows (with and without granted flags, so D8's
+    `PermissionRevokedSinceCheck` too), and `errorFor` for every (operation, flag): each tag is declared
+    (`test/support/declared.ts`, the runtime mirror of the row's union) and has its class's categories;
+  - `test/unit/recompute.test.ts`: through the real `DiscordApi` and dfx client, with a guild state whose refresh
+    answers the test's state: attribution from the refreshed state, not the stale one; Unattributed with Discord's
+    answer as the cause; nothing attributed when the refreshed state lacks the guild; View before Send; D8; a timeout the state had not seen; a refresh without an answer; 160005
+    with SendMessagesInThreads also missing (our order decides), alone, and with nothing found (the code's tag);
+    160002 with nothing found (the reply variant, `payload`), with Send missing, and on a send without a reply (a
+    defect, with no refresh); 50083 on a reaction with AddReactions missing too; a member operation (guild-level
+    refresh, the target read again: `TargetAboveInHierarchy`), a role above the bot, a target that has left, and a
+    reaction of unknown state (the message read). And **every refusal of the committed truth table** (205 rows:
+    50013, 50001, 50083, 160002, 160005, 40067), replayed through the same path over the state the replay rebuilds
+    from its setup, gives exactly the `{tag, categories}` preflight recorded for the row: what the matrix's step (d)
+    will check live in M6;
+  - `test/unit/discord-api.test.ts`: decoding and branding; a 2xx body that does not decode is a defect naming the
+    route template; a coded 429 is `RateLimited` with its `retry_after`, sent once; an uncoded 429 and one with code
+    0 are retried by dfx; a coded 20016 is a defect; the deadline gives `RequestTimedOut` with
+    `NoResponse { reason: "deadline", afterMs: 30000 }` under `TestClock` (not at 29 s), and comes from
+    `DiscordApiConfig`; transport and 5xx; an unmapped code is an `UnmappedDiscordError` carrying the answer; an
+    undeclarable limit is a defect before anything is sent; and the recording-tracer span test: with the caller
+    catching the error outside the operation's span, both `discord.channel.send` and `discord.rest` end failed,
+    `discord.rest` carries the route template, method, operation, guild and channel, and no span carries the token;
+  - `test/unit/bot-build.test.ts`: through the real bot build, a coded 429 reaches `runtime.api` (as `RateLimited`)
+    and `SubjectRaw` (as a 429 answer with its code) once each, unretried;
+  - the replay also asserts that the error map covers every `(operation, status, code, inner path)` of the table
+    (§5.13).
+- Mutation checks (each reverted, each failed the test meant to catch it): the recompute always falling back (215
+  of the recompute tests failed), the recompute skipping the refresh (193), the error map not checking the row's
+  tags (op-errors), not checking the status (error-map), 50035 not sorting by tier 7 (error-map), D8's revocation
+  dropped (recompute), the interceptor treating code 0 as coded (discord-api), and the interceptor left out of the
+  bot build (bot-build: dfx retried the coded 429 until the test's timeout).
+- For M6: the message, reaction and pin rows do not list `UnknownChannel`, so a request on a message whose channel
+  was deleted (10003) is an unmapped defect today; M6, which builds those operations and their live rows, decides
+  whether the rows gain it. No row of the M4 matrix met 10003.
+- Exit evidence: `bun run verify:offline` (below, in the final run).
+

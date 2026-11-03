@@ -9,15 +9,16 @@
  * overwrites it. `stale` is cleared by a refresh that committed everything, or by a gateway event.
  *
  * `getChannel` answering 50001 or 10003 records the channel as unseen (no View): evidence, not a defect
- * (§3.1). Any other Discord answer to a refresh read is an unmapped code, a defect.
+ * (§3.1). Any other Discord answer to a refresh read is an unmapped code, a defect. `refreshGuild` makes the same
+ * reads without a channel, for guild-level operations.
  */
 import type { DiscordRestService } from "dfx/DiscordREST"
 import { Context, Duration, Effect, Option, Schema, Stream, SubscriptionRef } from "effect"
 import type { Transient } from "../errors/Transient.ts"
 import { type Answered, send } from "../rest/Request.ts"
 import type { ChannelId, GuildId, UserId } from "../Snowflake.ts"
-import { UserId as UserIdSchema } from "../Snowflake.ts"
-import { reduce, toBotMember, toChannel, toRole, WireChannel, WireMember, WireRole } from "./Reducer.ts"
+import * as Schemas from "../rest/Schemas.ts"
+import { reduce, toBotMember, toChannel, toRole } from "./Reducer.ts"
 import { type ChannelSnap, emptySnapshot, type EntityKey, entityKey, generationOf, type GuildSnap, type Snapshot } from "./Snapshot.ts"
 
 /** What one refresh did. */
@@ -38,12 +39,16 @@ export interface Interface {
   readonly awaitGuild: (guild: GuildId, within: Duration.Input) => Effect.Effect<Option.Option<GuildSnap>>
   /** Re-reads `channel` (and its parent), the bot's member, the owner and the roles over REST (see the module comment). */
   readonly refresh: (guild: GuildId, channel: ChannelId) => Effect.Effect<Refreshed, Transient>
+  /**
+   * Re-reads the bot's member, the owner and the roles over REST, with no channel: what a guild-level operation
+   * (role assignment, nicknames, timeouts, kick and ban) is resolved over (M5, for the recompute).
+   */
+  readonly refreshGuild: (guild: GuildId) => Effect.Effect<Refreshed, Transient>
 }
 
 /** The guild state of one bot build. */
 export class GuildState extends Context.Service<GuildState, Interface>()("state/GuildState") {}
 
-const GuildBody = Schema.Struct({ owner_id: UserIdSchema, roles: Schema.Array(WireRole) })
 
 const decodeOrDie =
   <S extends Schema.Codec<unknown, unknown>>(schema: S, route: string) =>
@@ -54,7 +59,7 @@ const decodeOrDie =
     )
 
 /** A channel as a refresh found it: its wire object, or unseen. */
-type Fetched = { readonly _tag: "Seen"; readonly wire: WireChannel; readonly channel: ChannelSnap | undefined } | { readonly _tag: "Unseen" }
+type Fetched = { readonly _tag: "Seen"; readonly wire: Schemas.Channel; readonly channel: ChannelSnap | undefined } | { readonly _tag: "Unseen" }
 
 /** The codes `getChannel` answers when the bot cannot see the channel (H-080, H-087). */
 const unseenCodes: ReadonlySet<number> = new Set([50001, 10003])
@@ -89,7 +94,7 @@ export const make = (rest: DiscordRestService, botUserId: UserId, deadline: Dura
               ? Effect.succeed<Fetched>({ _tag: "Unseen" })
               : Effect.die(new Error(`GuildState.refresh: unmapped answer to getChannel: ${answer.response.status} ${answer.response.code}`))
           }
-          return decodeOrDie(WireChannel, "/channels/{channel.id}")(answer.body).pipe(
+          return decodeOrDie(Schemas.Channel, "/channels/{channel.id}")(answer.body).pipe(
             Effect.flatMap((wire) => {
               const converted = toChannel(wire)
               switch (converted._tag) {
@@ -108,20 +113,20 @@ export const make = (rest: DiscordRestService, botUserId: UserId, deadline: Dura
     const required = <A>(route: string, answer: Answered<A>): Effect.Effect<A> =>
       answer._tag === "Ok" ? Effect.succeed(answer.body) : Effect.die(new Error(`GuildState.refresh: unmapped answer to ${route}: ${answer.response.status} ${answer.response.code}`))
 
-    const refresh = (guildId: GuildId, channelId: ChannelId): Effect.Effect<Refreshed, Transient> =>
+    const refreshWith = (guildId: GuildId, channelId: ChannelId | undefined): Effect.Effect<Refreshed, Transient> =>
       Effect.gen(function* () {
         const before = (yield* SubscriptionRef.get(ref)).guilds.get(guildId)
         const captured = before?.generations ?? new Map<EntityKey, number>()
-        const channel = yield* fetchChannel(channelId)
-        const parentId = channel._tag === "Seen" && channel.channel?.thread !== undefined ? channel.channel.parentId : undefined
+        const channel = channelId === undefined ? undefined : yield* fetchChannel(channelId)
+        const parentId = channel?._tag === "Seen" && channel.channel?.thread !== undefined ? channel.channel.parentId : undefined
         const parent = parentId === undefined ? undefined : yield* fetchChannel(parentId)
         const member = yield* send("/guilds/{guild.id}/members/{user.id}", "GET", rest.getGuildMember(guildId, botUserId), deadline).pipe(
           Effect.flatMap((answer) => required("/guilds/{guild.id}/members/{user.id}", answer)),
-          Effect.flatMap(decodeOrDie(WireMember, "/guilds/{guild.id}/members/{user.id}"))
+          Effect.flatMap(decodeOrDie(Schemas.Member, "/guilds/{guild.id}/members/{user.id}"))
         )
         const guild = yield* send("/guilds/{guild.id}", "GET", rest.getGuild(guildId), deadline).pipe(
           Effect.flatMap((answer) => required("/guilds/{guild.id}", answer)),
-          Effect.flatMap(decodeOrDie(GuildBody, "/guilds/{guild.id}"))
+          Effect.flatMap(decodeOrDie(Schemas.Guild, "/guilds/{guild.id}"))
         )
 
         return yield* SubscriptionRef.modify(ref, (snapshot): readonly [Refreshed, Snapshot] => {
@@ -154,7 +159,7 @@ export const make = (rest: DiscordRestService, botUserId: UserId, deadline: Dura
             // a REST read carries the bot's thread member object exactly when it is a member
             if (fetched.channel.thread !== undefined) threadMembership.set(id, fetched.wire.member !== undefined)
           }
-          commit(channelId, channel)
+          if (channelId !== undefined && channel !== undefined) commit(channelId, channel)
           if (parentId !== undefined && parent !== undefined) commit(parentId, parent)
           const next: GuildSnap = {
             ...current,
@@ -170,5 +175,12 @@ export const make = (rest: DiscordRestService, botUserId: UserId, deadline: Dura
         })
       })
 
-    return GuildState.of({ snapshot: SubscriptionRef.get(ref), changes: SubscriptionRef.changes(ref), apply, awaitGuild, refresh })
+    return GuildState.of({
+      snapshot: SubscriptionRef.get(ref),
+      changes: SubscriptionRef.changes(ref),
+      apply,
+      awaitGuild,
+      refresh: (guildId, channelId) => refreshWith(guildId, channelId),
+      refreshGuild: (guildId) => refreshWith(guildId, undefined)
+    })
   })

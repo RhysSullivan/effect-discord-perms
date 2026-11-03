@@ -12,7 +12,8 @@ import { expectedCode, Observed } from "../../src/permissions/Observed.ts"
 import { requiredFlags } from "../../src/permissions/Preflight.ts"
 import { ResolverRules } from "../../src/permissions/ResolverRules.ts"
 import { payloadRuleNames, PayloadRules } from "../../src/payload/PayloadRules.ts"
-import { dedicatedCodeTags } from "../../src/rest/ErrorMap.ts"
+import { DiscordResponse, FieldError } from "../../src/errors/Cause.ts"
+import { dedicatedCodeTags, mapResponse } from "../../src/rest/ErrorMap.ts"
 import * as Flags from "../../src/permissions/Flags.ts"
 import { staticFactsOf } from "../../harness/scenario/Facts.ts"
 import { categoriesOf } from "../support/categories.ts"
@@ -158,6 +159,21 @@ describe("the constants the table decides (§5.13)", () => {
   it("ErrorMap: every other code the matrix recorded has its dedicated tag", () => {
     const unmapped = rows.filter(([, row]) => row.raw.class === "other-error" && (row.raw.mappedTag === "n/a" || dedicatedCodeTags.get(row.raw.code) !== row.raw.mappedTag))
     expect(unmapped.map(([id, row]) => `${id}: ${row.raw.status} ${row.raw.code}`)).toEqual([])
+  })
+
+  it("ErrorMap covers every (operation, status, code, inner path) the matrix recorded (M5)", () => {
+    const refused = rows.filter(([, row]) => row.raw.class === "50013" || row.raw.class === "50001" || row.raw.class === "other-error")
+    expect(refused.length).toBeGreaterThan(0)
+    const unmapped = refused.flatMap(([id, row]) => {
+      const scenario = byId.get(id)
+      if (scenario === undefined) return [`${id}: not in the catalog`]
+      const { op, args } = staticFactsOf(scenario)
+      const fieldErrors = row.raw.inner.map((error) => new FieldError({ path: error.path.split("."), code: error.code, message: "" }))
+      const answer = new DiscordResponse({ status: row.raw.status, code: row.raw.code, message: "", method: "POST", route: "(replay)", fieldErrors, attributedBy: "code" })
+      const result = mapResponse({ op, args, limits: {} }, answer, undefined)
+      return result._tag === "Unmapped" ? [`${id}: ${result.reason}`] : []
+    })
+    expect(unmapped).toEqual([])
   })
 
   it("every recorded error has its class's categories (ErrorCategories, or the class's marker)", () => {

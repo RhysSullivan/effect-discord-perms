@@ -19,6 +19,7 @@
  */
 import { Option, Schema } from "effect"
 import * as Flags from "../permissions/Flags.ts"
+import * as Schemas from "../rest/Schemas.ts"
 import { ChannelId, GuildId, RoleId, UserId } from "../Snowflake.ts"
 import {
   type BotMember,
@@ -33,62 +34,28 @@ import {
   type Snapshot
 } from "./Snapshot.ts"
 
-// ---- wire schemas: only what the resolver reads --------------------------------------------------------
-
-const Bitfield = Schema.String.check(Schema.isPattern(/^\d+$/))
-
-const WireOverwrite = Schema.Struct({ id: Schema.String, type: Schema.Literals([0, 1]), allow: Bitfield, deny: Bitfield })
-
-/** A channel or thread as the gateway (and REST) delivers it. */
-export const WireChannel = Schema.Struct({
-  id: ChannelId,
-  type: Schema.Int,
-  guild_id: Schema.optionalKey(GuildId),
-  parent_id: Schema.optionalKey(Schema.NullOr(ChannelId)),
-  flags: Schema.optionalKey(Schema.Int),
-  permission_overwrites: Schema.optionalKey(Schema.Array(WireOverwrite)),
-  owner_id: Schema.optionalKey(UserId),
-  thread_metadata: Schema.optionalKey(Schema.Struct({ archived: Schema.Boolean, locked: Schema.Boolean })),
-  /** The bot's thread member object, present when it is a member (on GUILD_CREATE threads and REST reads). */
-  member: Schema.optionalKey(Schema.Struct({}))
-})
-/** A wire channel. */
-export type WireChannel = typeof WireChannel.Type
-
-/** A role. */
-export const WireRole = Schema.Struct({ id: RoleId, permissions: Bitfield, position: Schema.Int, managed: Schema.Boolean })
-/** A wire role. */
-export type WireRole = typeof WireRole.Type
-
-/** A guild member. */
-export const WireMember = Schema.Struct({
-  user: Schema.Struct({ id: UserId }),
-  roles: Schema.Array(RoleId),
-  communication_disabled_until: Schema.optionalKey(Schema.NullOr(Schema.String))
-})
-/** A wire member. */
-export type WireMember = typeof WireMember.Type
+// ---- dispatch schemas, over the shared object schemas (`rest/Schemas.ts`, §4.11) -------------------------
 
 const Ready = Schema.Struct({ user: Schema.Struct({ id: UserId }) })
 const GuildCreate = Schema.Struct({
   id: GuildId,
   owner_id: UserId,
-  roles: Schema.Array(WireRole),
-  channels: Schema.Array(WireChannel),
-  threads: Schema.Array(WireChannel),
-  members: Schema.Array(WireMember)
+  roles: Schema.Array(Schemas.Role),
+  channels: Schema.Array(Schemas.Channel),
+  threads: Schema.Array(Schemas.Channel),
+  members: Schema.Array(Schemas.Member)
 })
 const Unavailable = Schema.Struct({ id: GuildId, unavailable: Schema.Literal(true) })
-const GuildUpdate = Schema.Struct({ id: GuildId, owner_id: UserId, roles: Schema.Array(WireRole) })
+const GuildUpdate = Schemas.Guild
 const GuildDelete = Schema.Struct({ id: GuildId })
-const RoleEvent = Schema.Struct({ guild_id: GuildId, role: WireRole })
+const RoleEvent = Schema.Struct({ guild_id: GuildId, role: Schemas.Role })
 const RoleDelete = Schema.Struct({ guild_id: GuildId, role_id: RoleId })
-const GuildChannel = Schema.Struct({ ...WireChannel.fields, guild_id: GuildId })
+const GuildChannel = Schema.Struct({ ...Schemas.Channel.fields, guild_id: GuildId })
 const ThreadDelete = Schema.Struct({ id: ChannelId, guild_id: GuildId })
 const ThreadListSync = Schema.Struct({
   guild_id: GuildId,
   channel_ids: Schema.optionalKey(Schema.Array(ChannelId)),
-  threads: Schema.Array(WireChannel),
+  threads: Schema.Array(Schemas.Channel),
   members: Schema.Array(Schema.Struct({ id: ChannelId }))
 })
 const ThreadMembersUpdate = Schema.Struct({
@@ -98,7 +65,7 @@ const ThreadMembersUpdate = Schema.Struct({
   removed_member_ids: Schema.optionalKey(Schema.Array(UserId))
 })
 const ThreadMemberUpdate = Schema.Struct({ id: ChannelId, guild_id: GuildId, user_id: UserId })
-const MemberUpdate = Schema.Struct({ ...WireMember.fields, guild_id: GuildId })
+const MemberUpdate = Schema.Struct({ ...Schemas.Member.fields, guild_id: GuildId })
 const GuildIdOnly = Schema.Struct({ guild_id: GuildId })
 const IdOnly = Schema.Struct({ id: GuildId })
 
@@ -113,7 +80,7 @@ export const requireTagFlag = 1 << 4
 const bits = (decimal: string): Flags.PermissionSet => Flags.fromBits(BigInt(decimal))
 
 /** A wire role as a snapshot role. */
-export const toRole = (role: WireRole): RoleSnap => ({ id: role.id, permissions: bits(role.permissions), position: role.position, managed: role.managed })
+export const toRole = (role: Schemas.Role): RoleSnap => ({ id: role.id, permissions: bits(role.permissions), position: role.position, managed: role.managed })
 
 /** What a wire channel becomes: a snapshot channel, nothing (a kind the library does not model), or a problem. */
 export type Converted =
@@ -122,7 +89,7 @@ export type Converted =
   | { readonly _tag: "Malformed"; readonly reason: string }
 
 /** A wire channel as a snapshot channel. A thread without `thread_metadata` is malformed. */
-export const toChannel = (channel: WireChannel): Converted => {
+export const toChannel = (channel: Schemas.Channel): Converted => {
   const kind = kindOfType(channel.type)
   if (kind === undefined) return { _tag: "Unmodelled" }
   const obfuscated = ((channel.flags ?? 0) & obfuscatedFlag) !== 0
@@ -151,7 +118,7 @@ export const toChannel = (channel: WireChannel): Converted => {
 }
 
 /** A wire member as the bot's member (`communication_disabled_until` is absent when never set). */
-export const toBotMember = (member: WireMember): BotMember => ({ roleIds: member.roles, timedOutUntil: member.communication_disabled_until ?? null })
+export const toBotMember = (member: Schemas.Member): BotMember => ({ roleIds: member.roles, timedOutUntil: member.communication_disabled_until ?? null })
 
 // ---- the reducer --------------------------------------------------------------------------------------
 
@@ -205,8 +172,8 @@ const markStale = (snapshot: Snapshot, data: unknown): Snapshot => {
 }
 
 /** Converts every wire channel, or names the first malformed one. */
-const convertAll = (wires: ReadonlyArray<WireChannel>): { readonly _tag: "Ok"; readonly channels: ReadonlyArray<readonly [ChannelSnap, WireChannel]> } | { readonly _tag: "Malformed"; readonly reason: string } => {
-  const channels: Array<readonly [ChannelSnap, WireChannel]> = []
+const convertAll = (wires: ReadonlyArray<Schemas.Channel>): { readonly _tag: "Ok"; readonly channels: ReadonlyArray<readonly [ChannelSnap, Schemas.Channel]> } | { readonly _tag: "Malformed"; readonly reason: string } => {
+  const channels: Array<readonly [ChannelSnap, Schemas.Channel]> = []
   for (const wire of wires) {
     const converted = toChannel(wire)
     if (converted._tag === "Malformed") return converted
@@ -215,7 +182,7 @@ const convertAll = (wires: ReadonlyArray<WireChannel>): { readonly _tag: "Ok"; r
   return { _tag: "Ok", channels }
 }
 
-const guildCreate = (snapshot: Snapshot, value: typeof GuildCreate.Type, converted: ReadonlyArray<readonly [ChannelSnap, WireChannel]>): Snapshot => {
+const guildCreate = (snapshot: Snapshot, value: typeof GuildCreate.Type, converted: ReadonlyArray<readonly [ChannelSnap, Schemas.Channel]>): Snapshot => {
   const previous = snapshot.guilds.get(value.id)
   const roles = new Map(value.roles.map((role) => [role.id, toRole(role)] as const))
   const channels = new Map<ChannelId, ChannelSnap>()
@@ -244,7 +211,7 @@ const guildCreate = (snapshot: Snapshot, value: typeof GuildCreate.Type, convert
  * sometimes (THREAD_CREATE when the bot recently gained access, threads.mdx), so its presence sets membership
  * and its absence changes nothing; THREAD_MEMBERS_UPDATE is the authority.
  */
-const upsertChannel = (snapshot: Snapshot, wire: WireChannel & { readonly guild_id: GuildId }, channel: ChannelSnap): Snapshot =>
+const upsertChannel = (snapshot: Snapshot, wire: Schemas.Channel & { readonly guild_id: GuildId }, channel: ChannelSnap): Snapshot =>
   touch(snapshot, wire.guild_id, [entityKey.channel(channel.id)], (guild) => {
     const threadMembership = new Map(guild.threadMembership)
     if (channel.thread !== undefined && wire.member !== undefined) threadMembership.set(channel.id, true)
@@ -263,7 +230,7 @@ export const reduce = (snapshot: Snapshot, event: string, data: unknown): Reduce
         return "problem" in next ? next : ok(next)
       }
     })
-  const withChannel = (wire: WireChannel & { readonly guild_id: GuildId }): Snapshot | Reduced => {
+  const withChannel = (wire: Schemas.Channel & { readonly guild_id: GuildId }): Snapshot | Reduced => {
     const converted = toChannel(wire)
     switch (converted._tag) {
       case "Malformed":

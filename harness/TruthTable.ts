@@ -86,7 +86,7 @@ export const Row = Schema.Struct({
   /** Every failure preflight found, in §3.2 order. */
   preflightSet: Schema.Array(Schema.String),
   raw: RawOutcome,
-  /** Step (d): the library's error with preflight bypassed (M5), or `n/a`. */
+  /** Step (d): the library's error with preflight bypassed (live from M6), or `n/a`. */
   recompute: Schema.Union([Schema.Literal("n/a"), RecordedError]),
   /** Discord's own computation (implicit=false), restricted to the required flags. */
   oracle: Schema.Union([Schema.Struct({ missing: Schema.Array(Flag) }), Schema.Literal("unavailable"), Schema.Literal("not-applicable")]),

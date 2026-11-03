@@ -84,18 +84,26 @@ export const json = (status: number, body: unknown, headers?: Readonly<Record<st
  * request with `script(method, path, query)`. Paths are relative to the API base, without the query; `query`
  * holds the request's URL parameters (`urlParams` and any already in the URL).
  */
-export const scriptedRest = (script: (method: string, path: string, query: URLSearchParams) => Scripted): Layer.Layer<DiscordREST> =>
-  scriptedRestEffect((method, path, query) => Effect.succeed(script(method, path, query)))
+export const scriptedRest = (
+  script: (method: string, path: string, query: URLSearchParams) => Scripted,
+  wrap?: (client: HttpClient.HttpClient) => HttpClient.HttpClient
+): Layer.Layer<DiscordREST> => scriptedRestEffect((method, path, query) => Effect.succeed(script(method, path, query)), wrap)
 
-/** Like {@link scriptedRest}, but each answer is an effect, so a test can hold a response until it chooses. */
-export const scriptedRestEffect = (script: (method: string, path: string, query: URLSearchParams) => Effect.Effect<Scripted>): Layer.Layer<DiscordREST> => {
+/**
+ * Like {@link scriptedRest}, but each answer is an effect, so a test can hold a response until it chooses.
+ * `wrap` wraps the base client the way a bot build does (the coded-429 interceptor, `Coded429.surface`).
+ */
+export const scriptedRestEffect = (
+  script: (method: string, path: string, query: URLSearchParams) => Effect.Effect<Scripted>,
+  wrap: (client: HttpClient.HttpClient) => HttpClient.HttpClient = (client) => client
+): Layer.Layer<DiscordREST> => {
   const client = HttpClient.make((request) => {
     const url = new URL(request.url)
     const query = new URLSearchParams(url.search)
     for (const [key, value] of new URLSearchParams(UrlParams.toString(request.urlParams))) query.append(key, value)
     return Effect.flatMap(script(request.method, url.pathname.replace(/^\/api\/v\d+/, ""), query), (answer) => answerWith(request, answer))
   })
-  return DiscordRESTMemoryLive.pipe(Layer.provide(DiscordConfig.layer({ token: Redacted.make("fake-token") })), Layer.provide(Layer.succeed(HttpClient.HttpClient, client)))
+  return DiscordRESTMemoryLive.pipe(Layer.provide(DiscordConfig.layer({ token: Redacted.make("fake-token") })), Layer.provide(Layer.succeed(HttpClient.HttpClient, wrap(client))))
 }
 
 const answerWith = (request: HttpClientRequest.HttpClientRequest, answer: Scripted) => {

@@ -18,7 +18,8 @@
  * 6. **(c) Raw call** through `SubjectRaw`, with no check (`Drivers.ts`), classified by `Outcome.ts`. A payload
  *    that mentions `@everyone` is sent only if the oracle shows the subject without MentionEveryone and
  *    Administrator; a kick or ban only with the Lab guard's permit, which it issues from harness-side reads.
- * 7. **(d) Recompute**: `n/a` until M5.
+ * 7. **(d) Recompute**: `n/a` until M6 (M5 builds the recompute, `src/permissions/Recompute.ts`, and holds it to every
+ *    refused row offline, `test/unit/recompute.test.ts`).
  * 8. **Oracle**: the value the wait settled on, restricted to the required flags (`not-applicable` for member
  *    operations, which have no channel).
  * 9. **Cleanup**: the threads the scenario created, the scenario channel's bot messages, and the thread back to

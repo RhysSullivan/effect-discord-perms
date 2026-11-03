@@ -10,12 +10,11 @@
  * H-045), and for member operations the hierarchy against the target and the assigned role (H-060..H-067).
  */
 import type { PermissionFlag } from "../../src/errors/Missing.generated.ts"
-import * as Flags from "../../src/permissions/Flags.ts"
 import type { OpName } from "../../src/permissions/Operations.ts"
-import { type DecideArgs, degradableFlags, errorModeFlags, requiredFlags } from "../../src/permissions/Preflight.ts"
-import { basePermissions, type GuildInput, type MemberInput, type Resolution, roleBelow, targetBelow } from "../../src/permissions/Resolver.ts"
+import * as Preflight from "../../src/permissions/Preflight.ts"
+import type { DecideArgs } from "../../src/permissions/Preflight.ts"
+import type { Resolution } from "../../src/permissions/Resolver.ts"
 import type { PayloadRuleName } from "../../src/payload/PayloadRules.ts"
-import type { RoleId } from "../../src/Snowflake.ts"
 import type { LabChannel, Operation, Scenario, SendPayload } from "./Dsl.ts"
 
 /** Where the operation's permissions are resolved. */
@@ -169,31 +168,17 @@ export const staticFactsOf = (scenario: Pick<Scenario, "setup" | "operation">): 
 }
 
 /** What the subject knows of the target and the assigned role when the step runs (member operations). */
-export interface Hierarchy {
-  readonly guild: GuildInput
-  readonly bot: MemberInput
-  readonly target: MemberInput
-  /** The role assigned or removed, for role operations. */
-  readonly role: RoleId | undefined
-}
+export type Hierarchy = Preflight.Hierarchy
 
 /**
- * The facts with the arguments complete: the static ones, whether the subject created the scenario thread (from
- * the resolution's thread facts), and for member operations the hierarchy. A role operation whose role the
- * guild state lacks is a defect: the lab provisions every role.
+ * The facts with the arguments complete (`Preflight.stateArgs`, shared with the library's recompute): whether
+ * the subject created the scenario thread, and for member operations the hierarchy. A member operation without
+ * the target's hierarchy, or a role operation whose role the guild state lacks, is a defect: the matrix always
+ * reads the target, and the lab provisions every role.
  */
 export const complete = (facts: StaticFacts, resolution: Resolution, hierarchy: Hierarchy | undefined): Facts => {
-  const creator = resolution.thread?.creatorIsMember === true
-  let args: DecideArgs = { ...facts.args, ...(facts.op === "thread.setArchived" || facts.op === "thread.setLocked" || facts.op === "thread.delete" ? { creator } : {}) }
-  if (facts.onTarget) {
-    if (hierarchy === undefined) throw new Error(`Facts: ${facts.op} needs the target's hierarchy`)
-    const administrator = Flags.has(basePermissions(hierarchy.guild, hierarchy.target), "Administrator") || hierarchy.target.userId === hierarchy.guild.ownerId
-    args = { ...args, target: { below: targetBelow(hierarchy.guild, hierarchy.bot, hierarchy.target), administrator } }
-    if (facts.assignsRole) {
-      const role = hierarchy.role === undefined ? undefined : hierarchy.guild.roles.get(hierarchy.role)
-      if (role === undefined) throw new Error(`Facts: ${facts.op} needs its role in the guild state`)
-      args = { ...args, role: { below: roleBelow(hierarchy.guild, hierarchy.bot, role), managed: role.managed } }
-    }
-  }
-  return { ...facts, args, required: requiredFlags(facts.op, args), needed: errorModeFlags(facts.op, args), degradable: degradableFlags(facts.op, args) }
+  if (facts.onTarget && hierarchy === undefined) throw new Error(`Facts: ${facts.op} needs the target's hierarchy`)
+  if (facts.assignsRole && (hierarchy?.role === undefined || !hierarchy.guild.roles.has(hierarchy.role))) throw new Error(`Facts: ${facts.op} needs its role in the guild state`)
+  const args = Preflight.stateArgs(facts.op, facts.args, resolution, facts.onTarget ? hierarchy : undefined)
+  return { ...facts, args, required: Preflight.requiredFlags(facts.op, args), needed: Preflight.errorModeFlags(facts.op, args), degradable: Preflight.degradableFlags(facts.op, args) }
 }

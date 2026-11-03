@@ -5,6 +5,7 @@
  */
 import { Discord } from "dfx"
 import { type Config, Context, type Redacted } from "effect"
+import type * as DiscordApi from "../rest/DiscordApi.ts"
 import type * as GuildState from "../state/GuildState.ts"
 import type { GuildId } from "../Snowflake.ts"
 import type { PrivilegedIntent, StartupIdentity } from "./Startup.ts"
@@ -47,6 +48,8 @@ export interface Runtime {
   readonly intents: ReadonlyArray<Intent>
   readonly guildId: GuildId | undefined
   readonly guildState: GuildState.Interface
+  /** The REST wrapper every operation's request goes through (deadline, error mapping, recompute, decoding). */
+  readonly api: DiscordApi.Interface
 }
 
 /** The running bot of one build. Handles close over it, so their methods need nothing (§4.1). */

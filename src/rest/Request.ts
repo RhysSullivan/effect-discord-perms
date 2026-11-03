@@ -15,7 +15,10 @@ import { DiscordUnavailable, NetworkError, RequestTimedOut, type Transient } fro
 import { classify } from "./ErrorMap.ts"
 
 /** A call's outcome when Discord answered. */
-export type Answered<A> = { readonly _tag: "Ok"; readonly body: A } | { readonly _tag: "Rejected"; readonly response: DiscordResponse }
+export type Answered<A> =
+  | { readonly _tag: "Ok"; readonly body: A }
+  /** Discord refused; `retryAfterMs` is the body's `retry_after` when it has one (a coded 429's, `Coded429.ts`). */
+  | { readonly _tag: "Rejected"; readonly response: DiscordResponse; readonly retryAfterMs: number | undefined }
 
 /**
  * Runs `request` (a dfx call for `method route`, `route` a template such as `/channels/{channel.id}`) within
@@ -32,7 +35,7 @@ export const send = <A>(route: string, method: HttpMethod, request: Effect.Effec
           Effect.flatMap((failure): Effect.Effect<Answered<A>, Transient> => {
             switch (failure._tag) {
               case "Response":
-                return Effect.succeed({ _tag: "Rejected", response: failure.response })
+                return Effect.succeed({ _tag: "Rejected", response: failure.response, retryAfterMs: failure.retryAfterMs })
               case "Unavailable":
                 return Effect.fail(new DiscordUnavailable({ cause: failure.response }))
               case "NoResponse":

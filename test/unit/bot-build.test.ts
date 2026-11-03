@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ApplicationFlags } from "discord-api-types/v10"
-import { Cause, Config, Context, Effect, Exit, Fiber, Layer, Option, Redacted } from "effect"
+import { Cause, Config, Context, Duration, Effect, Exit, Fiber, Layer, Option, Redacted } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import * as Headers from "effect/http/Headers"
 import * as HttpClient from "effect/http/HttpClient"
@@ -8,6 +8,8 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { Bot, BotRuntime, intentBits } from "../../src/bot/Bot.ts"
 import { BotInternals, SubjectRaw } from "../../src/bot/Internals.ts"
 import { StartupFailed } from "../../src/bot/Startup.ts"
+import { send } from "../../src/rest/Request.ts"
+import * as Schemas from "../../src/rest/Schemas.ts"
 import { ChannelId, GuildId } from "../../src/Snowflake.ts"
 import { channelUpdate, guildCreate, ids, memberObject, overwrite } from "../support/dispatches.ts"
 import { makeFakeGateway } from "../support/fakeGateway.ts"
@@ -42,6 +44,7 @@ const setup = (world: World) =>
         if (path === "/applications/@me") return answer(200, { id: "100000000000000002", flags: ApplicationFlags.GatewayGuildMembers })
         if (path === `/guilds/${ids.guild}/members/${ids.bot}`) return answer(200, memberObject(ids.bot, [ids.roleA]))
         if (path === `/channels/${ids.text}`) return answer(200, channelUpdate(ids.text, 0, []))
+        if (path === `/channels/${ids.text}/messages`) return answer(429, { message: "You are sending messages too quickly", code: 20028, retry_after: 2.5, global: false })
         return answer(404, { message: "404: Not Found", code: 0 })
       })
     )
@@ -96,6 +99,32 @@ describe("the bot build", () => {
         const raw = yield* SubjectRaw
         yield* raw.getChannel(ids.text)
         expect(requests.at(-1)?.path).toBe(`/channels/${ids.text}`)
+      }).pipe(Effect.provide(layer), Effect.scoped)
+    })
+  )
+
+  it.live("wraps the build's HTTP client in the coded-429 interceptor: a coded 429 reaches the API and SubjectRaw once, unretried", () =>
+    Effect.gen(function* () {
+      const { layer, requests } = yield* setup({ token: "fake-subject-token", status: 200, guildArrives: true })
+      yield* Effect.gen(function* () {
+        const runtime = yield* BotRuntime
+        const posts = () => requests.filter((entry) => entry.path === `/channels/${ids.text}/messages`).length
+        const exit = yield* runtime.api
+          .execute({
+            target: { op: "channel.send", guildId, scope: { _tag: "Channel", channelId: ChannelId.make(ids.text) }, granted: [], args: { payload: [] }, completion: { _tag: "Static" } },
+            route: { method: "POST", template: "/channels/{channel.id}/messages" },
+            call: (rest) => rest.createMessage(ids.text, { content: "hi" }),
+            response: Schemas.Message,
+            limits: {}
+          })
+          .pipe(Effect.exit)
+        const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error?._tag === "RateLimited" ? [error.retryAfterMs, error.cause.code] : error?._tag).toEqual([2500, 20028])
+        expect(posts()).toBe(1)
+        const raw = yield* SubjectRaw
+        const answer = yield* send("/channels/{channel.id}/messages", "POST", raw.createMessage(ids.text, { content: "hi" }), Duration.seconds(5))
+        expect(answer._tag === "Rejected" ? [answer.response.status, answer.response.code, answer.retryAfterMs] : answer._tag).toEqual([429, 20028, 2500])
+        expect(posts()).toBe(2)
       }).pipe(Effect.provide(layer), Effect.scoped)
     })
   )

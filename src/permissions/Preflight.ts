@@ -27,8 +27,9 @@
  * effective set they are reported in `degraded`.
  */
 import { Context } from "effect"
-import { PreflightDecision } from "../errors/Cause.ts"
+import { type ErrorCause, PreflightDecision } from "../errors/Cause.ts"
 import type { PermissionFlag } from "../errors/Missing.generated.ts"
+import { PermissionRevokedSinceCheck } from "../errors/Permission.ts"
 import {
   CommunicationDisabled,
   RoleAboveInHierarchy,
@@ -43,7 +44,8 @@ import { degradeFlags, errorFlags, type PayloadRuleName } from "../payload/Paylo
 import * as Flags from "./Flags.ts"
 import { errorFor, type OpName, Operations, type OpPermissionErrors, type OpSpec } from "./Operations.ts"
 import { type Failure, sortFailures } from "./Order.ts"
-import { blindMasks, type Resolution } from "./Resolver.ts"
+import type { RoleId } from "../Snowflake.ts"
+import { basePermissions, blindMasks, type GuildInput, type MemberInput, type Resolution, roleBelow, targetBelow } from "./Resolver.ts"
 import { ResolverRules } from "./ResolverRules.ts"
 
 export type { Failure } from "./Order.ts"
@@ -165,7 +167,7 @@ export type PreflightError =
   | TagRequired
 
 /** The error a failure becomes for `op`, with `cause`. Permission errors go through `errorFor` (D5 variants). */
-export const toError = (op: OpName, failure: Failure, cause: PreflightDecision): PreflightError => {
+export const toError = (op: OpName, failure: Failure, cause: ErrorCause): PreflightError => {
   switch (failure._tag) {
     case "MissingFlag":
       return errorFor(op, failure.flag, cause)
@@ -186,6 +188,39 @@ export const toError = (op: OpName, failure: Failure, cause: PreflightDecision):
     case "TagRequired":
       return new TagRequired({ cause })
   }
+}
+
+/**
+ * The error a failure becomes on a handle whose `granted` flags `Permissions.require` checked (D8): a missing flag
+ * it checked is `PermissionRevokedSinceCheck` (the type collapses those `Missing*` into it), anything else is
+ * {@link toError}'s. With nothing granted it is `toError`.
+ */
+export const toHandleError = (op: OpName, failure: Failure, granted: ReadonlyArray<PermissionFlag>, cause: ErrorCause): PreflightError | PermissionRevokedSinceCheck =>
+  failure._tag === "MissingFlag" && granted.includes(failure.flag) ? new PermissionRevokedSinceCheck({ flag: failure.flag, cause }) : toError(op, failure, cause)
+
+/** What the bot knows of the target member and the role assigned or removed, for member operations (H-060..H-067). */
+export interface Hierarchy {
+  readonly guild: GuildInput
+  readonly bot: MemberInput
+  readonly target: MemberInput
+  /** The role a role operation assigns or removes. */
+  readonly role: RoleId | undefined
+}
+
+/**
+ * The request's arguments completed from the state: whether the bot created the thread (archiving, locking and
+ * deleting it need no ManageThreads then, H-045), and for member operations the target's rank and Administrator
+ * (H-064, H-066, H-067) and the role's rank and management (H-060, H-068). A role the guild does not hold adds
+ * no role facts: Discord answers such a request with 10011, not a refusal.
+ */
+export const stateArgs = (op: OpName, args: DecideArgs, resolution: Resolution, hierarchy: Hierarchy | undefined): DecideArgs => {
+  const creates = op === "thread.setArchived" || op === "thread.setLocked" || op === "thread.delete"
+  let out: DecideArgs = creates ? { ...args, creator: resolution.thread?.creatorIsMember === true } : args
+  if (hierarchy === undefined) return out
+  const administrator = Flags.has(basePermissions(hierarchy.guild, hierarchy.target), "Administrator") || hierarchy.target.userId === hierarchy.guild.ownerId
+  out = { ...out, target: { below: targetBelow(hierarchy.guild, hierarchy.bot, hierarchy.target), administrator } }
+  const role = hierarchy.role === undefined ? undefined : hierarchy.guild.roles.get(hierarchy.role)
+  return role === undefined ? out : { ...out, role: { below: roleBelow(hierarchy.guild, hierarchy.bot, role), managed: role.managed } }
 }
 
 /** The tag `toError` gives a failure for `op` (the same-tag D5 variants share their base class's tag). */

@@ -134,7 +134,8 @@ src/
                                  OpFlags, OpTags, OpPermissionErrors, OpErrors<G>; variantConstructors, errorFor
     Order.ts                     the "most fundamental first" order (D7, generalised in §3.2)
     Preflight.ts                 decide(op, resolution) -> Pass | ordered failure list; Preflight.Mode (internal)
-    Recompute.ts                 50013/50001/dedicated-code path: refresh, resolve, attribute or Unattributed
+    Recompute.ts                 50013/50001/dedicated-code path: refresh, resolve, attribute or Unattributed (M5:
+                                 `attribute(context, Target, response, fallback)`; `Target` is §4.9's handle)
     Observed.ts *                hand-edited constants decided by the live matrix (§8); replay test enforces them
                                  (M1 adds the two the table's types read: slowmodeAppliesToBots, botsCanBeTimedOut)
     Require.ts *                 Permissions.require
@@ -158,10 +159,14 @@ src/
     Member.ts *                  GuildMember ops (addRole, removeRole, setNickname, timeout, kick, ban), Members.get
   rest/
     DiscordApi.ts                service wrapping DiscordREST: deadline, span, error mapping, decode, recompute hook
-    ErrorMap.ts                  (operation, status, code, inner path) -> tag; unmapped -> defect
+                                 (M5: `execute(Request)`; preflight stays in the operations, §4.8 step 2)
+    ErrorMap.ts                  (operation, status, code, inner path) -> tag; unmapped -> defect (M5: `Codes`, the
+                                 code -> statuses and meaning table; `mapResponse` checks the tag against the row and
+                                 the request's `LimitFacts`; `UnmappedDiscordError`)
     Request.ts                   one bounded dfx call, its failure classified (Transient or a Discord answer) (M3)
     Coded429.ts                  base HttpClient interceptor for nonzero-coded 429s (G2)
-    Schemas.ts                   response schemas (Message incl. reactions, Channel, Thread, Member, Role, Guild)
+    Schemas.ts                   response schemas (Message incl. reactions, Channel, Thread, Member, Role, Guild); the
+                                 reducer and the refresh decode with the same schemas (M5)
     Oracle.ts                    GET /channels/{c}/permissions/member/{u} etc. via rest.httpClient (harness only)
                                  (ErrorMap.ts's dfx failure classifier, `classify`, arrives in M2 for startup and
                                  the harness; M5 adds the table)
@@ -1280,7 +1285,8 @@ here, not in M4:
 | Service (Context.Service) | Provided by | Holds |
 |---|---|---|
 | `BotRuntime` | `Bot.layerWith(bot, {token})` (platform open) or `Bot.layer` | `DiscordApi`, `GuildState`, `InteractionsRunner`, identity (bot user ID, application ID), intents |
-| `DiscordApi` | inside `BotRuntime` | wrapped dfx `DiscordREST` (§4.7-§4.10) |
+| `DiscordApi` | inside `BotRuntime` (`runtime.api`, M5) | wrapped dfx `DiscordREST` (§4.7-§4.10) |
+| `DiscordApiConfig` (`Context.Reference<{ requestDeadline }>`, default 30 s) | read when a bot is built (M5) | the request deadline of every call: operations, startup checks, refreshes and the recompute's reads |
 | `GuildState` | inside `BotRuntime` | `SubscriptionRef<Snapshot>` with per-entity generations; `awaitGuild`, `refresh`, `snapshot` |
 | `Preflight.Mode` (`Context.Reference<"enforce" \| "bypass">`, default `"enforce"`) | internal; only the harness sets `"bypass"` | |
 | `HarnessRest`, `TargetRest` | `harness/Identities.ts` | raw dfx REST per identity |
@@ -1434,6 +1440,9 @@ bot's thread membership is a map of its own, because THREAD_MEMBERS_UPDATE can a
   `[sd:probe2/rt/refresh-generation.txt]` (`refreshCommitted: false`, the
   CHANNEL_UPDATE value survives, a replay changes nothing). `stale` is cleared
   by a non-racing refresh or a gateway event.
+- (M5) `refreshGuild(guild)` makes the same reads without a channel: what a
+  guild-level operation (role assignment, nicknames, timeouts, kick and ban)
+  is resolved over, for the recompute.
 - `getChannel` answering 50001 or 10003 during a refresh records the channel as
   not visible (`unseen`, no View); it is not a defect (§3.1). A REST thread
   carries the bot's thread member object exactly when it is a member, so a
@@ -1608,6 +1617,13 @@ Inside `Effect.fn("discord.<area>.<op>")` (§4.13):
 
 Recovery happens outside the span: at the call site, or in the handler.
 
+(M5) Steps 3 to 5 are `DiscordApi.execute(request)`. A `Request` carries the
+request's `Recompute.Target` (operation row, guild, channel or guild scope,
+the handle's granted flags, the static `DecideArgs`, and what the recompute
+must read to complete them), the route template and method, the dfx call, the
+response schema and the request's `LimitFacts` (§4.9). Steps 1, 2 and 6 stay
+in the operations (M6), which share the `Target` with their preflight.
+
 ### 4.9 Error mapping and the recompute (D16)
 
 `rest/ErrorMap.ts` is a table keyed by `(operation, status, code)` whose values
@@ -1646,6 +1662,46 @@ listed for the operation map; any other 50035 is a defect. dfx failure shapes
   missing flag outside the op's requirement list is not attributed (the result
   is Unattributed) and is logged; the matrix should never produce one.
 
+**As built (M5).**
+
+- **The table is `ErrorMap.Codes`: code -> the statuses it comes with and its
+  meaning** (recompute with a fallback tag, a state tag, a coded rate limit, an
+  empty message, a bulk-delete count, or 50035's fields). Statuses observed by
+  the M4 matrix are exact (50013, 50001, 160002 and 160005 with 403; 50083 and
+  40067 with 400); the others are discord-semantics §8.1's hypotheses, both
+  candidates where it lists two. A status outside the list is unmapped (H-082).
+- **A code maps for a request only to a tag the request declares:** a tag of
+  the operation's row, a missing flag of the request's own requirements (160002
+  needs ReadMessageHistory among them, so only a reply maps it), or a
+  payload- or argument-derived tag the request declares in its `LimitFacts`
+  (`empty`, `content` with its length and limit, `embeds`, `poll`, `name`,
+  `topic`, `slowmode`, `nick`, `timeout`, `messageCount`; which an operation may
+  declare is `ErrorMap.limitFields`, the runtime mirror of §2.3-§2.6). The
+  runtime therefore cannot produce a tag the type does not name; anything else
+  is `UnmappedDiscordError`, a defect carrying the answer. (Revision 2 described a
+  literal `(operation, status, code)` table; deriving the operation part from
+  the operation table and the request keeps one source.)
+- **50035** maps each inner path: `content` (`message.content` for a forum
+  post), `embeds[.i[.title|.description|.fields[.j.name|.j.value]|.footer.text|
+  .author.name]]` (the embed limit named by the path; the paths are hypotheses
+  until M6's limit rows), `poll.question.text`, `poll.answers[.i.poll_media.text]`,
+  `poll.duration`, `name`, `topic`, `rate_limit_per_user`, `nick` and
+  `communication_disabled_until`. Every inner error must map; the operation
+  fails with the first in tier 7's order.
+- **Coded rate limits** need status 429 and `retry_after`; `RateLimited` only
+  where the row lists it, and 20016 is unmapped while
+  `Observed.slowmodeAppliesToBots` is false. 30034 (command registration) and
+  the interaction codes are mapped by their own modules (M8, M9).
+- **The recompute's handle is `Recompute.Target`.** Its `completion` says what
+  to read beyond the refresh: nothing; for a member operation the target member
+  again (10007 adds no hierarchy) and the role from the refreshed roles; for a
+  reaction whose emoji state was unknown, the message's reactions. A
+  channel-scoped target refreshes with `GuildState.refresh`, a guild-scoped one
+  with `GuildState.refreshGuild`. The fallback (nothing found) is built by the
+  error map with `attributedBy: "code"`, so a cause says which of the two
+  decided the tag. The state-derived arguments (`Preflight.stateArgs`: the
+  thread's creator, the hierarchy) are shared with the harness's step (a).
+
 ### 4.10 Deadlines and 429s (D9, C9, C10, G2)
 
 - **Deadline.** Every `DiscordApi` call is wrapped in
@@ -1670,6 +1726,9 @@ listed for the operation map; any other 50035 is a defect. dfx failure shapes
     gives `DailyCommandCreateLimit`.
   - `LOG.md` records the interceptor as a dfx deviation, and records that dfx's
     bucket update is skipped for coded 429s.
+  - (M5) `BotInternals.layerWith` provides it to the whole bot build, over the
+    base client it leaves open, so `SubjectRaw` (the matrix's step (c)) sees a
+    coded 429 as a 429 answer with its code instead of a dfx retry.
 
 ### 4.11 Response decoding and ID branding (D12)
 
@@ -1719,6 +1778,14 @@ orchestrator sets that flag, and §4.4 reads it back.
   stay out of attributes.
 - A recording-tracer unit test asserts that an operation span is marked failed
   even when the caller catches the error.
+- (M5) `DiscordApi.execute` runs in a child span `discord.rest` with
+  `discord.route`, `discord.method`, `discord.operation`, `discord.guild_id`
+  and `discord.channel_id`; the operation's span (M6) carries §4.13's
+  attributes. Effect's HTTP client opens its own span below (`POST`), with
+  `url.full` and the Authorization header redacted. Bot routes carry only IDs,
+  but an interaction webhook URL carries the interaction token in its path, so
+  M9 must keep those requests out of the HTTP client's span attributes (for
+  example with `HttpClient.TracerDisabledWhen`).
 
 ### 4.14 Per-event fibers (D29) and interactions runtime
 
@@ -2818,6 +2885,10 @@ Live milestones run serially, under the lock.
   - a 2xx decode failure is a defect;
   - the recording-tracer span test.
 - Exit: `bun run verify:offline`.
+- (M5) The matrix's step (d) stays `n/a` until M6, which "enables" it (§6 M6);
+  M3's "until M5" meant the recompute's code. M5 holds the recompute to every
+  refusal of the committed truth table offline instead
+  (`test/unit/recompute.test.ts`: each gives exactly the row's step (b) error).
 
 **M6 Payloads, channel and message ops, require, phase-1 rules live** (live)
 
