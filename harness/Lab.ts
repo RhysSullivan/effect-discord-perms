@@ -340,6 +340,12 @@ export const kickBanRoute = (action: "kick" | "ban", guildId: GuildId, user: Use
 export interface Interface {
   /** Checks one outgoing request. Dies (aborting the run) if the guard refuses it. */
   readonly check: (request: HttpClientRequest.HttpClientRequest) => Effect.Effect<void>
+  /**
+   * Checks a request a dry run answers instead of sending (`DryRun.ts`): the verdict `check` gives, with a kick or
+   * ban of the target judged as if its permit were held. Nothing is sent, so no permit is needed and none is
+   * consumed; the live call still needs its own. Dies (aborting the run) if the guard refuses it.
+   */
+  readonly checkDry: (request: HttpClientRequest.HttpClientRequest) => Effect.Effect<void>
   /** Allows writes, once the identity checks have found the bots and the protected channels. */
   readonly arm: (armed: Armed) => Effect.Effect<void>
   /** Admits a channel the harness read or created. Dies if it is not a lab channel. */
@@ -398,6 +404,8 @@ export const make = (guildId: GuildId): Effect.Effect<Interface> =>
       )
     )
 
+    const enforce = (decision: Verdict): Effect.Effect<void> => (decision._tag === "Allow" ? Effect.void : Effect.die(new Error(`lab guard refused ${decision.reason}`)))
+
     return LabGuard.of({
       check: (request) =>
         Ref.modify(state, (current): readonly [Verdict, GuardState] => {
@@ -407,7 +415,15 @@ export const make = (guildId: GuildId): Effect.Effect<Interface> =>
           return decision._tag === "Allow" && route !== undefined && current.kickBanPermits.has(route)
             ? [decision, { ...current, kickBanPermits: new Set([...current.kickBanPermits].filter((permit) => permit !== route)) }]
             : [decision, current]
-        }).pipe(Effect.flatMap((decision) => (decision._tag === "Allow" ? Effect.void : Effect.die(new Error(`lab guard refused ${decision.reason}`))))),
+        }).pipe(Effect.flatMap(enforce)),
+      checkDry: (request) =>
+        Ref.get(state).pipe(
+          Effect.flatMap((current) => {
+            const route = routeOf(request.method, request.url)
+            const permitted = route === undefined ? current : { ...current, kickBanPermits: new Set([...current.kickBanPermits, route]) }
+            return enforce(verdict(permitted, request.method, request.url, requestBody(request)))
+          })
+        ),
       arm: (armed) => Ref.update(state, (current) => ({ ...current, armed: Option.some(armed) })),
       admitChannel: (channel) =>
         Effect.gen(function* () {

@@ -10,6 +10,10 @@
  * - **(d)** runs it in `"bypass"` mode, live, for rows whose raw call Discord refused with 50013, 50001 or a
  *   dedicated code: the request goes out, Discord refuses it again, and the recompute decides the error, which must
  *   equal step (b)'s, tag and categories (`recompute-vs-preflight`). The Lab guard and Safety apply as to (c).
+ * - **The request check** (the M6 verifier): {@link bypassedRequests} runs it in `"bypass"` mode over the dry-run
+ *   stub, which records the request step (d) sends, and the runner compares that request (and step (b)'s, when (b)
+ *   reached the stub) with the raw call's, also recorded by the stub (`Drivers.dryRequests`): the method, the path
+ *   with its IDs and query, and the body (`request-wiring` otherwise).
  *
  * The handles are built from what the lab knows, as a bot holds handles it got earlier: the scenario channel by
  * its kind, the fixtures' messages from the harness's read of them (their author and reactions), and the target
@@ -26,7 +30,7 @@ import { memberHandle } from "../src/members/Member.ts"
 import * as Preflight from "../src/permissions/Preflight.ts"
 import type * as Schemas from "../src/rest/Schemas.ts"
 import type { ChannelId, EmojiId, ForumTagId, MessageId, RoleId, StickerId } from "../src/Snowflake.ts"
-import { DryRun, type Recorder } from "./DryRun.ts"
+import { DryRun, type Recorded, type Recorder } from "./DryRun.ts"
 import { emoji } from "./Fixtures.ts"
 import * as LabIds from "./LabIds.ts"
 import * as Materialize from "./Materialize.ts"
@@ -261,17 +265,19 @@ export const operate = (operation: Operation, context: LibraryContext): Effect.E
 /** Step (b)'s record: `pass` when the operation reached the stub, else its error (see the module comment). */
 export type Step = "pass" | RecordedError
 
+/** Step (b)'s record and the requests the stub answered (none when preflight refused). */
+export interface PreflightStep {
+  readonly step: Step
+  readonly requests: ReadonlyArray<Recorded>
+}
+
 /** Step (b): the operation in enforce mode over the dry-run stub. A defect (no canned body, a refused guard check) aborts. */
-export const preflightStep = (operation: Operation, context: LibraryContext, recorder: Recorder): Effect.Effect<Step> =>
+export const preflightStep = (operation: Operation, context: LibraryContext, recorder: Recorder): Effect.Effect<PreflightStep> =>
   operate(operation, context).pipe(
     Effect.provideService(Preflight.Mode, "enforce"),
     Effect.provideService(DryRun, Option.some(recorder)),
     Effect.matchEffect({
-      onSuccess: () =>
-        Effect.map(recorder.recorded, (recorded): Step => {
-          if (recorded.length === 0) throw new Error("library step (b): the operation succeeded without reaching the dry-run stub")
-          return "pass"
-        }),
+      onSuccess: () => Effect.succeed<Step>("pass"),
       onFailure: (error) => {
         const cause: unknown = error.cause
         return Effect.succeed<Step>(
@@ -281,7 +287,26 @@ export const preflightStep = (operation: Operation, context: LibraryContext, rec
               { tag: `${error._tag} (not a preflight decision)`, categories: [] }
         )
       }
-    })
+    }),
+    Effect.flatMap((step) =>
+      Effect.flatMap(recorder.recorded, (requests) =>
+        step === "pass" && requests.length === 0
+          ? Effect.die(new Error("library step (b): the operation succeeded without reaching the dry-run stub"))
+          : Effect.succeed<PreflightStep>({ step, requests })
+      )
+    )
+  )
+
+/**
+ * The request check's library side: the operation in bypass mode over the dry-run stub, which records what step (d)
+ * would send. A typed failure (a local check) records nothing, which no raw call equals; a defect aborts.
+ */
+export const bypassedRequests = (operation: Operation, context: LibraryContext, recorder: Recorder): Effect.Effect<ReadonlyArray<Recorded>> =>
+  operate(operation, context).pipe(
+    Effect.provideService(Preflight.Mode, "bypass"),
+    Effect.provideService(DryRun, Option.some(recorder)),
+    Effect.ignore,
+    Effect.andThen(recorder.recorded)
   )
 
 /** Step (d)'s record: the error with preflight bypassed; a success (Discord let it through this time) never equals (b). */

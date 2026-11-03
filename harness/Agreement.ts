@@ -4,6 +4,8 @@
  *
  * - `preflight-wiring`: step (b), the real operation over the dry-run stub (M6), does not fail with the first of
  *   `preflightSet` (the runner also requires its tag and categories to equal `Preflight.decide`'s error).
+ * - `request-wiring` is the runner's alone, from what the dry-run stub recorded (the table keeps no URL or body):
+ *   the library's request differs from the raw call's (`DryRun.requestDifferences`).
  * - `preflight-vs-raw`: preflight passed while the raw call neither succeeded nor degraded, or failed while it
  *   succeeded, or the raw code's mapped tag is not in `preflightSet` (§3.2).
  * - `level-vs-raw` (H-080): a raw 50001 or 50013 that is not the code `Observed.expectedCode` gives the

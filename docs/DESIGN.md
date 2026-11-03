@@ -212,11 +212,14 @@ harness/
   Materialize.ts                 pure: symbolic Setup -> desired state, and its subject-observable projection
   Predict.ts                     pure: steps (a) and (b) from the setup alone (the replay's rebuild; flip selection) (M4)
   Fixtures.ts                    the subject's own fixtures before Converge (temporary access), the harness's after (M4)
-  Drivers.ts                     step (c) per operation: the raw SubjectRaw call, its outcome, what it created (M4)
+  Drivers.ts                     step (c) per operation: the raw SubjectRaw call, its outcome, what it created (M4);
+                                 `dryRequests`, the same call recorded dry (the request check's reference)
   Converge.ts                    applies the minimal diff from current to desired state, in a fixed order
   Wait.ts                        consistency waits: read-back, projected subject GuildState, stable oracle
-  DryRun.ts                      Context.Reference read by the shared client: record and answer canned, never send
-  Library.ts                     steps (b) and (d) through the library's public operations, on handles built from the lab (M6)
+  DryRun.ts                      Context.Reference read by the shared client: record (method, path, body) and answer
+                                 canned, never send; `requestDifferences` for the request check (after the M6 verifier)
+  Library.ts                     steps (b) and (d) through the library's public operations, on handles built from the lab (M6);
+                                 `bypassedRequests`, step (d)'s request recorded dry
   Probes.ts                      the rule rows' probes: a typed library call or a raw call the types forbid, and its observation (M6)
   Outcome.ts                     raw outcome classifier, degradation readback (D35)
   Agreement.ts                   pure: row -> agree | mismatch kind (shared with offline replay)
@@ -2253,7 +2256,10 @@ restriction is `R-no-topic-on-voice`.)
     roles and both members to `LabGuard.permitKickOrBan`, which checks
     `kickBanPredictedToFail` itself and issues a one-shot permit for exactly the
     target's kick or ban route; any other kick or ban, a second use of a permit,
-    or a bulk ban is refused);
+    or a bulk ban is refused. After the M6 verifier: a request the dry-run stub
+    answers instead of sending is judged by `LabGuard.checkDry`, the same verdict
+    with the target's kick or ban treated as permitted; nothing is sent, so it
+    needs no permit and uses none, and the live call still needs its own);
   - (M4) a channel PATCH that renames a channel keeps a `lab`/`lab-*` name, and
     a new guild emoji has a `lab_` name (emoji are never edited or deleted);
   - (M6) one write outside the admitted channels: a message create aimed at a
@@ -2661,6 +2667,27 @@ setup alone made 216.)
    unseen thread, which `thread.leave` needs no View for), the fixtures' messages
    from the harness's read of them (author and reactions), the target member from
    the subject's read. Every library route has a canned body, `DryRun.cannedFiles`.)
+   **The request check** (after the M6 verifier). Nothing above compares the
+   request the library sends with the one the matrix measured: (b) only needed
+   the stub to be reached, a success row's live call is (c)'s alone, and a
+   wrong request on a refused row is usually refused for the same reason, so
+   five wrong requests (an unpin sent as a pin, a role removal as an addition,
+   a lock as an archive, an unarchive as an archive, a private thread as a
+   public one) passed every test and the live matrix. So the operation runs a
+   second time in `"bypass"` mode over the stub (`Library.bypassedRequests`:
+   what (d) sends), and the raw call of (c) runs over the stub too
+   (`Drivers.dryRequests`, with the same context as the live call); the stub
+   records each request's method, its path under the API base with the IDs and
+   the sorted query, and its body as canonical JSON (a multipart body as its
+   parts, `payload_json` as JSON and each file by name, type and size). The
+   library's request, and (b)'s when (b) reached the stub, must each equal the
+   raw call's; otherwise the row is `request-wiring` and the run log names the
+   difference. The table records none of it (it holds no IDs). No request of
+   the check is sent, paced or counted, and the guard judges each one as the
+   live request would be judged (`LabGuard.checkDry`, §5.6). Offline,
+   `test/unit/request-check.test.ts` runs the same check over one scenario of
+   every (operation, lab channel) of the catalog through the harness's real
+   wiring (158 pairs), and fails on each of the five wrong requests.
 6. **(c) Raw call** through `SubjectRaw`, with no check. Classify it with
    `Outcome.ts`: `success`, `degraded` (with the list), `50013`, `50001`,
    `other-error` (status, code, sorted inner codes with paths), `ignored`,
@@ -2694,6 +2721,10 @@ outcome: the request may have been applied (§4.10).
 **Agreement** is pure and shared with the replay. It is `"agree"` unless:
 
 - `preflight-wiring`: (b), the real operation, differs from `Preflight.decide`;
+- `request-wiring` (after the M6 verifier): the library's request (step (d)'s,
+  and (b)'s when it reached the stub) differs from the raw call's, in method,
+  path or body (the request check of step 5; the runner decides it, since the
+  table keeps no URL);
 - `preflight-vs-raw`: preflight `pass` while raw is neither success nor
   degraded, or preflight failed while raw succeeded, or raw has a `mappedTag`
   that is not in `preflightSet` (§3.2);

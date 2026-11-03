@@ -41,7 +41,8 @@ export class TargetRest extends Context.Service<TargetRest, DiscordRestService>(
 /**
  * The base client every identity's dfx sees: guarded, paced and counted. It requires the real base client,
  * the pacing service and the guard, all from outside every identity's fresh boundary. Under a dry run
- * (`DryRun.ts`) a request passes the guard and is answered with its canned body instead of being sent.
+ * (`DryRun.ts`) a request passes the guard (`checkDry`: as the live request would, with no kick or ban permit used)
+ * and is answered with its canned body instead of being sent.
  */
 export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpClient.HttpClient | PacingModule.Pacing | Lab.LabGuard> = Layer.effect(
   HttpClient.HttpClient,
@@ -64,9 +65,13 @@ export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpCli
     )
     return HttpClient.make((request) =>
       Effect.gen(function* () {
-        yield* guard.check(request)
         const dry = yield* DryRun
-        if (Option.isNone(dry)) return yield* sent.execute(request)
+        if (Option.isNone(dry)) {
+          yield* guard.check(request)
+          return yield* sent.execute(request)
+        }
+        // nothing is sent: the guard judges the request as it would the live one, with no kick or ban permit used
+        yield* guard.checkDry(request)
         const route = cannedRoute(request.method, request.url)
         const body = dry.value.canned(route)
         if (Option.isNone(body)) return yield* Effect.die(new Error(`dry run: no canned body for ${route}`))

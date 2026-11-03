@@ -1,22 +1,35 @@
 /**
- * The dry-run switch (DESIGN §5.10 step (b)): a `Context.Reference` the shared base `HttpClient` reads for every
- * request. When it holds a recorder, the request still passes the Lab guard, then is recorded and answered
- * with a canned 2xx body from `fixtures/canned/` instead of being sent; nothing is paced or counted, because
- * nothing reaches Discord. A request without a canned body is a defect.
+ * The dry-run switch (DESIGN §5.10 step (b) and the request check): a `Context.Reference` the shared base
+ * `HttpClient` reads for every request. When it holds a recorder, the request still passes the Lab guard (judged as
+ * the live request would be, `LabGuard.checkDry`), then is recorded and answered with a canned 2xx body from
+ * `fixtures/canned/` instead of being sent; nothing is paced or counted, because nothing reaches Discord. A request
+ * without a canned body is a defect.
  *
  * The matrix's step (b) runs the real public operation in `"enforce"` mode under it (M6), so the run exercises the
- * user-facing path without an extra Discord request.
+ * user-facing path without an extra Discord request. The request check (the M6 verifier) runs the operation again
+ * with preflight bypassed, as step (d) sends it, and the raw call of step (c), both under it, and compares what was
+ * recorded: the method, the path with its IDs and query, and the body ({@link requestDifferences}).
  */
 import { Context, Effect, FileSystem, Option, Ref, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
+import type * as HttpBody from "effect/http/HttpBody"
 import type * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as UrlParams from "effect/http/UrlParams"
 import { routeKey } from "./Pacing.ts"
+import { canonicalJson } from "./TruthTable.ts"
 
 /** One request the stub answered. */
 export interface Recorded {
   readonly method: string
   /** The route as the pacing counters key it: `POST /channels/{id}/messages`. */
   readonly route: string
+  /** The path under the API base, with its IDs, and the query parameters sorted: `/channels/1/messages/pins?limit=50`. */
+  readonly path: string
+  /**
+   * The body as canonical JSON (`TruthTable.canonicalJson`): a JSON body as sent, a multipart body as its parts in
+   * order (`payload_json` as JSON, each file by name, type and size), `null` for none.
+   */
+  readonly body: string
 }
 
 /** A dry run in progress: what it recorded, and the canned bodies by route. */
@@ -61,16 +74,82 @@ export const cannedFiles: Readonly<Record<string, string>> = {
 /** The route a canned body is looked up by: `routeKey`, with a reaction's emoji segment as `{emoji}`. */
 export const cannedRoute = (method: string, url: string): string => routeKey(method, url).replace(/\/reactions\/[^/]+\/@me$/, "/reactions/{emoji}/@me")
 
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
+/** A text body as JSON, or as `{ text }` when it is not JSON. */
+const jsonOrText = (text: string): Schema.Json => Option.getOrElse(decodeJson(text), (): Schema.Json => ({ text }))
+
+/** A form part's value, as `FormData` holds it. */
+type Part = NonNullable<ReturnType<globalThis.FormData["get"]>>
+
+/** A form part: a string, `payload_json` read as JSON, any other file by name, type and size. */
+const partOf = (name: string, value: Part): Effect.Effect<Schema.Json> => {
+  if (typeof value === "string") return Effect.succeed({ name, value: jsonOrText(value) })
+  if (name === "payload_json") return Effect.map(Effect.promise(() => value.text()), (text) => ({ name, value: jsonOrText(text) }))
+  return Effect.succeed({ name, file: { name: value.name, type: value.type, size: value.size } })
+}
+
+/** A request body as the recorder keeps it (see {@link Recorded}). */
+export const bodyOf = (body: HttpBody.HttpBody): Effect.Effect<Schema.Json> => {
+  switch (body._tag) {
+    case "Empty":
+      return Effect.succeed(null)
+    case "Uint8Array":
+      return Effect.succeed(jsonOrText(new TextDecoder().decode(body.body)))
+    case "FormData":
+      return Effect.forEach([...body.formData.entries()], ([name, value]) => partOf(name, value))
+    case "Raw":
+    case "Stream":
+      return Effect.succeed({ unreadable: body._tag })
+  }
+}
+
+/** A request's path under the API base, with the query parameters (the URL's and `urlParams`) sorted. */
+export const pathOf = (request: HttpClientRequest.HttpClientRequest): string => {
+  const url = new URL(request.url)
+  const query = new URLSearchParams(url.search)
+  for (const [key, value] of new URLSearchParams(UrlParams.toString(request.urlParams))) query.append(key, value)
+  query.sort()
+  const search = query.toString()
+  return `${url.pathname.replace(/^\/api\/v\d+/, "")}${search === "" ? "" : `?${search}`}`
+}
+
+/** A request as the recorder keeps it. */
+export const recordedOf = (request: HttpClientRequest.HttpClientRequest): Effect.Effect<Recorded> =>
+  Effect.map(bodyOf(request.body), (body) => ({ method: request.method, route: cannedRoute(request.method, request.url), path: pathOf(request), body: canonicalJson(body) }))
+
 /** A recorder over `bodies` (route to canned body). */
 export const makeRecorder = (bodies: ReadonlyMap<string, unknown>): Effect.Effect<Recorder> =>
   Effect.gen(function* () {
     const log = yield* Ref.make<ReadonlyArray<Recorded>>([])
     return {
-      record: (request) => Ref.update(log, (entries) => [...entries, { method: request.method, route: cannedRoute(request.method, request.url) }]),
+      record: (request) => Effect.flatMap(recordedOf(request), (entry) => Ref.update(log, (entries) => [...entries, entry])),
       recorded: Ref.get(log),
       canned: (route) => Option.fromUndefinedOr(bodies.get(route))
     }
   })
+
+/**
+ * How the requests `actual` recorded differ from the `expected` ones (the raw call's), each difference named with
+ * `label`; empty when they are the same requests: the same number, and each with the same method, path and body.
+ */
+export const requestDifferences = (label: string, actual: ReadonlyArray<Recorded>, expected: ReadonlyArray<Recorded>): ReadonlyArray<string> => {
+  if (actual.length !== expected.length) {
+    const list = (entries: ReadonlyArray<Recorded>) => entries.map((entry) => entry.route).join(", ") || "none"
+    return [`${label}: ${actual.length} request(s) (${list(actual)}), the raw call ${expected.length} (${list(expected)})`]
+  }
+  const flat = (body: string) => body.replace(/\s+/g, " ")
+  return actual.flatMap((entry, index) => {
+    const reference = expected[index]
+    if (reference === undefined) return []
+    const at = `${label}: request ${index + 1}`
+    return [
+      ...(entry.method === reference.method ? [] : [`${at}: method ${entry.method}, the raw call's ${reference.method}`]),
+      ...(entry.path === reference.path ? [] : [`${at}: path ${entry.path}, the raw call's ${reference.path}`]),
+      ...(entry.body === reference.body ? [] : [`${at}: body ${flat(entry.body)}, the raw call's ${flat(reference.body)}`])
+    ]
+  })
+}
 
 /** The canned bodies' directory. */
 export const cannedDirectory = new URL("../fixtures/canned/", import.meta.url).pathname

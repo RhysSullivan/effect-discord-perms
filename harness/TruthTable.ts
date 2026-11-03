@@ -64,6 +64,7 @@ export type ResolverRecord = typeof ResolverRecord.Type
 export const AgreementKind = Schema.Literals([
   "agree",
   "preflight-wiring",
+  "request-wiring",
   "preflight-vs-raw",
   "resolver-vs-raw",
   "level-vs-raw",

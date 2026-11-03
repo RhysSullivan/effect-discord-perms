@@ -303,6 +303,39 @@ describe("the guard service", () => {
     })
   )
 
+  it.effect("judges a dry run's request as the live one, a kick or ban of the target as if permitted, and uses or issues no permit", () =>
+    Effect.gen(function* () {
+      const guard = yield* make(guild)
+      const kick = HttpClientRequest.delete(api(`/guilds/${guild}/members/${target}`))
+      const ban = HttpClientRequest.put(api(`/guilds/${guild}/bans/${target}`))
+      const write = HttpClientRequest.post(api(`/channels/${labChannel}/messages`))
+      // before arming, a dry write is refused like a live one
+      expect(Exit.isFailure(yield* Effect.exit(guard.checkDry(write)))).toBe(true)
+      yield* guard.arm({ harnessUserId: harness, subjectUserId: subject, targetUserId: target, protectedChannels: new Set([rules]) })
+      yield* guard.admitChannel({ id: labChannel, name: "lab-text" })
+      expect(Exit.isSuccess(yield* Effect.exit(guard.checkDry(write)))).toBe(true)
+      expect(Exit.isFailure(yield* Effect.exit(guard.checkDry(HttpClientRequest.post(api(`/channels/${elsewhere}/messages`)))))).toBe(true)
+      expect(Exit.isSuccess(yield* Effect.exit(guard.checkDry(kick)))).toBe(true)
+      expect(Exit.isSuccess(yield* Effect.exit(guard.checkDry(ban)))).toBe(true)
+      // never the harness, a human or another guild's member, dry or not
+      expect(Exit.isFailure(yield* Effect.exit(guard.checkDry(HttpClientRequest.delete(api(`/guilds/${guild}/members/${harness}`)))))).toBe(true)
+      expect(Exit.isFailure(yield* Effect.exit(guard.checkDry(HttpClientRequest.put(api(`/guilds/${guild}/bans/${rhys}`)))))).toBe(true)
+      expect(Exit.isFailure(yield* Effect.exit(guard.checkDry(HttpClientRequest.delete(api(`/guilds/${otherGuild}/members/${target}`)))))).toBe(true)
+      // the dry checks left no permit behind: the live kick and ban are still refused
+      expect(Exit.isFailure(yield* Effect.exit(guard.check(kick)))).toBe(true)
+      expect(Exit.isFailure(yield* Effect.exit(guard.check(ban)))).toBe(true)
+      // and a permit the live call needs is not used up by a dry check
+      const roles = [
+        { id: guild, permissions: "0", position: 0 },
+        { id: "400000000000000011", permissions: "0", position: 10 }
+      ]
+      yield* guard.permitKickOrBan("kick", { guildId: guild, roles, subject: { roles: [] }, target: { roles: ["400000000000000011"] } })
+      expect(Exit.isSuccess(yield* Effect.exit(guard.checkDry(kick)))).toBe(true)
+      expect(Exit.isSuccess(yield* Effect.exit(guard.check(kick)))).toBe(true)
+      expect(Exit.isFailure(yield* Effect.exit(guard.check(kick)))).toBe(true)
+    })
+  )
+
   it.effect("bounds a lab step: a call that never answers (dfx waiting out a long 429) fails with status 0, naming the step", () =>
     Effect.gen(function* () {
       const fiber = yield* Effect.never.pipe(labStep("converge: get the subject"), Effect.flip, Effect.forkChild)

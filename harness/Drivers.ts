@@ -12,6 +12,7 @@ import type { Transient } from "../src/errors/Transient.ts"
 import { type Answered, send } from "../src/rest/Request.ts"
 import type { ChannelId, EmojiId, MessageId, RoleId, StickerId } from "../src/Snowflake.ts"
 import { ChannelId as ChannelIdSchema } from "../src/Snowflake.ts"
+import { DryRun, type Recorded, type Recorder } from "./DryRun.ts"
 import { emoji, type PriorSend, priorSendProblem } from "./Fixtures.ts"
 import * as LabIds from "./LabIds.ts"
 import type * as Materialize from "./Materialize.ts"
@@ -211,6 +212,13 @@ export const rawCall = (scenario: Pick<Scenario, "operation" | "setup">, context
       }
     }
   })
+
+/**
+ * The request check's reference (§5.10): the scenario's raw call over the dry-run stub, which records the request
+ * step (c) sends (method, path with its IDs and query, body) and answers it without sending it.
+ */
+export const dryRequests = (scenario: Pick<Scenario, "operation" | "setup">, context: CallContext, recorder: Recorder): Effect.Effect<ReadonlyArray<Recorded>, Transient, SubjectRaw> =>
+  rawCall(scenario, context).pipe(Effect.provideService(DryRun, Option.some(recorder)), Effect.andThen(recorder.recorded))
 
 const PinsPage = Schema.Struct({ items: Schema.Array(Schema.Unknown) })
 
