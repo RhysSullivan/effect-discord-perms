@@ -311,7 +311,10 @@ const tablePath = new URL("../../fixtures/truth-table.json", import.meta.url).pa
 const table = Schema.decodeUnknownSync(Schema.fromJsonString(TruthTable.TruthTable))(fs.readFileSync(tablePath, "utf8"))
 const byId = new Map(scenarios.map((scenario) => [scenario.id, scenario]))
 const ids = Predict.symbolicIds
-const refused = Object.entries(table.scenarios).filter(([, row]) => row.raw.class === "50013" || row.raw.class === "50001" || row.raw.class === "other-error")
+// the matrix rows: a rule row records a probe, with no preflight to compare (§5.5)
+const refused = Object.entries(table.scenarios).filter(
+  ([id, row]) => byId.get(id)?.operation._tag !== "rule" && (row.raw.class === "50013" || row.raw.class === "50001" || row.raw.class === "other-error")
+)
 
 describe("every refusal the truth table recorded, through DiscordApi and the recompute", () => {
   it("covers every refusal class the matrix saw", () => {

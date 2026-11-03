@@ -39,7 +39,10 @@ const mapped = (op: OpName, status: number, code: number, options: { readonly li
   outcome(mapResponse({ op, args: { payload: options.payload ?? [] }, limits: options.limits ?? {} }, response(status, code, options.fieldErrors), options.retryAfterMs))
 
 describe("the truth table's refusals", () => {
-  const refused = Object.entries(table.scenarios).filter(([, row]) => row.raw.class === "50013" || row.raw.class === "50001" || row.raw.class === "other-error")
+  // the matrix rows: a rule row's raw side sends what the types forbid (the replay's limit block holds its 50035s)
+  const refused = Object.entries(table.scenarios).filter(
+    ([id, row]) => byId.get(id)?.operation._tag !== "rule" && (row.raw.class === "50013" || row.raw.class === "50001" || row.raw.class === "other-error")
+  )
 
   it("each maps, for its operation, to its declared tag with its class's categories", () => {
     expect(refused.length).toBeGreaterThan(150)

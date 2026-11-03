@@ -98,7 +98,8 @@ describe("the replay", () => {
 })
 
 describe("the constants the table decides (§5.13)", () => {
-  const ranRows = rows.filter(([, row]) => ran(row))
+  // the rule rows record a probe, not the resolver and preflight (§5.5); the rule-row and limit blocks judge them
+  const ranRows = matrixRows.filter(([, row]) => ran(row))
 
   it("Observed.botsCanBeTimedOut: no row records bot-not-timeoutable, and timed-out rows ran", () => {
     expect(Observed.botsCanBeTimedOut).toBe(true)
