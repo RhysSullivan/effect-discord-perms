@@ -2295,7 +2295,9 @@ byte-identical Setup, which rules-check asserts.
 
 (M7) A `pair` may list `also`: further sides on the same setup that the rule's valid case covers, each with its
 own full expectation, checked like the two (catalog, table row, observation, one setup).
-`R-message-content` uses it for the mention, ping-on reply and own-message exceptions.
+`R-message-content` uses it for the mention, ping-on reply and own-message exceptions. (M8: any further side of the
+rule, valid or invalid: the command rules' nested registrations and nested raw sides, and the registration diff's
+further mutations.)
 
 Staging: M0's rules-check implements every check whose inputs exist. A `pair`
 rule fails closed ("cannot verify yet") until the catalog and truth-table

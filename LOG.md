@@ -435,7 +435,8 @@ M6, the whole matrix:
 - **M8, H-205: rejected creates.** A refused POST of a name the guild did not have (`Lab-command-name-upper`, `lab
   command`, a 33-character name) leaves no command: the next row's GET lists only the registered one. Whether such a
   refusal counts toward the 200 creates a day stays unobservable short of reaching the limit; the harness counts every
-  name a POST or PUT may create, refused or not (`CommandBudget.ts`): 21 counted before the full runs, about 6 a full run.
+  name a POST or PUT may create, refused or not (`CommandBudget.ts`): 21 counted before the full runs (3 by the
+  recording), 7 by run W.
 - **M8: the command write buckets are small** (scope user). The guild commands POST answered 429 with `retry-after` 17
   to 18 s after about a dozen writes in half a minute; the bulk overwrite PUT has its own bucket, which sustained about
   one PUT every 30 s and answered 429 with `retry-after` 52 to 58 s when pressed. dfx waits them out; the registration
@@ -1352,7 +1353,7 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
 - **Command creates are budgeted** (M8). Discord allows 200 application-command creates per guild a day (H-205); the
   shared client counts every name a POST or PUT to the guild commands may create, refused or not, in a rolling 24-hour
   ledger at `/tmp/effect-discord-perms-command-creates.json`, and aborts a command before a request that would take the
-  count past 150 (`harness/CommandBudget.ts`). A full run counts about 6 (the registration rows reuse one registered
+  count past 150 (`harness/CommandBudget.ts`). A full run counts about 7 (the registration rows reuse one registered
   command name), `record-commands` 3. If it aborts, wait for the ledger's oldest entries to age out; never delete the
   ledger to get past it.
 - **The command write buckets are small** (M8): the registration rows wait about five minutes of a full run for the
