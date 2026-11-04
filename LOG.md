@@ -1866,6 +1866,13 @@ Live, in order (each alone under the lock, on minisforum):
     403s), 429s retried by dfx on 13 reactions and one channel edit, no lab step retried, oracle available, **0
     mismatches**; 23 rows needed the obfuscation resend. The replay rejected its table on two rows (the refresh's
     unseen mark and the missing witness, "Design deviations"), so it was not committed.
+  - `run --write` on `af0a8c2` (the two fixes): stopped at row 472 of 511 when the shell wrapper that had waited for the
+    role bucket reached its own two-hour limit and killed it (my scheduling, not the run); nothing was written, and the
+    next run's opening reset cleaned the lab (4 writes);
+  - `run --write` on `af0a8c2`, again: exit 0, 511 scenarios in 2,615 s, 8,942 requests, 2,698 writes, 592 invalid,
+    429s retried by dfx on 7 reactions and one channel edit, no lab step retried, **0 mismatches**. The replay accepted
+    every row and rejected only the missing `createThread.private` witness ("Design deviations"), so this table was
+    not committed either.
 - **Run time (the M6 verifier's first finding), before and after.** M6's full runs: 3,131 to 3,243 s for 486
   scenarios (6.4 to 6.7 s each), some 11,077 requests (23 a scenario). M7's complete run above: 2,479 s for 510
   scenarios (4.9 s each, the 15 sessions included), 8,928 requests (17.5 a scenario). Per row, from the run logs
