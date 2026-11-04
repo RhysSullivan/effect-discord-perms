@@ -1,10 +1,13 @@
 // Bot, intents, events, message content and the handler boundary (DESIGN §2.7; [sd:src/bot-use.ts]): every shape
 // that must compile, with exact inferred types.
 import { Discord } from "dfx"
-import { Context, Effect, type Scope, Schema } from "effect"
+import { Config, Context, Effect, type Layer, type Scope, Schema } from "effect"
+import type * as HttpClient from "effect/http/HttpClient"
+import type * as Socket from "effect/socket/Socket"
 import { expectTypeOf } from "vitest"
 import { Bot, type BotRuntime } from "../../../src/bot/Bot.ts"
 import type { Handled, UnhandledErrors } from "../../../src/bot/Handler.ts"
+import type { StartupFailed } from "../../../src/bot/Startup.ts"
 import type { DMChannel, GuildChannel, MessageChannel } from "../../../src/channels/Channel.ts"
 import { isMessageChannel } from "../../../src/channels/Channel.ts"
 import { catchCategory, withCategory } from "../../../src/errors/Category.ts"
@@ -111,3 +114,8 @@ export const r10 = noContent.on("MESSAGE_CREATE", (event) =>
   event.channel.send({ content: "pong" }).pipe(catchCategory(["permission", "access", "state"], () => Effect.void))
 )
 expectTypeOf(r10).toEqualTypeOf<Effect.Effect<void, never, BotRuntime | Scope.Scope>>()
+
+// 11. the layers (§4.2): `layerWith` leaves the platform open, `layer` needs nothing
+const config = { token: Config.Redacted("DISCORD_SUBJECT_TOKEN") }
+expectTypeOf(Bot.layerWith(withContent, config)).toEqualTypeOf<Layer.Layer<BotRuntime, StartupFailed | Config.ConfigError, HttpClient.HttpClient | Socket.WebSocketConstructor>>()
+expectTypeOf(Bot.layer(withContent, config)).toEqualTypeOf<Layer.Layer<BotRuntime, StartupFailed | Config.ConfigError, never>>()
