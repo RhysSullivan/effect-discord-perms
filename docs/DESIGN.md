@@ -3062,6 +3062,11 @@ since dfx waits the bucket out.)
   milliseconds and requests, and LOG.md the timings before and after.)
 - A lab step answered with a 5xx is retried as §5.10's "Lab-step retries"
   describes; the summary prints the retries per step.
+- (M8) The 542-scenario run takes 2,905 to 2,989 s, of which the 30 registration
+  and route rows take about 300 s, nearly all of it dfx waiting out Discord's
+  command buckets (about one bulk overwrite every 30 s, §5.10 "Registration
+  writes"). The 30-minute target is still missed (the orchestrator's decision,
+  LOG.md); the 60-minute abort has about 10 minutes of headroom.
 
 ### 5.12 Truth table (G9, compiled: `[sd:src/verify.ts]`, `[sd:truth-runtime.txt]`)
 
