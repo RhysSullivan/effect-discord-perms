@@ -2125,3 +2125,8 @@ Live, in order (each alone under the lock, on minisforum):
     reactions, one channel edit, one command POST and two command PUTs, no lab step retried, oracle available, **0
     mismatches**. The table (`6199bf0d...b164b6`, 669,042 bytes) adds the 30 command rows; the 512 rows before them are
     byte-for-byte M7's. The 30 command rows took 294 s of it (rows 173 to 202).
+  - **exit run A**, on `67b10e6` and its LOG commits: `bun run verify:live` (`run --write --compare`) exited 0: role
+    budget 100 left (88 needed), 542 scenarios in 2,989 s, 9,262 requests, 2,741 writes, 601 invalid, 429s retried by dfx
+    on 11 reactions, one channel edit, one command POST and two command PUTs, no lab step retried, oracle available, **0
+    mismatches**, `compare: identical to the previous table` (W's, committed); it wrote the same bytes
+    (`6199bf0d...b164b6`). The command rows took 303 s; the create ledger counted 7 more (35 in 24 hours).
