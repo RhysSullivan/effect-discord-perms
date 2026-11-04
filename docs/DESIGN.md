@@ -2684,7 +2684,10 @@ The expected total is 234 pairwise rows, about 110 targeted rows, about 45
 flip rows, about 95 rule rows and about 16 intent sessions, roughly **500
 scenarios**. (M6: 486 scenarios in the phase-1 catalog: 304 family rows, 24
 coverage rows, 94 flip controls and 64 rule rows; the intent sessions come in
-M7.) (M4 has 229 pairwise rows, 72 targeted rows and 62 flip controls, 363
+M7.) (M7: 510: the codec's obfuscation blinds the timed-out rows that hide View, so
+11 flip controls are replaced (9 by the flips of 9 new coverage rows, §4.15), and the
+catalog is 304 family rows, 33 coverage rows, 94 flip controls, 64 rule rows and 15
+intent sessions; a full run makes 80 role edits.) (M4 has 229 pairwise rows, 72 targeted rows and 62 flip controls, 363
 scenarios in all; the rule rows and intent sessions come in M6-M8.)
 
 ### 5.10 Executing one scenario
@@ -3241,6 +3244,11 @@ Live milestones run serially, under the lock.
   - unit tests show a failing handler does not stop later events, and that
     finalizers run per event;
   - `bun run verify:offline`.
+
+- (M7) Beyond the listed scope: `gateway/Dispatches.ts` (`bot.on`'s own dispatch stream, §4.14),
+  `channels/Direct.ts` and `DiscordApi.executeDirect` (the DM branch's handles), `bot/Runtime.ts`, the replay's
+  model of the codec (`Predict.snapshotOf`, §4.15) and the catalog change it brings (§5.9), `LivePair.also`
+  (§5.5), and the M6 verifier's minor findings (the run time and lab-step retries of §5.10 and §5.11).
 
 **M8 Commands, registration, routes live** (live)
 

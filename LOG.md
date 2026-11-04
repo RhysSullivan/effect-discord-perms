@@ -354,6 +354,29 @@ M6, the whole matrix:
   derives `coverage/thread/announcement-thread/delete/subject/op-flag/normal/member/without-ViewChannel` and its
   flip for (thread.delete, ViewChannel) instead (486 scenarios).
 
+- **M7, H-160 confirmed with the codec: a channel the subject cannot view is obfuscated in its gateway state.** With
+  Identify's `capabilities: 32768`, every View-denied row resolved `obfuscated` (the first codec run,
+  `run --only 'send/text/**'`: the four rows that hide `lab-text` by an `@everyone`, member or role overwrite deny), and
+  the runner's obfuscation check passed on every row that hides `lab-text`, also where a role change hid it
+  (`run --only 'rule/**'`: the `members` rows follow the `thread` rows, which grant View through a role). So Discord
+  sends the obfuscated channel when View goes away by an overwrite or by a role change.
+- **M7, H-161 confirmed: when View returns, Discord sends the channel's real data.** No row in the codec runs timed
+  out waiting for the subject's state to show a channel it can view again with its real overwrites, by an
+  overwrite or a role. (Without the codec, M6 live: no channel event at all when a role granted View.)
+- **M7, H-171, H-180 and the intent pairs, live.** A session without GuildMessages received no MESSAGE_CREATE for
+  the target's message, without GuildMessageReactions no MESSAGE_REACTION_ADD for its reaction, without
+  GuildMessageTyping no TYPING_START, without GuildMembers no GUILD_MEMBER_UPDATE about the target's nickname, and
+  without Guilds no CHANNEL_UPDATE for `lab-bots-only`'s slowmode, each after its canary arrived; the sessions with the
+  intent received each.
+- **M7, H-172 confirmed for bots, live: without MessageContent a plain message from the target arrives with empty
+  content, and these arrive with it:** a message that mentions the subject (with `allowed_mentions.users` naming it),
+  the target's ping-on reply to the subject's message (`replied_user: true`), and the subject's own message. With
+  MessageContent the plain message carries its content. The library's `contentDelivered` said the same in every
+  session. The DM case needs a human (Q-17).
+- **M7, H-175 confirmed, and H-179: a session with intents 0 receives READY, and a GUILD_MEMBER_UPDATE about the bot
+  itself** (the harness's nickname edit of the subject), with neither Guilds nor GuildMembers. `R-intent-guilds`'
+  without side uses it as its canary.
+
 ## dfx deviations
 
 Where dfx got in the way and we wrapped or adapted it, and why.
@@ -1123,8 +1146,9 @@ the same commit.
   the catalog: a timed-out row that hides View resolves `obfuscated`, which hides the timeout from preflight, so its
   ViewChannel flip is no longer clean (it would fail with `CommunicationDisabled`, which the blind original does not
   list); those (operation, ViewChannel) keys now take derived coverage rows, normal and without an administrator, whose
-  flips must pass. The catalog changes from 486 to 495 matrix and rule rows, plus 15 sessions, 510 in all: 11 coverage
-  rows and their flips added, 13 flips of timed-out View rows replaced.
+  flips must pass. The catalog changes from 486 to 495 matrix and rule rows, plus 15 sessions, 510 in all: 9 coverage
+  rows added, and 11 flip controls replaced by 11 others (the 9 coverage rows' flips and two family rows' that are now
+  the first clean ones of their keys).
 
 ## Escalated rules
 
@@ -1767,3 +1791,36 @@ Live, in order (each alone under the lock, on minisforum):
   nothing to measure yet), and `bun run rules` gave `rules ok 43 rule(s) (38 live pair, 0 escalated, 3 pure-typing,
   2 other not-live), 9 fail fixture(s), 76 live sides checked against the table, flag coverage over 422 matrix
   row(s)`, with the M7 events check "not checked yet".
+
+### M7 Gateway, Bot, intents, content
+
+- Before M7, the M6 verifier's six minor findings (commit `fe40700`; "Design deviations", "Before M7").
+- The library: `src/gateway/Intents.ts` (the 21 intent names, equal to dfx's keys; `EventIntents` as a runtime table
+  of the six supported events; `IntentCheck` with `MissingIntent`), `src/gateway/Events.ts` (the payload types, the
+  guild and DM branches of `MESSAGE_CREATE`, `ReceivedMessage`, the frozen `contentUnavailable`, and the decoding of
+  each dispatch into handles), `src/gateway/Codec.ts` (the capabilities codec and `DiscordLiveWithCapabilities`, which
+  records what Identify sent), `src/gateway/Dispatches.ts` (the build's dispatch stream), `src/bot/Handler.ts`
+  (`Handled`, `UnhandledErrors`), `src/bot/Bot.ts` (`Bot.make` with `on`, `Bot.layerWith`, `Bot.layer`),
+  `src/bot/Runtime.ts`, `src/channels/Direct.ts` with `DiscordApi.executeDirect` (the DM handles), the hook's
+  `DispatchTap` (internal, for the sessions) and the barrel's exports.
+- The harness: the subject is the library's build with the codec, and the identity check requires its Identify to
+  have sent exactly the declared intents (`intents 3`) with ChannelObfuscation, and READY to name the subject;
+  `Identities.Sessions` opens extra subject sessions; `harness/Sessions.ts` and `catalog/intents.ts` (fifteen
+  sessions on the `text-messages` setup); the obfuscation check (`Runner.obfuscationProblem`); the replay's model
+  of the codec; the table's `obfuscation: "codec"`.
+- Registry: `R-intent-guild-messages`, `R-intent-reactions`, `R-intent-typing`, `R-intent-guild-members` and
+  `R-intent-guilds` (each a session with the event's intent against one without, after a canary), `R-message-content`
+  (with the intent `Applied content`, without it `Ignored content`, and the mention, ping-on reply and own-message
+  exceptions as `also` sides; remainder escalated, Q-17, "Waiting for Rhys"), and the pure-typing
+  `R-handler-boundary` and `R-transient-only-escapes`. rules-check's events check (`eventProblems`) and `also` sides.
+- Type fixtures: pass `test/types/pass/bot.ts` (the prototype's shapes with exact types: content narrowing, an
+  `Effect.fn` handler with a service, `Effect.orDie`, READY without intents, crosspost narrowing, the DM branch, the
+  guild branch per intents, branded event IDs, D6's `Handled`), fail `test/types/fail/bot.ts` (each missing intent,
+  content, the boundary by category and by uncategorised tag, an `Effect.fn` handler, a transient-and-state error, a
+  built payload); hover `test/hover/bot.ts` (`event.message` is `ReceivedMessage<false>`, `event.channel`
+  `MessageChannel`, a registration `Effect.Effect<void, never, BotRuntime | Scope>`).
+- Unit tests: `bot-events.test.ts` through the real `Bot.layerWith` over a fake gateway (finalizers run per event; a
+  handler failing with a transient error or dying does not stop later events; ContentUnavailable exactly without the
+  intent and outside the exceptions; the DM branch and its send; READY after registration; CHANNEL_UPDATE's kind and
+  obfuscation), the identity and build tests re-run with the codec (`capabilities: 32768` in Identify, the record),
+  `obfuscation.test.ts`, the events check in `rules-check.test.ts`, and `lab-retry.test.ts`.
