@@ -16,6 +16,15 @@ milestone appends its entries.
   and without MessageContent and must receive the content), or accept the DM branch as typed and unit-tested
   (`test/unit/bot-events.test.ts` drives it through a fake gateway) without a live row. Nothing else waits on it.
 
+- **Q-18, handler-side delivery of option values and component clicks (`R-options-typed` and `R-custom-id-routing`'s
+  remainder; unmet Done criteria until decided; M8).** The bot-only halves are live: Discord refuses a definition the
+  types reject and stores the typed one's choices, required options and channel types as defined (the options
+  readback), and a `custom_id` a route built at 100 characters is stored, read back and decoded to the same data while
+  101 is refused. A handler receiving a real invocation (the option values) or a real button click needs a human to
+  run the command and click. Rhys decides: run a test command and click a test button in Perms Lab once (M9's
+  `checklist` command will post them), or accept the handler side as typed and unit-tested (M9 decodes interaction
+  payloads offline). Nothing else waits on it.
+
 - **Q-22, DM delivery under the DM intents (`R-intent-guild-messages`, `R-intent-reactions` and `R-intent-typing`'s
   remainder; an unmet Done criterion until decided; the M7 verifier).** `bot.on("MESSAGE_CREATE")` compiles with
   DirectMessages, `MESSAGE_REACTION_ADD` with DirectMessageReactions and `TYPING_START` with DirectMessageTyping, but the
@@ -398,6 +407,40 @@ M6, the whole matrix:
   itself** (the harness's nickname edit of the subject), with neither Guilds nor GuildMembers. `R-intent-guilds`'
   without side uses it as its canary.
 
+- **M8, open question 11: how Discord stores a guild command** (`fixtures/commands-canonical.json`, recorded by
+  `harness/main.ts record-commands` with three samples covering every field the library sends). Beyond what was sent it
+  adds the server-assigned `id`, `application_id`, `guild_id` and `version`, and `default_member_permissions: null` and
+  `nsfw: false`; nothing else (no `contexts`, `integration_types` or `dm_permission` on a guild command, and no
+  localizations from a GET without `with_localizations`). An option sent with `required: false` comes back without the
+  field. Choices, ranges, lengths and `autocomplete` come back as sent. **`channel_types` is a set**: `[5, 0, 11]` came
+  back as `[0, 11, 5]`, neither the order sent nor ascending, so the canonicaliser sorts it.
+- **M8, H-190 and H-191: names.** An uppercase letter in a command, subcommand or option name is refused with 400
+  50035 `APPLICATION_COMMAND_INVALID_NAME` on that name's path; a space with `STRING_TYPE_REGEX` (the name regex, not
+  the lowercase check); 33 characters with `BASE_TYPE_BAD_LENGTH`, while 32 are accepted, at the top level
+  (`R-command-name-*`) and for a subcommand (`options.0.name`) and a nested option (`options.0.options.0.name`).
+- **M8, H-194: a required option after an optional one** is refused with `APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID`
+  on the required option's own path (`options.1`, nested `options.0.options.1`), not on the list.
+- **M8, H-195: 26 options, or 26 subcommands in a group,** are refused with `BASE_TYPE_MAX_LENGTH` on the list's path
+  (`options`, `options.0.options`); 25 of each, nested to the second level, are accepted.
+- **M8, H-196 and H-197: nesting and mixing.** A group inside a group or a subcommand, and a value option among a
+  group's subcommands, are refused with `UNION_TYPE_CHOICES` on the element (a level's options are a union that admits
+  only subcommands, or only value options); a subcommand after a value option at the top level with
+  `APPLICATION_COMMAND_OPTIONS_TYPE_INVALID` on the subcommand. So H-197, which the docs do not state, holds: a top
+  level does not mix the two.
+- **M8: a string option's choice with a number value** is refused with `STRING_TYPE_CONVERT` on
+  `options.0.choices.0.value` (`R-options-typed`).
+- **M8, H-130: a `custom_id` of 100 characters** is accepted and stored exactly as sent (the harness's read of the
+  message gives the same ID back, which the route decodes to the same data); 101 is refused with `BASE_TYPE_BAD_LENGTH`
+  on `components.0.components.0.custom_id` (`R-custom-id-routing`).
+- **M8, H-205: rejected creates.** A refused POST of a name the guild did not have (`Lab-command-name-upper`, `lab
+  command`, a 33-character name) leaves no command: the next row's GET lists only the registered one. Whether such a
+  refusal counts toward the 200 creates a day stays unobservable short of reaching the limit; the harness counts every
+  name a POST or PUT may create, refused or not (`CommandBudget.ts`): 21 counted before the full runs, about 6 a full run.
+- **M8: the command write buckets are small** (scope user). The guild commands POST answered 429 with `retry-after` 17
+  to 18 s after about a dozen writes in half a minute; the bulk overwrite PUT has its own bucket, which sustained about
+  one PUT every 30 s and answered 429 with `retry-after` 52 to 58 s when pressed. dfx waits them out; the registration
+  rows take about five minutes of a full run for it ("Design deviations", M8).
+
 ## dfx deviations
 
 Where dfx got in the way and we wrapped or adapted it, and why.
@@ -443,6 +486,14 @@ Where dfx got in the way and we wrapped or adapted it, and why.
   that way), and its first handler failure ends the whole subscription (dfx.md §4). The library's `DispatchHook`
   already sees every dispatch serially before dfx publishes it; it now also publishes it to the build's own stream
   (`src/gateway/Dispatches.ts`) after the reducer, and `bot.on` subscribes there, synchronously, before it returns.
+
+- **M8: command registration goes through `rest.httpClient`** (`src/rest/Request.ts` `sendJson`,
+  `src/commands/Registration.ts`). dfx's generated `ChannelTypes` has no GuildMedia (16), so a definition whose channel
+  option allows media channels cannot be typed as dfx's `ApplicationCommandUpdateRequest`. Registration sends its GET
+  and bulk-overwrite PUT as JSON through the build's authenticated, rate-limited `rest.httpClient` (dfx still waits out
+  and retries uncoded 429s; the coded-429 interceptor still surfaces 30034), under the declared route, and classifies
+  the answer as `Request.send` classifies a dfx failure. The harness's raw registrations use the same function, so a
+  body the types forbid can be sent.
 
 ## Design deviations
 
@@ -1215,6 +1266,45 @@ the same commit.
   - **The 30-minute target** (carried from M6): no change in M8, as the verifier expected; raising §5.11's cap or
     revising the target is the orchestrator's decision. M8's run times are in its milestone below.
 
+- **M8: §5.5's `also` holds any further side of a rule** (§5.5 updated). M7 introduced it for more valid cases (the
+  message-content exceptions); M8 uses it for the command rules nested in subcommands and groups (a valid nested
+  registration and the nested raw sides) and for the registration diff's further mutations. rules-check checks every
+  `also` side like the two (catalog, table row, full expectation, one setup), which it already did.
+- **M8: the registration rows' writes and waits** (§5.10 "Registration writes" updated). The first live run counted
+  `Writes 2` on three mutation rows whose PUT got a 429 that dfx sent again: the base client counts a request when it is
+  sent, and Discord applied nothing for the 429. The observation is now the base client's command writes less the
+  429s it saw on those routes (`CommandProbes.commandWrites`, unit-tested). The same runs showed the bulk overwrite's
+  bucket allows about one PUT every 30 s, so a base re-registration before each mutation doubled the rows' time: each
+  mutation row now syncs its definition over whatever the row before registered (every mutation differs from every
+  other registered definition, `test/unit/command-catalog.test.ts`), and only the identical row re-registers the base
+  first, 9 PUTs for the group instead of 16. The probes' requests take the lab steps' 90 s deadline instead of the
+  matrix's 30 s, because dfx waits the bucket out (the first live run aborted when a PUT queued behind a 429 outlasted
+  30 s). The single-field detection the mutations are about is held offline over every field
+  (`test/unit/registration.test.ts`, eleven mutations, and `test/unit/canonical.test.ts`, every leaf of the recording).
+- **M8: the custom_id round trip reads the message through the harness** (§5.5's table said "read custom_id back from
+  the create response"). The library's `Sent` does not expose components, and the harness's own read of the message is
+  independent of the library, as the M6 verifier asked for the mention rows.
+- **M8: context-menu commands are not built** (§2.8 updated): §2.8 mentions a USER/MESSAGE constructor "not separately
+  prototyped", and M8's scope (`Command.ts` in §1.2) lists only `chatInput` and `withSubcommands`. A context-menu
+  command's target arrives through an interaction, so M9 brings the constructor with the runner; a type rule on its name
+  would also need its own live pair.
+- **M8: the per-command budget row's handler is a function of the invocation** (§5.4, `examples/command-probe/`): the
+  row measures 20 commands of 25 options "with a handler", but handlers (`Interactions.command`) arrive in M9. Until
+  then each command's handler reads its invocation's options (`(invocation: InvocationOf<typeof c>) => Effect.log(...)`);
+  M9 replaces it with `Interactions.command` and re-baselines deliberately. Measured: 362.3 types and 2,105.1
+  instantiations a command (the design estimated about 2.2k).
+- **M8: registration runs at startup only when `BotConfig.commands` is given** (§2.8, §4.4 updated). `BotConfig` is now a
+  union in which `commands` exists only with `guildId` (registration is guild-scoped, D18), so a bot cannot ask for
+  global registration. Absent, the guild's commands are left alone (the harness's subject leaves them to the probes
+  and reset); `[]` removes them.
+
+- **M8: `op-errors.test.ts`'s sanity bound counts matrix rows.** Its loop checks every outcome `Preflight.decide`
+  predicts for each table row (the tag declared by the row's operation, with its class's categories) and then required
+  more outcomes than rows. With M8's 30 rule rows the counts met (540 outcomes, 540 rows): a rule row runs a probe and
+  its setup seldom predicts a failure (four outcomes among 109 rule rows). Every row's outcomes are still checked; the
+  bound now compares with the 431 matrix rows, which is what it meant (the replay, error-map and recompute checks
+  already leave the rule rows out, M6).
+
 ## Escalated rules
 
 Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria.
@@ -1222,6 +1312,8 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
 - `R-message-content` (remainder, Q-17, M7): the DM content exception needs a human DM ("Waiting for Rhys").
 - `R-intent-guild-messages`, `R-intent-reactions`, `R-intent-typing` (remainder, Q-22, after the M7 verifier): the
   delivery of each event under its DM intent needs a human DM ("Waiting for Rhys").
+- `R-options-typed`, `R-custom-id-routing` (remainder, Q-18, M8): a handler receiving real option values or a real
+  component click needs a human ("Waiting for Rhys").
 
 ## Notes for every milestone
 
@@ -1257,6 +1349,17 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   needs 88, 80 for its role states plus the margin; a full run takes 42 to 48 minutes, so the bucket is the pace:
   about 1.2 hours between full runs. Never wrap a wait for the bucket and a run in one shell command with a time
   limit: M7 lost a run at row 472 that way.)
+- **Command creates are budgeted** (M8). Discord allows 200 application-command creates per guild a day (H-205); the
+  shared client counts every name a POST or PUT to the guild commands may create, refused or not, in a rolling 24-hour
+  ledger at `/tmp/effect-discord-perms-command-creates.json`, and aborts a command before a request that would take the
+  count past 150 (`harness/CommandBudget.ts`). A full run counts about 6 (the registration rows reuse one registered
+  command name), `record-commands` 3. If it aborts, wait for the ledger's oldest entries to age out; never delete the
+  ledger to get past it.
+- **The command write buckets are small** (M8): the registration rows wait about five minutes of a full run for the
+  bulk overwrite's bucket (about one PUT every 30 s), so two `--only 'rule/commands/**'` runs back to back are slow.
+- **`bun --no-env-file harness/main.ts record-commands`** (M8) re-records `fixtures/commands-canonical.json` from a live
+  GET; re-run it if Discord's command storage seems to have changed (a registration defect naming a field), review the
+  diff, and update `Canonical.ts`'s default tables and `test/unit/canonical.test.ts` with it.
 - **Crossposts are rate-limited per announcement channel** (about 10 publishes per hour). A full run publishes 4
   messages in `lab-announcement` in its first few minutes, so never start more than two full runs (or runs of
   `message/**` and `flip/**`) within one hour.
@@ -1962,3 +2065,62 @@ Live, in order (each alone under the lock, on minisforum):
   second, still a fifth of one bot's global limit) together with concurrent independent reads in Converge and the
   read-back, a decision about §5.11's cap I leave to the orchestrator. The 60-minute abort has 19 minutes of headroom
   for M8's rows.
+
+### M8 Commands, registration, routes live
+
+- Before M8, the M7 verifier's six minor findings (commit `bb830c0`; "Design deviations", "Before M8").
+- The library: `src/commands/Command.ts` (`Command.chatInput` and `Command.withSubcommands` with the name, order, count,
+  nesting and mixing checks at every level as mapped tuples, the option typing, the opaque `ChatInputCommand` with its
+  `definition`), `src/commands/Canonical.ts` (the Discord JSON, the canonical form and the recorded default tables),
+  `src/commands/Registration.ts` (`sync`: GET, diff by name in canonical form, the bulk overwrite only on a difference,
+  a GET that must find the commands stored as sent), `BotConfig.commands` with startup check 5 in the bot build,
+  `Request.sendJson`, and `ComponentRoute`'s `routeNameOf`. The barrel exports the command API.
+- The harness: `CommandBudget.ts` (the create budget in the shared client), `RecordCommands.ts` (`record-commands`,
+  which wrote `fixtures/commands-canonical.json`), `CommandProbes.ts` (the registration probes) and the two route probes
+  in `Probes.ts`, `catalog/commands.ts` (the definitions and raw bodies), and `catalog/rules.ts`'s `commands` setup.
+- Registry (eleven rules, all live pairs on the `commands` setup, each top-level side with its nested sides as `also`):
+  `R-command-name-lowercase`, `R-command-name-spaces`, `R-command-name-length`, `R-option-name-lowercase`,
+  `R-option-order`, `R-option-count`, `R-subcommand-nesting`, `R-subcommand-mixing`, `R-options-typed` (remainder
+  escalated, Q-18), `R-registration-diff` and `R-custom-id-routing` (remainder escalated, Q-18). Every raw side was
+  refused by Discord with 400 50035 on the path the rule names ("Live findings", M8), and every typed side registered.
+- Type fixtures: pass `test/types/pass/commands.ts` (exact invocations at the top level, nested and of every option
+  type, the 25-option and 32-character limits, template and dynamic names, `BotConfig.commands`) and `routes.ts`; fail
+  `test/types/fail/commands.ts` (22 directives: every rule at the top level and nested, the option values' typing and a
+  forged command) and `routes.ts` (a route name with `:`, an unhandled `CustomIdTooLong`, mistyped data, a decoded
+  value's type); hover `test/hover/commands.ts` (the command value and its options hover as the invocation, as §5.3
+  shows).
+- Budget: the per-command row (`examples/command-probe/`, committed baseline in `examples/reference-bot/budget.json`):
+  362.3 types and 2,105.1 instantiations a 25-option command with its handler stand-in ("Design deviations", M8).
+- Unit tests (1,478 in 53 files after M8, from 1,442 in 47): `canonical.test.ts` (the recording: sent equals stored
+  canonically, the default tables are exactly what the recording adds and drops, every one of the 80 leaves matters,
+  `channel_types` is a set), `registration.test.ts` (over a fake store that stores as recorded: one write then reads
+  only, exactly one write for each of eleven field mutations, a changed default or a stranger command overwritten, a
+  store that keeps an unknown field after the write is a defect, each refusal's `StartupFailed`, an unmapped answer a
+  defect), `bot-build.test.ts` (check 5: registered after GUILD_CREATE, nothing without `commands`, `command-rejected`
+  and `daily-command-limit` fail the build), `custom-id.test.ts` (round trips of literals, a date, a bigint and a set;
+  exactly 100 characters and `CustomIdTooLong` at 101; other routes', malformed and mistyped IDs decode to nothing;
+  routing by prefix; an unencodable value a defect), `command-budget.test.ts`, `command-catalog.test.ts`, and the M7
+  verifier's `codec.test.ts` and `obfuscation.test.ts`.
+- Mutation checks (each reverted, each failed the tests named): registration always writing (`registration.test.ts`,
+  `bot-build.test.ts`), `channel_types` not sorted and `required: false` not a default (`canonical.test.ts`,
+  `registration.test.ts`), no check after the write and 30034 unmapped (`registration.test.ts`), the 429s counted as
+  writes (`command-catalog.test.ts`), the budget never learning a registered name (`command-budget.test.ts`), the
+  custom_id limit off by one (`custom-id.test.ts`); in the types, no subcommand count, no option order and channel options
+  not narrowed each fail `bun run test:types`.
+- Live, in order (each alone under the lock, on minisforum):
+  - `record-commands`: the three samples registered, read back and cleared; the fixture written ("Live findings",
+    open question 11); 3 creates counted;
+  - `run --only 'rule/commands/**' --write` (30 scenarios): stopped at row 23 as an infrastructure abort, `the library's
+    registration: discord-unavailable ... overwrite: RequestTimedOut`: a bulk overwrite queued in dfx behind the
+    commands bucket outlasted the probes' 30 s deadline. 13 of the 22 rows run disagreed with my planned codes; every raw
+    side had been refused, so the registry took the observed codes ("Live findings");
+  - the same, with the observed codes and the lab steps' 90 s deadline: 30 scenarios, 557 s, 3 mismatches, all
+    `rule-observation` on mutation rows that counted `Writes 2`: the PUT got a 429 (`retry-after` 56 to 58 s) that dfx sent
+    again ("Design deviations", M8);
+  - the same, counting writes less 429s and chaining the mutations: exit 0, 30 scenarios in 395 s, 459 requests, 40
+    writes, 3 invalid (the 429s: one POST, two PUTs), **0 mismatches**;
+  - **run W** (`bun --no-env-file harness/main.ts run --write`, on `9d0c036` and the budget test): exit 0, role budget 98
+    left (88 needed), 542 scenarios in 2,905 s, 9,263 requests, 2,745 writes, 605 invalid, 429s retried by dfx on 15
+    reactions, one channel edit, one command POST and two command PUTs, no lab step retried, oracle available, **0
+    mismatches**. The table (`6199bf0d...b164b6`, 669,042 bytes) adds the 30 command rows; the 512 rows before them are
+    byte-for-byte M7's. The 30 command rows took 298 s of it (rows 173 to 202).

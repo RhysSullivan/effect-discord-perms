@@ -16111,6 +16111,1491 @@
         "removals": []
       }
     },
+    "rule/commands/raw-choice-wrong-type": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "STRING_TYPE_CONVERT",
+            "path": "options.0.choices.0.value"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-choice-wrong-type",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "STRING_TYPE_CONVERT",
+            "path": "options.0.choices.0.value"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-command-name-33": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "BASE_TYPE_BAD_LENGTH",
+            "path": "name"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-command-name-33",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "BASE_TYPE_BAD_LENGTH",
+            "path": "name"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-command-name-space": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "STRING_TYPE_REGEX",
+            "path": "name"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-command-name-space",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "STRING_TYPE_REGEX",
+            "path": "name"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-command-name-upper": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_INVALID_NAME",
+            "path": "name"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-command-name-upper",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_INVALID_NAME",
+            "path": "name"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-custom-id-over": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "BASE_TYPE_BAD_LENGTH",
+            "path": "components.0.components.0.custom_id"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-custom-id-over",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "BASE_TYPE_BAD_LENGTH",
+            "path": "components.0.components.0.custom_id"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-group-in-group": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "UNION_TYPE_CHOICES",
+            "path": "options.0.options.0"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-group-in-group",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "UNION_TYPE_CHOICES",
+            "path": "options.0.options.0"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-group-in-subcommand": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "UNION_TYPE_CHOICES",
+            "path": "options.0.options.0"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-group-in-subcommand",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "UNION_TYPE_CHOICES",
+            "path": "options.0.options.0"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-option-count": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "BASE_TYPE_MAX_LENGTH",
+            "path": "options"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-option-count",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "BASE_TYPE_MAX_LENGTH",
+            "path": "options"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-option-count-nested": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "BASE_TYPE_MAX_LENGTH",
+            "path": "options.0.options"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-option-count-nested",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "BASE_TYPE_MAX_LENGTH",
+            "path": "options.0.options"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-option-name-upper": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_INVALID_NAME",
+            "path": "options.0.name"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-option-name-upper",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_INVALID_NAME",
+            "path": "options.0.name"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-option-name-upper-nested": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_INVALID_NAME",
+            "path": "options.0.options.0.name"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-option-name-upper-nested",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_INVALID_NAME",
+            "path": "options.0.options.0.name"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-option-order": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID",
+            "path": "options.1"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-option-order",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID",
+            "path": "options.1"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-option-order-nested": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID",
+            "path": "options.0.options.1"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-option-order-nested",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID",
+            "path": "options.0.options.1"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-subcommand-count-nested": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "BASE_TYPE_MAX_LENGTH",
+            "path": "options.0.options"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-subcommand-count-nested",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "BASE_TYPE_MAX_LENGTH",
+            "path": "options.0.options"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-subcommand-mixed": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_OPTIONS_TYPE_INVALID",
+            "path": "options.1"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-subcommand-mixed",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_OPTIONS_TYPE_INVALID",
+            "path": "options.1"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-subcommand-mixed-nested": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "UNION_TYPE_CHOICES",
+            "path": "options.0.options.1"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-subcommand-mixed-nested",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "UNION_TYPE_CHOICES",
+            "path": "options.0.options.1"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-subcommand-name-33": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "BASE_TYPE_BAD_LENGTH",
+            "path": "options.0.name"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-subcommand-name-33",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "BASE_TYPE_BAD_LENGTH",
+            "path": "options.0.name"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-subcommand-name-space": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "STRING_TYPE_REGEX",
+            "path": "options.0.name"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-subcommand-name-space",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "STRING_TYPE_REGEX",
+            "path": "options.0.name"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/raw-subcommand-name-upper": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Rejected",
+        "code": 50035,
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_INVALID_NAME",
+            "path": "options.0.name"
+          }
+        ],
+        "status": 400
+      },
+      "operation": "rule:raw-subcommand-name-upper",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "other-error",
+        "code": 50035,
+        "degraded": [],
+        "inner": [
+          {
+            "code": "APPLICATION_COMMAND_INVALID_NAME",
+            "path": "options.0.name"
+          }
+        ],
+        "mappedTag": "n/a",
+        "status": 400
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-custom-id-max": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Succeeded"
+      },
+      "operation": "rule:typed-custom-id-max",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-register-choices": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Applied",
+        "field": "options"
+      },
+      "operation": "rule:typed-register-choices",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-register-options": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Succeeded"
+      },
+      "operation": "rule:typed-register-options",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-register-subcommands": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Succeeded"
+      },
+      "operation": "rule:typed-register-subcommands",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-sync-channel-types": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Writes",
+        "count": 1
+      },
+      "operation": "rule:typed-sync-channel-types",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-sync-choices": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Writes",
+        "count": 1
+      },
+      "operation": "rule:typed-sync-choices",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-sync-description": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Writes",
+        "count": 1
+      },
+      "operation": "rule:typed-sync-description",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-sync-identical": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Writes",
+        "count": 0
+      },
+      "operation": "rule:typed-sync-identical",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-sync-name": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Writes",
+        "count": 1
+      },
+      "operation": "rule:typed-sync-name",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-sync-option-name": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Writes",
+        "count": 1
+      },
+      "operation": "rule:typed-sync-option-name",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/commands/typed-sync-required": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Writes",
+        "count": 1
+      },
+      "operation": "rule:typed-sync-required",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
     "rule/forum/raw-send-forum": {
       "agreement": "agree",
       "observation": {
