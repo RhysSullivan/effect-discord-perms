@@ -2092,7 +2092,7 @@ Live, in order (each alone under the lock, on minisforum):
   shows).
 - Budget: the per-command row (`examples/command-probe/`, committed baseline in `examples/reference-bot/budget.json`):
   362.3 types and 2,105.1 instantiations a 25-option command with its handler stand-in ("Design deviations", M8).
-- Unit tests (1,478 in 53 files after M8, from 1,442 in 47): `canonical.test.ts` (the recording: sent equals stored
+- Unit tests (1,508 in 53 files after M8, from 1,442 in 47): `canonical.test.ts` (the recording: sent equals stored
   canonically, the default tables are exactly what the recording adds and drops, every one of the 80 leaves matters,
   `channel_types` is a set), `registration.test.ts` (over a fake store that stores as recorded: one write then reads
   only, exactly one write for each of eleven field mutations, a changed default or a stranger command overwritten, a
@@ -2130,3 +2130,20 @@ Live, in order (each alone under the lock, on minisforum):
     on 11 reactions, one channel edit, one command POST and two command PUTs, no lab step retried, oracle available, **0
     mismatches**, `compare: identical to the previous table` (W's, committed); it wrote the same bytes
     (`6199bf0d...b164b6`). The command rows took 303 s; the create ledger counted 7 more (35 in 24 hours).
+  - **exit run B**, same code (`3b91ed0`, only LOG.md and DESIGN.md changed since A): `bun --no-env-file harness/main.ts
+    run --compare` in a fresh process exited 0: role budget 97 left (88 needed), 542 scenarios in 2,904 s, 9,266
+    requests, 2,742 writes, 601 invalid, 429s retried by dfx on 11 reactions, one channel edit, one command POST and two
+    command PUTs, no lab step retried, oracle available, **0 mismatches**, `compare: identical to the previous table`,
+    `run ok`. The command rows took 297 s; 42 creates in the ledger's 24 hours. The lock was gone afterwards. Then `bun
+    run verify:offline` exited 0 (gen:errors up to date; typecheck; 1,508 tests in 53 files; test:types 11 pass and 12
+    fail fixtures, 89 diagnostics, largest gated 498 characters; hover 5 files, 19 markers; rules; budget: the
+    per-command row, 362.3 types and 2,105.1 instantiations a command, within its baseline), and `bun run rules` gave
+    `rules ok 62 rule(s) (55 live pair, 0 escalated, 5 pure-typing, 2 other not-live), 12 fail fixture(s), 134 live sides
+    checked against the table, 5 event(s) with a live intent pair, flag coverage over 433 matrix row(s)`; `verify:live`
+    lists six escalated remainders as unmet Done criteria: `R-intent-guild-messages`, `R-intent-reactions` and
+    `R-intent-typing` (Q-22), `R-message-content` (Q-17), `R-options-typed` and `R-custom-id-routing` (Q-18).
+- **Run time.** M8's three full runs took 2,905, 2,989 and 2,904 s for 542 scenarios (M7's: 2,516 to 2,907 s for 512).
+  The 30 registration and route rows take 294 to 303 s, nearly all of it dfx waiting out Discord's command buckets
+  (the bulk overwrite's allows about one PUT every 30 s; the group sends 9). The 30-minute target of §5.11 stays
+  missed, as recorded since M6; the 60-minute abort has about 10 minutes of headroom, which M9 (offline) does not use
+  and M10's single run will.
