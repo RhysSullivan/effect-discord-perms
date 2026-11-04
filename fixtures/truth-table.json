@@ -4,7 +4,7 @@
     "discordApiTypes": "0.38.57",
     "everyoneBaseline": [],
     "mfaLevel": 0,
-    "obfuscation": "default",
+    "obfuscation": "codec",
     "oracle": "available",
     "typescript": "7.0.2"
   },
@@ -143,8 +143,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -164,16 +163,13 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "ManageChannels",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "ManageChannels",
           "ViewChannel"
@@ -875,8 +871,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -896,8 +891,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "Connect",
@@ -1328,8 +1322,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -1349,16 +1342,13 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "ManageChannels",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "ManageChannels",
           "ViewChannel"
@@ -1629,16 +1619,14 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "Connect",
           "ManageChannels",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "Connect",
           "ManageChannels",
@@ -1667,6 +1655,71 @@
             "via": "member-overwrite-deny"
           }
         ]
+      }
+    },
+    "coverage/channelEdit/forum/none/absent/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "channelEdit:slowmode",
+      "oracle": {
+        "missing": [
+          "ViewChannel"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "preflightSet": [
+        "MissingViewChannel"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "resolver": {
+        "level": "view",
+        "masks": [
+          "obfuscated"
+        ],
+        "missing": [
+          "ManageChannels",
+          "ViewChannel"
+        ],
+        "missingBeforeMasks": [
+          "ViewChannel"
+        ],
+        "required": [
+          "ManageChannels",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "forum",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ManageChannels"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
       }
     },
     "coverage/channelEdit/private-thread/manage/member-overwrite-deny/normal/without-ViewChannel": {
@@ -1774,7 +1827,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "SendMessages",
@@ -1795,6 +1848,71 @@
           {
             "flags": [
               "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "coverage/createThread/text/private/none/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "createThread:private",
+      "oracle": {
+        "missing": [
+          "ViewChannel"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "preflightSet": [
+        "MissingViewChannel"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "resolver": {
+        "level": "view",
+        "masks": [
+          "obfuscated"
+        ],
+        "missing": [
+          "CreatePrivateThreads",
+          "ViewChannel"
+        ],
+        "missingBeforeMasks": [
+          "ViewChannel"
+        ],
+        "required": [
+          "CreatePrivateThreads",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "CreatePrivateThreads"
             ],
             "via": "role"
           }
@@ -1914,6 +2032,79 @@
             "flags": [
               "ViewChannel",
               "ReadMessageHistory",
+              "ManageMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "coverage/message/announcement/crosspost-foreign/none/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "message:crosspost-foreign",
+      "oracle": {
+        "missing": [
+          "ViewChannel"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "preflightSet": [
+        "MissingViewChannel"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "resolver": {
+        "level": "view",
+        "masks": [
+          "obfuscated"
+        ],
+        "missing": [
+          "ManageMessages",
+          "ReadMessageHistory",
+          "SendMessages",
+          "ViewChannel"
+        ],
+        "missingBeforeMasks": [
+          "ViewChannel"
+        ],
+        "required": [
+          "ManageMessages",
+          "ReadMessageHistory",
+          "SendMessages",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "announcement",
+        "fixtures": [
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ReadMessageHistory",
+              "SendMessages",
               "ManageMessages"
             ],
             "via": "role"
@@ -2087,7 +2278,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "ManageMessages",
@@ -2410,7 +2601,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "Connect",
@@ -2547,7 +2738,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "Connect",
@@ -2643,6 +2834,202 @@
         "removals": []
       }
     },
+    "coverage/message/text/bulk-delete/none/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "message:bulk-delete",
+      "oracle": {
+        "missing": [
+          "ViewChannel"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "preflightSet": [
+        "MissingViewChannel"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "resolver": {
+        "level": "view",
+        "masks": [
+          "obfuscated"
+        ],
+        "missing": [
+          "ManageMessages",
+          "ViewChannel"
+        ],
+        "missingBeforeMasks": [
+          "ViewChannel"
+        ],
+        "required": [
+          "ManageMessages",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "harness-message",
+          "second-harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ManageMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "coverage/message/text/edit-own/none/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "message:edit-own",
+      "oracle": {
+        "missing": [
+          "ViewChannel"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "preflightSet": [
+        "MissingViewChannel"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "resolver": {
+        "level": "view",
+        "masks": [
+          "obfuscated"
+        ],
+        "missing": [
+          "ViewChannel"
+        ],
+        "missingBeforeMasks": [
+          "ViewChannel"
+        ],
+        "required": [
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message"
+        ],
+        "grants": [],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "coverage/pins/announcement/pin/pin-messages/absent/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "pins:pin",
+      "oracle": {
+        "missing": [
+          "ViewChannel"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "preflightSet": [
+        "MissingViewChannel"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "resolver": {
+        "level": "view",
+        "masks": [
+          "obfuscated"
+        ],
+        "missing": [
+          "PinMessages",
+          "ReadMessageHistory",
+          "ViewChannel"
+        ],
+        "missingBeforeMasks": [
+          "ViewChannel"
+        ],
+        "required": [
+          "PinMessages",
+          "ReadMessageHistory",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "announcement",
+        "fixtures": [
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ReadMessageHistory",
+              "PinMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
     "coverage/pins/announcement/unpin/none/absent/normal/without-PinMessages": {
       "agreement": "agree",
       "operation": "pins:unpin",
@@ -2701,6 +3088,77 @@
           {
             "flags": [
               "ViewChannel",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "coverage/pins/announcement/unpin/none/absent/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "pins:unpin",
+      "oracle": {
+        "missing": [
+          "ViewChannel"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "preflightSet": [
+        "MissingViewChannel"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "resolver": {
+        "level": "view",
+        "masks": [
+          "obfuscated"
+        ],
+        "missing": [
+          "PinMessages",
+          "ReadMessageHistory",
+          "ViewChannel"
+        ],
+        "missingBeforeMasks": [
+          "ViewChannel"
+        ],
+        "required": [
+          "PinMessages",
+          "ReadMessageHistory",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "announcement",
+        "fixtures": [
+          "harness-message",
+          "pinned-harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "PinMessages",
               "ReadMessageHistory"
             ],
             "via": "role"
@@ -2881,7 +3339,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "Connect",
@@ -2905,6 +3363,144 @@
             "flags": [
               "Connect",
               "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "coverage/react/targeted/order-history-add/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "react:unicode-new",
+      "oracle": {
+        "missing": [
+          "ViewChannel"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "preflightSet": [
+        "MissingViewChannel"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "resolver": {
+        "level": "view",
+        "masks": [
+          "obfuscated"
+        ],
+        "missing": [
+          "AddReactions",
+          "ViewChannel"
+        ],
+        "missingBeforeMasks": [
+          "ViewChannel"
+        ],
+        "required": [
+          "AddReactions",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "AddReactions"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "coverage/react/targeted/order-view-connect/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "react:unicode-new",
+      "oracle": {
+        "missing": [
+          "ViewChannel"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "preflightSet": [
+        "MissingViewChannel"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "access",
+          "permission"
+        ],
+        "tag": "MissingViewChannel"
+      },
+      "resolver": {
+        "level": "view",
+        "masks": [
+          "obfuscated"
+        ],
+        "missing": [
+          "AddReactions",
+          "Connect",
+          "ViewChannel"
+        ],
+        "missingBeforeMasks": [
+          "ViewChannel"
+        ],
+        "required": [
+          "AddReactions",
+          "Connect",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "voice",
+        "fixtures": [
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ReadMessageHistory",
+              "AddReactions",
+              "Connect"
             ],
             "via": "role"
           }
@@ -3661,7 +4257,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "CreatePublicThreads",
@@ -3802,6 +4398,68 @@
         "removals": []
       }
     },
+    "createThread/targeted/private-timed-out": {
+      "agreement": "agree",
+      "operation": "createThread:private",
+      "oracle": {
+        "missing": [
+          "CreatePrivateThreads"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "state"
+        ],
+        "tag": "CommunicationDisabled"
+      },
+      "preflightSet": [
+        "CommunicationDisabled"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "state"
+        ],
+        "tag": "CommunicationDisabled"
+      },
+      "resolver": {
+        "level": "action",
+        "masks": [
+          "implicit-send",
+          "timeout"
+        ],
+        "missing": [
+          "CreatePrivateThreads"
+        ],
+        "missingBeforeMasks": [],
+        "required": [
+          "CreatePrivateThreads",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "CreatePrivateThreads",
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "timed-out",
+        "removals": []
+      }
+    },
     "createThread/text/private/none/normal": {
       "agreement": "agree",
       "operation": "createThread:private",
@@ -3926,8 +4584,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -3947,8 +4604,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "CreatePrivateThreads",
@@ -4086,68 +4742,6 @@
         "removals": []
       }
     },
-    "flip/channelEdit/forum/view/role-overwrite-deny/timed-out": {
-      "agreement": "agree",
-      "operation": "channelEdit:slowmode",
-      "oracle": {
-        "missing": [
-          "ManageChannels"
-        ]
-      },
-      "preflight": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "preflightSet": [
-        "CommunicationDisabled"
-      ],
-      "raw": {
-        "class": "50013",
-        "code": 50013,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "resolver": {
-        "level": "action",
-        "masks": [
-          "implicit-send",
-          "timeout"
-        ],
-        "missing": [
-          "ManageChannels"
-        ],
-        "missingBeforeMasks": [],
-        "required": [
-          "ManageChannels",
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "forum",
-        "fixtures": [],
-        "grants": [
-          {
-            "flags": [
-              "ViewChannel",
-              "ManageChannels"
-            ],
-            "via": "role"
-          }
-        ],
-        "memberState": "timed-out",
-        "removals": []
-      }
-    },
     "flip/channelEdit/private-thread/manage/member-overwrite-deny/normal": {
       "agreement": "agree",
       "operation": "channelEdit:slowmode",
@@ -4238,72 +4832,6 @@
           }
         ],
         "memberState": "normal",
-        "removals": []
-      }
-    },
-    "flip/channelEdit/stage/view/absent/timed-out": {
-      "agreement": "agree",
-      "operation": "channelEdit:slowmode",
-      "oracle": {
-        "missing": [
-          "Connect",
-          "ManageChannels"
-        ]
-      },
-      "preflight": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "preflightSet": [
-        "CommunicationDisabled"
-      ],
-      "raw": {
-        "class": "50001",
-        "code": 50001,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "resolver": {
-        "level": "view",
-        "masks": [
-          "implicit-send",
-          "timeout"
-        ],
-        "missing": [
-          "Connect",
-          "ManageChannels"
-        ],
-        "missingBeforeMasks": [],
-        "required": [
-          "Connect",
-          "ManageChannels",
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "stage",
-        "fixtures": [],
-        "grants": [
-          {
-            "flags": [
-              "Connect",
-              "ManageChannels",
-              "ViewChannel"
-            ],
-            "via": "role"
-          }
-        ],
-        "memberState": "timed-out",
         "removals": []
       }
     },
@@ -4444,6 +4972,98 @@
         "removals": []
       }
     },
+    "flip/channelEdit/voice/view/member-overwrite-deny/normal": {
+      "agreement": "agree",
+      "operation": "channelEdit:slowmode",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "implicit-send"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "Connect",
+          "ManageChannels",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "voice",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "Connect",
+              "ManageChannels"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "flip/coverage/channelEdit/forum/none/absent/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "channelEdit:slowmode",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "implicit-send"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "ManageChannels",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "forum",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "ManageChannels",
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
     "flip/coverage/channelEdit/private-thread/manage/member-overwrite-deny/normal/without-ViewChannel": {
       "agreement": "agree",
       "operation": "channelEdit:slowmode",
@@ -4524,6 +5144,51 @@
           {
             "flags": [
               "SendMessages",
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "flip/coverage/createThread/text/private/none/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "createThread:private",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "implicit-send"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "CreatePrivateThreads",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "CreatePrivateThreads",
               "ViewChannel"
             ],
             "via": "role"
@@ -4615,6 +5280,55 @@
               "ReadMessageHistory",
               "ManageMessages",
               "SendMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "flip/coverage/message/announcement/crosspost-foreign/none/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "message:crosspost-foreign",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "ManageMessages",
+          "ReadMessageHistory",
+          "SendMessages",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "announcement",
+        "fixtures": [
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ReadMessageHistory",
+              "SendMessages",
+              "ManageMessages",
+              "ViewChannel"
             ],
             "via": "role"
           }
@@ -5138,6 +5852,148 @@
         "removals": []
       }
     },
+    "flip/coverage/message/text/bulk-delete/none/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "message:bulk-delete",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "implicit-send"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "ManageMessages",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "harness-message",
+          "second-harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ManageMessages",
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "flip/coverage/message/text/edit-own/none/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "message:edit-own",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "implicit-send"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "flip/coverage/pins/announcement/pin/pin-messages/absent/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "pins:pin",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "implicit-send"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "PinMessages",
+          "ReadMessageHistory",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "announcement",
+        "fixtures": [
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ReadMessageHistory",
+              "PinMessages",
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
     "flip/coverage/pins/announcement/unpin/none/absent/normal/without-PinMessages": {
       "agreement": "agree",
       "operation": "pins:unpin",
@@ -5180,6 +6036,56 @@
               "ViewChannel",
               "ReadMessageHistory",
               "PinMessages"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "flip/coverage/pins/announcement/unpin/none/absent/normal/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "pins:unpin",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "implicit-send"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "PinMessages",
+          "ReadMessageHistory",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "announcement",
+        "fixtures": [
+          "harness-message",
+          "pinned-harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "PinMessages",
+              "ReadMessageHistory",
+              "ViewChannel"
             ],
             "via": "role"
           }
@@ -5321,6 +6227,103 @@
             "flags": [
               "Connect",
               "ReadMessageHistory",
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "flip/coverage/react/targeted/order-history-add/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "react:unicode-new",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "implicit-send"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "AddReactions",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "AddReactions",
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "flip/coverage/react/targeted/order-view-connect/without-ViewChannel": {
+      "agreement": "agree",
+      "operation": "react:unicode-new",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [
+          "implicit-send"
+        ],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "AddReactions",
+          "Connect",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "voice",
+        "fixtures": [
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ReadMessageHistory",
+              "AddReactions",
+              "Connect",
               "ViewChannel"
             ],
             "via": "role"
@@ -5737,68 +6740,6 @@
         "removals": []
       }
     },
-    "flip/createThread/text/private/view/timed-out": {
-      "agreement": "agree",
-      "operation": "createThread:private",
-      "oracle": {
-        "missing": [
-          "CreatePrivateThreads"
-        ]
-      },
-      "preflight": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "preflightSet": [
-        "CommunicationDisabled"
-      ],
-      "raw": {
-        "class": "50001",
-        "code": 50001,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "resolver": {
-        "level": "action",
-        "masks": [
-          "implicit-send",
-          "timeout"
-        ],
-        "missing": [
-          "CreatePrivateThreads"
-        ],
-        "missingBeforeMasks": [],
-        "required": [
-          "CreatePrivateThreads",
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "text",
-        "fixtures": [],
-        "grants": [
-          {
-            "flags": [
-              "CreatePrivateThreads",
-              "ViewChannel"
-            ],
-            "via": "role"
-          }
-        ],
-        "memberState": "timed-out",
-        "removals": []
-      }
-    },
     "flip/member/add-role/below/equal/op-flag/target-plain/normal": {
       "agreement": "agree",
       "operation": "member:add-role",
@@ -5950,71 +6891,6 @@
         "targetRank": "below"
       }
     },
-    "flip/message/announcement/bulk-delete/view/timed-out": {
-      "agreement": "agree",
-      "operation": "message:bulk-delete",
-      "oracle": {
-        "missing": [
-          "ManageMessages"
-        ]
-      },
-      "preflight": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "preflightSet": [
-        "CommunicationDisabled"
-      ],
-      "raw": {
-        "class": "50013",
-        "code": 50013,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "resolver": {
-        "level": "action",
-        "masks": [
-          "implicit-send",
-          "timeout"
-        ],
-        "missing": [
-          "ManageMessages"
-        ],
-        "missingBeforeMasks": [],
-        "required": [
-          "ManageMessages",
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "announcement",
-        "fixtures": [
-          "harness-message",
-          "second-harness-message"
-        ],
-        "grants": [
-          {
-            "flags": [
-              "ManageMessages",
-              "ViewChannel"
-            ],
-            "via": "role"
-          }
-        ],
-        "memberState": "timed-out",
-        "removals": []
-      }
-    },
     "flip/message/announcement/crosspost-foreign/op-flag/normal": {
       "agreement": "agree",
       "operation": "message:crosspost-foreign",
@@ -6061,75 +6937,6 @@
           }
         ],
         "memberState": "normal",
-        "removals": []
-      }
-    },
-    "flip/message/announcement/crosspost-foreign/view/timed-out": {
-      "agreement": "agree",
-      "operation": "message:crosspost-foreign",
-      "oracle": {
-        "missing": [
-          "ManageMessages",
-          "SendMessages"
-        ]
-      },
-      "preflight": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "preflightSet": [
-        "CommunicationDisabled"
-      ],
-      "raw": {
-        "class": "50001",
-        "code": 50001,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "resolver": {
-        "level": "action",
-        "masks": [
-          "timeout"
-        ],
-        "missing": [
-          "ManageMessages",
-          "SendMessages"
-        ],
-        "missingBeforeMasks": [],
-        "required": [
-          "ManageMessages",
-          "ReadMessageHistory",
-          "SendMessages",
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "announcement",
-        "fixtures": [
-          "harness-message"
-        ],
-        "grants": [
-          {
-            "flags": [
-              "ReadMessageHistory",
-              "SendMessages",
-              "ManageMessages",
-              "ViewChannel"
-            ],
-            "via": "role"
-          }
-        ],
-        "memberState": "timed-out",
         "removals": []
       }
     },
@@ -6224,64 +7031,6 @@
           }
         ],
         "memberState": "normal",
-        "removals": []
-      }
-    },
-    "flip/message/announcement/edit-own/view/timed-out": {
-      "agreement": "agree",
-      "operation": "message:edit-own",
-      "oracle": {
-        "missing": []
-      },
-      "preflight": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "preflightSet": [
-        "CommunicationDisabled"
-      ],
-      "raw": {
-        "class": "50013",
-        "code": 50013,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "resolver": {
-        "level": "action",
-        "masks": [
-          "implicit-send",
-          "timeout"
-        ],
-        "missing": [],
-        "missingBeforeMasks": [],
-        "required": [
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "announcement",
-        "fixtures": [
-          "subject-message"
-        ],
-        "grants": [
-          {
-            "flags": [
-              "ViewChannel"
-            ],
-            "via": "role"
-          }
-        ],
-        "memberState": "timed-out",
         "removals": []
       }
     },
@@ -6881,72 +7630,6 @@
         "removals": []
       }
     },
-    "flip/pins/announcement/pin/view/member-overwrite-deny/timed-out": {
-      "agreement": "agree",
-      "operation": "pins:pin",
-      "oracle": {
-        "missing": [
-          "PinMessages"
-        ]
-      },
-      "preflight": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "preflightSet": [
-        "CommunicationDisabled"
-      ],
-      "raw": {
-        "class": "50013",
-        "code": 50013,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "resolver": {
-        "level": "action",
-        "masks": [
-          "implicit-send",
-          "timeout"
-        ],
-        "missing": [
-          "PinMessages"
-        ],
-        "missingBeforeMasks": [],
-        "required": [
-          "PinMessages",
-          "ReadMessageHistory",
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "announcement",
-        "fixtures": [
-          "harness-message"
-        ],
-        "grants": [
-          {
-            "flags": [
-              "ViewChannel",
-              "PinMessages",
-              "ReadMessageHistory"
-            ],
-            "via": "role"
-          }
-        ],
-        "memberState": "timed-out",
-        "removals": []
-      }
-    },
     "flip/pins/archived-thread/list/view/absent/normal": {
       "agreement": "agree",
       "operation": "pins:list",
@@ -7364,73 +8047,6 @@
         "removals": []
       }
     },
-    "flip/pins/text/unpin/view/role-overwrite-deny/timed-out": {
-      "agreement": "agree",
-      "operation": "pins:unpin",
-      "oracle": {
-        "missing": [
-          "PinMessages"
-        ]
-      },
-      "preflight": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "preflightSet": [
-        "CommunicationDisabled"
-      ],
-      "raw": {
-        "class": "50013",
-        "code": 50013,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "resolver": {
-        "level": "action",
-        "masks": [
-          "implicit-send",
-          "timeout"
-        ],
-        "missing": [
-          "PinMessages"
-        ],
-        "missingBeforeMasks": [],
-        "required": [
-          "PinMessages",
-          "ReadMessageHistory",
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "text",
-        "fixtures": [
-          "harness-message",
-          "pinned-harness-message"
-        ],
-        "grants": [
-          {
-            "flags": [
-              "ViewChannel",
-              "PinMessages",
-              "ReadMessageHistory"
-            ],
-            "via": "role"
-          }
-        ],
-        "memberState": "timed-out",
-        "removals": []
-      }
-    },
     "flip/react/archived-thread/unicode-new/add-reactions/absent/normal": {
       "agreement": "agree",
       "operation": "react:unicode-new",
@@ -7581,137 +8197,6 @@
           }
         ],
         "memberState": "normal",
-        "removals": []
-      }
-    },
-    "flip/react/targeted/order-view-connect": {
-      "agreement": "agree",
-      "operation": "react:unicode-new",
-      "oracle": {
-        "missing": [
-          "Connect"
-        ]
-      },
-      "preflight": {
-        "categories": [
-          "access",
-          "permission"
-        ],
-        "tag": "MissingConnect"
-      },
-      "preflightSet": [
-        "MissingConnect"
-      ],
-      "raw": {
-        "class": "50001",
-        "code": 50001,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "access",
-          "permission"
-        ],
-        "tag": "MissingConnect"
-      },
-      "resolver": {
-        "level": "view",
-        "masks": [
-          "implicit-send",
-          "implicit-connect"
-        ],
-        "missing": [
-          "Connect"
-        ],
-        "missingBeforeMasks": [
-          "Connect"
-        ],
-        "required": [
-          "AddReactions",
-          "Connect",
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "voice",
-        "fixtures": [
-          "harness-message"
-        ],
-        "grants": [
-          {
-            "flags": [
-              "ReadMessageHistory",
-              "AddReactions",
-              "ViewChannel"
-            ],
-            "via": "role"
-          }
-        ],
-        "memberState": "normal",
-        "removals": []
-      }
-    },
-    "flip/react/text/unicode-existing/view/role-overwrite-deny/timed-out": {
-      "agreement": "agree",
-      "operation": "react:unicode-existing",
-      "oracle": {
-        "missing": []
-      },
-      "preflight": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "preflightSet": [
-        "CommunicationDisabled"
-      ],
-      "raw": {
-        "class": "50013",
-        "code": 50013,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "resolver": {
-        "level": "action",
-        "masks": [
-          "implicit-send",
-          "timeout"
-        ],
-        "missing": [],
-        "missingBeforeMasks": [],
-        "required": [
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "text",
-        "fixtures": [
-          "harness-message",
-          "existing-reaction"
-        ],
-        "grants": [
-          {
-            "flags": [
-              "ViewChannel",
-              "AddReactions",
-              "ReadMessageHistory"
-            ],
-            "via": "role"
-          }
-        ],
-        "memberState": "timed-out",
         "removals": []
       }
     },
@@ -8049,73 +8534,6 @@
         "removals": []
       }
     },
-    "flip/send/stage/guild-sticker/role-overwrite-allow/view/member-overwrite-deny/timed-out": {
-      "agreement": "agree",
-      "operation": "send:guild-sticker",
-      "oracle": {
-        "missing": [
-          "Connect",
-          "SendMessages"
-        ]
-      },
-      "preflight": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "preflightSet": [
-        "CommunicationDisabled"
-      ],
-      "raw": {
-        "class": "50001",
-        "code": 50001,
-        "degraded": [],
-        "inner": [],
-        "mappedTag": "n/a",
-        "status": 403
-      },
-      "recompute": {
-        "categories": [
-          "state"
-        ],
-        "tag": "CommunicationDisabled"
-      },
-      "resolver": {
-        "level": "view",
-        "masks": [
-          "timeout"
-        ],
-        "missing": [
-          "Connect",
-          "SendMessages"
-        ],
-        "missingBeforeMasks": [],
-        "required": [
-          "Connect",
-          "SendMessages",
-          "ViewChannel"
-        ]
-      },
-      "setup": {
-        "channel": "stage",
-        "fixtures": [
-          "guild-sticker"
-        ],
-        "grants": [
-          {
-            "flags": [
-              "ViewChannel",
-              "Connect",
-              "SendMessages"
-            ],
-            "via": "role-overwrite-allow"
-          }
-        ],
-        "memberState": "timed-out",
-        "removals": []
-      }
-    },
     "flip/send/stage/mention-everyone/member-overwrite-allow/connect/absent/normal": {
       "agreement": "agree",
       "operation": "send:mention-everyone",
@@ -8379,6 +8797,51 @@
               "ViewChannel",
               "SendMessages",
               "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "flip/send/targeted/voice-connect-without-view": {
+      "agreement": "agree",
+      "operation": "send:plain",
+      "oracle": {
+        "missing": []
+      },
+      "preflight": "pass",
+      "preflightSet": [],
+      "raw": {
+        "class": "success",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 200
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": [
+          "Connect",
+          "SendMessages",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "voice",
+        "fixtures": [],
+        "grants": [
+          {
+            "flags": [
+              "Connect",
+              "SendMessages",
+              "ViewChannel"
             ],
             "via": "role"
           }
@@ -10055,8 +10518,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -10076,8 +10538,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "ManageMessages",
@@ -10242,8 +10703,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -10263,8 +10723,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "ManageMessages",
@@ -10470,7 +10929,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "ReadMessageHistory",
@@ -10612,8 +11071,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -10633,8 +11091,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "ViewChannel"
@@ -10922,6 +11379,75 @@
         "memberState": "normal",
         "removals": [],
         "threadState": "archived"
+      }
+    },
+    "message/targeted/crosspost-foreign-timed-out": {
+      "agreement": "agree",
+      "operation": "message:crosspost-foreign",
+      "oracle": {
+        "missing": [
+          "ManageMessages",
+          "SendMessages"
+        ]
+      },
+      "preflight": {
+        "categories": [
+          "state"
+        ],
+        "tag": "CommunicationDisabled"
+      },
+      "preflightSet": [
+        "CommunicationDisabled"
+      ],
+      "raw": {
+        "class": "50001",
+        "code": 50001,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 403
+      },
+      "recompute": {
+        "categories": [
+          "state"
+        ],
+        "tag": "CommunicationDisabled"
+      },
+      "resolver": {
+        "level": "action",
+        "masks": [
+          "timeout"
+        ],
+        "missing": [
+          "ManageMessages",
+          "SendMessages"
+        ],
+        "missingBeforeMasks": [],
+        "required": [
+          "ManageMessages",
+          "ReadMessageHistory",
+          "SendMessages",
+          "ViewChannel"
+        ]
+      },
+      "setup": {
+        "channel": "announcement",
+        "fixtures": [
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ReadMessageHistory",
+              "SendMessages",
+              "ManageMessages",
+              "ViewChannel"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "timed-out",
+        "removals": []
       }
     },
     "message/targeted/delete-foreign-archived-thread": {
@@ -11728,7 +12254,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "ViewChannel"
@@ -11898,7 +12424,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "Connect",
@@ -11968,7 +12494,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "Connect",
@@ -12210,8 +12736,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -12231,17 +12756,14 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "PinMessages",
           "ReadMessageHistory",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "PinMessages",
           "ReadMessageHistory",
@@ -13449,8 +13971,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -13470,17 +13991,14 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "PinMessages",
           "ReadMessageHistory",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "PinMessages",
           "ReadMessageHistory",
@@ -14563,8 +15081,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "MissingConnect"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -14584,7 +15101,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "AddReactions",
@@ -14761,8 +15278,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -14782,15 +15298,12 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "ViewChannel"
         ]
@@ -15355,8 +15868,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -15376,17 +15888,14 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "AddReactions",
           "Connect",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "AddReactions",
           "Connect",
@@ -16360,6 +16869,701 @@
         "inner": [],
         "mappedTag": "n/a",
         "status": 403
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-content-mention": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Applied",
+        "field": "content"
+      },
+      "operation": "rule:session-content-mention",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-delivered",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-content-own": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Applied",
+        "field": "content"
+      },
+      "operation": "rule:session-content-own",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-delivered",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-content-reply": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Applied",
+        "field": "content"
+      },
+      "operation": "rule:session-content-reply",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-delivered",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-content-with": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Applied",
+        "field": "content"
+      },
+      "operation": "rule:session-content-with",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-delivered",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-content-without": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "Ignored",
+        "field": "content"
+      },
+      "operation": "rule:session-content-without",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-delivered",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-guild-members-with": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "EventDelivered",
+        "event": "GUILD_MEMBER_UPDATE"
+      },
+      "operation": "rule:session-guild-members-with",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-delivered",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-guild-members-without": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "EventAbsent",
+        "canary": "CHANNEL_UPDATE",
+        "event": "GUILD_MEMBER_UPDATE"
+      },
+      "operation": "rule:session-guild-members-without",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-absent",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-guild-messages-with": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "EventDelivered",
+        "event": "MESSAGE_CREATE"
+      },
+      "operation": "rule:session-guild-messages-with",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-delivered",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-guild-messages-without": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "EventAbsent",
+        "canary": "CHANNEL_UPDATE",
+        "event": "MESSAGE_CREATE"
+      },
+      "operation": "rule:session-guild-messages-without",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-absent",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-guilds-with": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "EventDelivered",
+        "event": "CHANNEL_UPDATE"
+      },
+      "operation": "rule:session-guilds-with",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-delivered",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-guilds-without": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "EventAbsent",
+        "canary": "GUILD_MEMBER_UPDATE",
+        "event": "CHANNEL_UPDATE"
+      },
+      "operation": "rule:session-guilds-without",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-absent",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-reactions-with": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "EventDelivered",
+        "event": "MESSAGE_REACTION_ADD"
+      },
+      "operation": "rule:session-reactions-with",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-delivered",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-reactions-without": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "EventAbsent",
+        "canary": "CHANNEL_UPDATE",
+        "event": "MESSAGE_REACTION_ADD"
+      },
+      "operation": "rule:session-reactions-without",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-absent",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-typing-with": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "EventDelivered",
+        "event": "TYPING_START"
+      },
+      "operation": "rule:session-typing-with",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-delivered",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
+      },
+      "recompute": "n/a",
+      "resolver": {
+        "level": "none",
+        "masks": [],
+        "missing": [],
+        "missingBeforeMasks": [],
+        "required": []
+      },
+      "setup": {
+        "channel": "text",
+        "fixtures": [
+          "subject-message",
+          "harness-message"
+        ],
+        "grants": [
+          {
+            "flags": [
+              "ViewChannel",
+              "SendMessages",
+              "ReadMessageHistory"
+            ],
+            "via": "role"
+          }
+        ],
+        "memberState": "normal",
+        "removals": []
+      }
+    },
+    "rule/text-messages/session-typing-without": {
+      "agreement": "agree",
+      "observation": {
+        "_tag": "EventAbsent",
+        "canary": "CHANNEL_UPDATE",
+        "event": "TYPING_START"
+      },
+      "operation": "rule:session-typing-without",
+      "oracle": "not-applicable",
+      "preflight": "n/a",
+      "preflightSet": [],
+      "raw": {
+        "class": "event-absent",
+        "code": 0,
+        "degraded": [],
+        "inner": [],
+        "mappedTag": "n/a",
+        "status": 0
       },
       "recompute": "n/a",
       "resolver": {
@@ -19172,7 +20376,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "MentionEveryone",
@@ -19180,8 +20384,7 @@
           "ViewChannel"
         ],
         "missingBeforeMasks": [
-          "MentionEveryone",
-          "ViewChannel"
+          "MentionEveryone"
         ],
         "required": [
           "MentionEveryone",
@@ -19248,15 +20451,13 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "SendMessages",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "SendMessages",
           "ViewChannel"
@@ -19415,8 +20616,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -19436,8 +20636,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "ReadMessageHistory",
@@ -19445,6 +20644,8 @@
           "ViewChannel"
         ],
         "missingBeforeMasks": [
+          "ReadMessageHistory",
+          "SendMessages",
           "ViewChannel"
         ],
         "required": [
@@ -19507,16 +20708,14 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "SendMessages",
           "SendTTSMessages",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "SendMessages",
           "SendTTSMessages",
@@ -22061,8 +23260,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -22082,8 +23280,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "Connect",
@@ -22091,6 +23288,8 @@
           "ViewChannel"
         ],
         "missingBeforeMasks": [
+          "Connect",
+          "SendMessages",
           "ViewChannel"
         ],
         "required": [
@@ -23064,8 +24263,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "MissingSendMessages"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -23085,7 +24283,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "SendMessages",
@@ -23976,7 +25174,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "Connect",
@@ -24026,8 +25224,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -24047,17 +25244,14 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "EmbedLinks",
           "SendMessages",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "EmbedLinks",
           "SendMessages",
@@ -24340,7 +25534,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "MentionEveryone",
@@ -24348,8 +25542,7 @@
           "ViewChannel"
         ],
         "missingBeforeMasks": [
-          "MentionEveryone",
-          "ViewChannel"
+          "MentionEveryone"
         ],
         "required": [
           "MentionEveryone",
@@ -24459,15 +25652,13 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "SendMessages",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "SendMessages",
           "ViewChannel"
@@ -24514,8 +25705,7 @@
         "tag": "MissingViewChannel"
       },
       "preflightSet": [
-        "MissingViewChannel",
-        "CommunicationDisabled"
+        "MissingViewChannel"
       ],
       "raw": {
         "class": "50001",
@@ -24535,17 +25725,14 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view",
-          "timeout"
+          "obfuscated"
         ],
         "missing": [
           "SendMessages",
           "SendPolls",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "SendMessages",
           "SendPolls",
@@ -24923,7 +26110,7 @@
       "resolver": {
         "level": "view",
         "masks": [
-          "implicit-view"
+          "obfuscated"
         ],
         "missing": [
           "AttachFiles",
@@ -24931,9 +26118,7 @@
           "SendMessages",
           "ViewChannel"
         ],
-        "missingBeforeMasks": [
-          "ViewChannel"
-        ],
+        "missingBeforeMasks": [],
         "required": [
           "AttachFiles",
           "Connect",
