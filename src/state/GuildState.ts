@@ -10,7 +10,8 @@
  *
  * `getChannel` answering 50001 or 10003 records the channel as unseen (no View): evidence, not a defect
  * (§3.1). A 50001 for a voice or stage channel the state holds is not: Discord answers it without Connect too,
- * and the resolver's Connect mask decides there. The mark holds until a gateway event that can change what the
+ * and the resolver's Connect mask decides there. Nor is a 50001 for a guild channel the state holds obfuscated
+ * (M7): the obfuscated copy already says no View. The mark holds until a gateway event that can change what the
  * bot sees retires it (`Reducer.ts`); a guild channel keeps the gateway's copy meanwhile, a thread's is dropped.
  * Any other Discord answer to a refresh read is an unmapped code, a defect. `refreshGuild` makes the same reads
  * without a channel, for guild-level operations.
@@ -158,6 +159,10 @@ export const make = (rest: DiscordRestService, botUserId: UserId, deadline: Dura
               // a voice or stage channel answers 50001 without Connect as well as without View (M6 live, H-152), so
               // the answer says nothing the gateway's copy does not: the resolver's Connect mask decides there
               if (held !== undefined && isVoiceKind(held.kind) && fetched.code === 50001) return
+              // an obfuscated copy (the codec, M7) already says no View, and Discord replaces it with the real data
+              // when View returns (H-161), so a 50001 adds nothing; marking it unseen would keep the channel blind
+              // under another name until some event retires the mark (M7 live: the next row in the same setup)
+              if (held !== undefined && held.thread === undefined && held.obfuscated && fetched.code === 50001) return
               unseen.add(id)
               // a thread's copy is dropped: the gateway sends nothing for a thread the bot cannot see. A guild
               // channel keeps the gateway's copy, which GUILD_CREATE and CHANNEL_* keep current whether or not

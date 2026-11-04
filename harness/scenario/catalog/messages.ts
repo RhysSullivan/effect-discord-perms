@@ -155,6 +155,15 @@ export const targetedRows: ReadonlyArray<Scenario> = [
     memberState: "normal"
   }),
   // ordering (§3.2): SendMessages (access) and ManageMessages (the action's own flag) both missing
+  // M7: a crosspost of another's message under a timeout answers 50001 (`Observed.viewCodeFailures`); the flip control
+  // that witnessed it (`flip/message/announcement/crosspost-foreign/view/timed-out`) is gone, since with the codec its
+  // original is blind (obfuscated), so this row witnesses it
+  targeted("crosspost-foreign-timed-out", ["H-020", "H-141"], "crosspost-foreign", {
+    channel: "announcement",
+    grants: [{ flags: ["ReadMessageHistory", "SendMessages", "ManageMessages", "ViewChannel"], via: "role" }],
+    removals: [],
+    memberState: "timed-out"
+  }),
   targeted("order-send-manage-crosspost", ["H-141"], "crosspost-foreign", {
     channel: "announcement",
     grants: [{ flags: ["ViewChannel"], via: "role" }],

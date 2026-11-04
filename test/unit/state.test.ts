@@ -314,6 +314,22 @@ describe("GuildState", () => {
     })
   )
 
+  it.effect("leaves an obfuscated guild channel unmarked on 50001: the obfuscated copy already says no View (M7, the codec)", () =>
+    Effect.gen(function* () {
+      const state = yield* make(
+        scriptedRestEffect((method, path) => Effect.succeed(restAnswers(() => json(403, { code: 50001, message: "Missing Access" }))(method, path)))
+      )
+      yield* state.apply("READY", ready)
+      yield* state.apply("GUILD_CREATE", guildCreate)
+      yield* state.apply("CHANNEL_UPDATE", channelUpdate(ids.text, 0, [], 1 << 17))
+      expect(guildOf(yield* state.snapshot).channels.get(text)?.obfuscated).toBe(true)
+      yield* state.refresh(guildId, text)
+      const after = guildOf(yield* state.snapshot)
+      expect(after.unseen.has(text)).toBe(false)
+      expect(after.channels.get(text)?.obfuscated).toBe(true)
+    })
+  )
+
   it.effect("sets the bot's thread membership from the REST thread's member field, and commits the thread's parent", () =>
     Effect.gen(function* () {
       const parentOverwrites = [overwrite(ids.roleA, 0, "2048", "0")]

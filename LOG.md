@@ -1154,6 +1154,19 @@ the same commit.
   error map, the recompute, flag coverage, the request check) would have needed the new tag too. As rule probes on
   `catalog/rules.ts`'s `text-messages` setup they share the rule rows' machinery and add no role state (the run still
   needs 80 role edits). `catalog/intents.ts` keeps the pure descriptions the design names.
+- **M7: a refresh's 50001 marks no obfuscated guild channel unseen** (§4.5 updated). The first complete codec run
+  (510 scenarios, 0 mismatches) wrote a table the replay rejected on one row:
+  `coverage/pins/announcement/unpin/none/absent/normal/without-ViewChannel` resolved `unseen` live where the rebuild
+  says `obfuscated`. The row before it, the pin of the same setup, refreshed `lab-announcement` in its step (d)
+  recompute; `getChannel` answered 50001 and the refresh marked it unseen, and nothing between the two rows (same
+  setup, no write) retired the mark. With the codec the obfuscated copy is already the gateway's evidence of no View,
+  and Discord sends the real data when View returns (H-161), so the refresh now leaves an obfuscated guild channel
+  unmarked (a real copy is still marked, as is a thread). `test/unit/state.test.ts` pins it (removing the rule fails it).
+- **M7: `message/targeted/crosspost-foreign-timed-out`** (§5.9 updated). The same table left
+  `Observed.viewCodeFailures["message.crosspostForeign"]`' `CommunicationDisabled` without a witness: the M6 witness was
+  `flip/message/announcement/crosspost-foreign/view/timed-out`, which the codec removed (its original is blind). The new
+  targeted row is that flip's setup (View, Send, ReadMessageHistory and ManageMessages through a role, timed out), 511
+  scenarios in all, still 80 role edits.
 - **M7: the replay models the codec** (§4.15, §5.12 updated): the table is `obfuscation: "codec"`, and
   `Predict.snapshotOf` rebuilds a channel the subject cannot view obfuscated, with no overwrites. Its consequence for
   the catalog: a timed-out row that hides View resolves `obfuscated`, which hides the timeout from preflight, so its
@@ -1837,3 +1850,28 @@ Live, in order (each alone under the lock, on minisforum):
   intent and outside the exceptions; the DM branch and its send; READY after registration; CHANNEL_UPDATE's kind and
   obfuscation), the identity and build tests re-run with the codec (`capabilities: 32768` in Identify, the record),
   `obfuscation.test.ts`, the events check in `rules-check.test.ts`, and `lab-retry.test.ts`.
+- Live, in order (each alone under the lock, on minisforum):
+  - `run --only 'send/text/**'` (10 scenarios, the first with the codec): 0 mismatches; the four View-denied rows
+    resolved `obfuscated` (H-160);
+  - `run --only 'rule/text-messages/**'` (19, the sessions' first run): 0 mismatches, every session as the registry
+    expects; 219 s;
+  - `run --only 'rule/**'` (79): 0 mismatches, 430 s; the role-hidden `members` rows passed the obfuscation check;
+  - `run --write`, the first complete run: stopped at row 53 by the obfuscation check (losing Administrator, "Live
+    findings"); `run --only 'send/targeted/**'` then timed out on the same row with the strict wait, and passed with the
+    resend (27 scenarios, 0 mismatches, 185 s);
+  - `run --write` on `925352c`: exit 0, 510 scenarios in 2,479 s, 8,928 requests, 2,698 writes, 596 invalid (the raw
+    403s), 429s retried by dfx on 13 reactions and one channel edit, no lab step retried, oracle available, **0
+    mismatches**; 23 rows needed the obfuscation resend. The replay rejected its table on two rows (the refresh's
+    unseen mark and the missing witness, "Design deviations"), so it was not committed.
+- **Run time (the M6 verifier's first finding), before and after.** M6's full runs: 3,131 to 3,243 s for 486
+  scenarios (6.4 to 6.7 s each), some 11,077 requests (23 a scenario). M7's complete run above: 2,479 s for 510
+  scenarios (4.9 s each, the 15 sessions included), 8,928 requests (17.5 a scenario). Per row, from the run logs
+  (`/tmp/effect-discord-perms-live-1793756262499.log` before, `-1793766082794.log` after): the wait 2,245 to 1,155 ms
+  (5 to 6 requests to 3.8), Converge 1,823 to 1,275 ms (to 5.0 requests), steps (a) to (d) 1,448 to 1,350 ms (5.4
+  requests), cleanup 802 to 790 ms (2.8), fixtures 175 to 177 ms. The 30-minute target is still missed, by 11 minutes,
+  and I do not think more cutting of this kind can meet it: the shared bucket starts at most 5 requests a second
+  (§5.11's own cap), so 8,928 requests cost at least 1,786 s before any wait, and the rest is the waits for Discord's
+  gateway events (the 23 resends add about 2 s each). Meeting 30 minutes would need the cap raised (to about 10 a
+  second, still a fifth of one bot's global limit) together with concurrent independent reads in Converge and the
+  read-back, a decision about §5.11's cap I leave to the orchestrator. The 60-minute abort has 19 minutes of headroom
+  for M8's rows.

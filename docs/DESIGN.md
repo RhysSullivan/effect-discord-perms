@@ -1525,7 +1525,10 @@ bot's thread membership is a map of its own, because THREAD_MEMBERS_UPDATE can a
   the bot cannot see) and the next use refreshes it. A 50001 for a voice or
   stage channel the state holds records nothing: Discord answers it without
   Connect as well as without View (M6 live, H-152), and the resolver's Connect
-  mask decides from the gateway's copy.
+  mask decides from the gateway's copy. (M7) Nor does a 50001 for a guild channel
+  the state holds obfuscated: the obfuscated copy already says no View, and Discord
+  replaces it with the real data when View returns (H-161), where an `unseen` mark
+  would have kept the channel blind under another name until an event retired it.
 
 ### 4.6 Resolver (D22; H-001..H-029, H-033, H-047)
 
@@ -2687,7 +2690,10 @@ coverage rows, 94 flip controls and 64 rule rows; the intent sessions come in
 M7.) (M7: 510: the codec's obfuscation blinds the timed-out rows that hide View, so
 11 flip controls are replaced (9 by the flips of 9 new coverage rows, §4.15), and the
 catalog is 304 family rows, 33 coverage rows, 94 flip controls, 64 rule rows and 15
-intent sessions; a full run makes 80 role edits.) (M4 has 229 pairwise rows, 72 targeted rows and 62 flip controls, 363
+intent sessions; a full run makes 80 role edits. After the first full codec run,
+`message/targeted/crosspost-foreign-timed-out` joins the targeted rows, 511 in all: it
+witnesses `Observed.viewCodeFailures`' crosspost under a timeout, which a flip control
+witnessed before the codec blinded its original.) (M4 has 229 pairwise rows, 72 targeted rows and 62 flip controls, 363
 scenarios in all; the rule rows and intent sessions come in M6-M8.)
 
 ### 5.10 Executing one scenario
