@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ApplicationFlags } from "discord-api-types/v10"
-import { Config, Deferred, Effect, Layer, Redacted, Ref } from "effect"
+import { Config, Deferred, Effect, Exit, Layer, Redacted, Ref, Tracer } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { Bot, BotRuntime } from "../../src/bot/Bot.ts"
@@ -122,6 +122,40 @@ describe("bot.on", () => {
             expect(yield* until(seen, 3)).toEqual(["fail", "die", "later"])
           })
         )
+      })
+    )
+  )
+
+  it.live("runs each event in a discord.event.<NAME> span, failed when the handler failed though the failure was reported (D28)", () =>
+    withBot(["Guilds", "GuildMessages", "MessageContent"], (gateway) =>
+      Effect.gen(function* () {
+        const spans: Array<Tracer.NativeSpan> = []
+        const tracer = Tracer.make({
+          span(options) {
+            const span = new Tracer.NativeSpan(options)
+            spans.push(span)
+            return span
+          }
+        })
+        const seen = yield* Ref.make<ReadonlyArray<string>>([])
+        const bot = Bot.make({ intents: ["Guilds", "GuildMessages", "MessageContent"] })
+        const unavailable = new DiscordUnavailable({
+          cause: new DiscordResponse({ status: 503, code: 0, message: "unavailable", method: "POST", route: "/channels/{channel.id}/messages", fieldErrors: [], attributedBy: "code" })
+        })
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* bot
+              .on("MESSAGE_CREATE", (event) => Effect.andThen(Ref.update(seen, (all) => [...all, event.message.id]), event.message.id.endsWith("1") ? Effect.fail(unavailable) : Effect.void))
+              .pipe(Effect.provideService(Tracer.Tracer, tracer))
+            yield* gateway.dispatch("MESSAGE_CREATE", message({ id: "500000000000000001" }))
+            yield* until(seen, 1)
+            yield* gateway.dispatch("MESSAGE_CREATE", message({ id: "500000000000000002" }))
+            yield* until(seen, 2)
+            yield* Effect.sleep("20 millis")
+          })
+        )
+        const events = spans.filter((span) => span.name === "discord.event.MESSAGE_CREATE")
+        expect(events.map((span) => span.status._tag === "Ended" && Exit.isFailure(span.status.exit))).toEqual([true, false])
       })
     )
   )
