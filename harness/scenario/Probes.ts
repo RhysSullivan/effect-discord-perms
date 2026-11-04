@@ -12,6 +12,7 @@
 import { Schema } from "effect"
 import type { OpName } from "../../src/permissions/Operations.ts"
 import type * as LabIds from "../LabIds.ts"
+import { sessionNames } from "./catalog/intents.ts"
 
 /** Every probe. */
 export const ProbeName = Schema.Literals([
@@ -89,7 +90,9 @@ export const ProbeName = Schema.Literals([
   "typed-nickname-max",
   "raw-nickname-over",
   "typed-timeout-max",
-  "raw-timeout-over"
+  "raw-timeout-over",
+  // the intent sessions (M7, `catalog/intents.ts`): text, the subject's and the harness's messages
+  ...sessionNames
 ])
 /** A probe. */
 export type ProbeName = typeof ProbeName.Type
@@ -107,6 +110,13 @@ export interface ProbeMeta {
 }
 
 const send = (touches: ReadonlyArray<LabIds.ChannelName> = []): ProbeMeta => ({ op: "channel.send", touches, renames: [], mentions: { target: false, roles: [] } })
+
+/**
+ * An intent session (M7, `catalog/intents.ts`): resolved on the channel row of its setup (a session reads no
+ * permissions), touching `lab-bots-only`, whose slowmode its canary (or trigger) edits. The target mentions only the
+ * subject, a bot.
+ */
+const session: ProbeMeta = send(["lab-bots-only"])
 
 /** Each probe's description. */
 export const probes: { readonly [P in ProbeName]: ProbeMeta } = {
@@ -173,5 +183,20 @@ export const probes: { readonly [P in ProbeName]: ProbeMeta } = {
   "typed-nickname-max": { op: "member.setNickname", touches: [], renames: [], mentions: { target: false, roles: [] } },
   "raw-nickname-over": { op: "member.setNickname", touches: [], renames: [], mentions: { target: false, roles: [] } },
   "typed-timeout-max": { op: "member.timeout", touches: [], renames: [], mentions: { target: false, roles: [] } },
-  "raw-timeout-over": { op: "member.timeout", touches: [], renames: [], mentions: { target: false, roles: [] } }
+  "raw-timeout-over": { op: "member.timeout", touches: [], renames: [], mentions: { target: false, roles: [] } },
+  "session-guild-messages-with": session,
+  "session-guild-messages-without": session,
+  "session-reactions-with": session,
+  "session-reactions-without": session,
+  "session-typing-with": session,
+  "session-typing-without": session,
+  "session-guild-members-with": session,
+  "session-guild-members-without": session,
+  "session-guilds-with": session,
+  "session-guilds-without": session,
+  "session-content-with": session,
+  "session-content-without": session,
+  "session-content-mention": session,
+  "session-content-reply": session,
+  "session-content-own": session
 }

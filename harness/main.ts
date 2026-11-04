@@ -41,6 +41,7 @@ const printIdentities = (report: IdentityCheck.IdentityReport) => {
   console.log(`  app ids match .env; three distinct bots; harness top role "${report.harnessTopRole.name}" at position ${report.harnessTopRole.position}`)
   console.log(`  guild: ${report.guild.name}, mfaLevel ${report.guild.mfa_level}, protected: ${report.protectedChannels.map((channel) => `#${channel.name}`).join(", ")}`)
   console.log(`  harness Message Content flag: ${report.harnessHasMessageContent ? "yes" : "no"}`)
+  console.log(`  subject Identify: intents ${report.sentIntents} as declared, capabilities ChannelObfuscation; READY named the subject`)
   for (const item of report.notCheckedYet) console.log(`  not checked yet: ${item}`)
 }
 

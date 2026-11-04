@@ -1,0 +1,8 @@
+const message = event.message
+const message: ReceivedMessage<false>
+
+const channel = event.channel
+const channel: MessageChannel
+
+export const registration = bot.on("CHANNEL_UPDATE", (event) => Effect.log(event.channel.id))
+const registration: Effect.Effect<void, never, BotRuntime | Scope>

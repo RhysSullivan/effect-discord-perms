@@ -4,11 +4,14 @@
  * over every truth-table row and must reproduce the live records exactly; the flip controls (§5.9) use it to
  * find each row's first missing flag before any run.
  *
- * The rebuilt state is what the live subject's state shows under the table's `obfuscation: "default"`: every
- * lab channel with its real overwrites (M3 live: before Discord's switch, without the codec, GUILD_CREATE lists
- * the channels a bot cannot view with their real overwrites), and the scenario thread as step (a) leaves it
- * after its refresh: present with its state and the subject's membership when the subject can see it, `unseen`
- * when it cannot (the refresh got 50001 or 10003).
+ * The rebuilt state is what the live subject's state shows under the table's `obfuscation: "codec"` (M7: the
+ * subject identifies with the ChannelObfuscation capability, `gateway/Codec.ts`, D20): a lab channel the subject
+ * can view with its real overwrites, and one it cannot view obfuscated, with no overwrites (H-160; M7 live, the
+ * first codec run: every View-denied text-channel row resolved `obfuscated`, and the channels came back with their
+ * real data when View returned, H-161); and the scenario thread as step (a) leaves it after its refresh: present
+ * with its state and the subject's membership when the subject can see it, `unseen` when it cannot (the refresh got
+ * 50001 or 10003). (Until M7 the table was `obfuscation: "default"`: without the codec, before Discord's switch,
+ * GUILD_CREATE listed hidden channels with their real overwrites, M3 live.)
  */
 import { guildInputFromSnapshot, inputFromSnapshot, type Resolution, resolve } from "../src/permissions/Resolver.ts"
 import type { ChannelSnap, GuildSnap, Snapshot } from "../src/state/Snapshot.ts"
@@ -19,6 +22,9 @@ import * as Materialize from "./Materialize.ts"
 import type { Scenario } from "./scenario/Dsl.ts"
 import * as Facts from "./scenario/Facts.ts"
 import { type StepRecords, stepRecords } from "./TruthTable.ts"
+
+/** How the subject's gateway shows a channel it cannot view (the table header's `obfuscation`). */
+export const obfuscation = "codec"
 
 /** How long Converge times the subject out for, as the rebuilt state's timeout end (10 minutes after `now`). */
 const timeoutMs = 600_000
@@ -50,7 +56,7 @@ export const snapshotOf = (state: Materialize.Desired, ids: Materialize.Ids, now
   const channels = new Map<ChannelId, ChannelSnap>()
   for (const name of state.overwrites.keys()) {
     const channel = Materialize.channelOf(state, ids, name)
-    channels.set(channel.id, channel)
+    channels.set(channel.id, Materialize.subjectSees(state, ids, name, now) ? channel : { ...channel, obfuscated: true, overwrites: [] })
   }
   const unseen = new Set<ChannelId>()
   const threadMembership = new Map<ChannelId, boolean>()

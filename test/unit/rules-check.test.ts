@@ -1,7 +1,7 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { describe, expect, it } from "vitest"
-import { type CoverageRow, coverageProblems, escalatedRules, openQuestionsOf, type PairRowView, registryProblems, type RepositoryView, waitingForRhys } from "../../scripts/lib/rules.ts"
+import { type CoverageRow, coverageProblems, escalatedRules, eventProblems, openQuestionsOf, type PairRowView, registryProblems, type RepositoryView, type SessionView, waitingForRhys } from "../../scripts/lib/rules.ts"
 import type { Rule } from "../rules.ts"
 
 const failSource = ["import { x } from 'y'", "// @valid", "x.ok()", "// @expect-error TS2345 Beta", "x.bad()"].join("\n")
@@ -131,7 +131,7 @@ describe("registryProblems", () => {
       const unobserved = new Map<string, PairRowView>([...table, ["rule/text-send/typed-send", { setup: "S", observation: undefined }]])
       expect(registryProblems([pairRule], view({ ...base, table: unobserved }))).toEqual(["R-ids-distinct: the valid side rule/text-send/typed-send recorded no observation"])
       const twoSetups = new Map([...table, ["rule/text-send/typed-send", row({ _tag: "Succeeded" }, "T")]])
-      expect(registryProblems([pairRule], view({ ...base, table: twoSetups }))).toEqual(["R-ids-distinct: the two sides ran on different setups"])
+      expect(registryProblems([pairRule], view({ ...base, table: twoSetups }))).toEqual(["R-ids-distinct: the sides ran on different setups"])
     })
   })
 })
@@ -208,6 +208,39 @@ describe("escalatedRules", () => {
     ).toEqual([
       { rule: "R-message-content", part: "remainder", question: "Q-17" },
       { rule: "R-options-typed", part: "live", question: "Q-18" }
+    ])
+  })
+})
+
+describe("eventProblems (§5.5, M7)", () => {
+  const eventIntents = { READY: [], CHANNEL_UPDATE: ["Guilds"] } as const
+  const intentRule = (valid: Rule["live"]): Rule => ({ ...pureTyping, id: "R-intent-guilds", live: valid })
+  const pairOf = (canary: string): Rule["live"] => ({
+    kind: "pair",
+    setup: "text-messages",
+    valid: { scenario: "rule/text-messages/session-guilds-with", expect: { _tag: "EventDelivered", event: "CHANNEL_UPDATE" } },
+    invalid: { scenario: "rule/text-messages/session-guilds-without", expect: { _tag: "EventAbsent", event: "CHANNEL_UPDATE", canary } }
+  })
+  const sessions: Readonly<Record<string, SessionView>> = {
+    "rule/text-messages/session-guilds-with": { event: "CHANNEL_UPDATE", intents: ["Guilds"] },
+    "rule/text-messages/session-guilds-without": { event: "CHANNEL_UPDATE", intents: [] }
+  }
+  const sessionOf = (scenario: string): SessionView | undefined => sessions[scenario]
+
+  it("passes an event whose rule pairs a session with its intent and one without it, after a canary; READY needs none", () => {
+    expect(eventProblems([intentRule(pairOf("GUILD_MEMBER_UPDATE"))], eventIntents, sessionOf)).toEqual([])
+  })
+
+  it("fails an event no rule pairs, an absence without a canary, and sessions whose intents do not differ in the event's", () => {
+    expect(eventProblems([], eventIntents, sessionOf)).toEqual(["event CHANNEL_UPDATE: no rule has a live intent pair for it"])
+    expect(eventProblems([intentRule(pairOf("none"))], eventIntents, sessionOf)).toEqual(["event CHANNEL_UPDATE: R-intent-guilds's invalid side does not expect EventAbsent of CHANNEL_UPDATE with a canary"])
+    const both = (scenario: string): SessionView | undefined => (sessions[scenario] === undefined ? undefined : { event: "CHANNEL_UPDATE", intents: ["Guilds"] })
+    expect(eventProblems([intentRule(pairOf("GUILD_MEMBER_UPDATE"))], eventIntents, both)).toEqual([
+      "event CHANNEL_UPDATE: R-intent-guilds's invalid side rule/text-messages/session-guilds-without is not a session observing it without Guilds"
+    ])
+    const neither = (scenario: string): SessionView | undefined => (sessions[scenario] === undefined ? undefined : { event: "CHANNEL_UPDATE", intents: [] })
+    expect(eventProblems([intentRule(pairOf("GUILD_MEMBER_UPDATE"))], eventIntents, neither)).toEqual([
+      "event CHANNEL_UPDATE: R-intent-guilds's valid side rule/text-messages/session-guilds-with is not a session observing it with one of Guilds"
     ])
   })
 })

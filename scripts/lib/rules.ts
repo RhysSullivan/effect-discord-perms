@@ -163,10 +163,11 @@ export const registryProblems = (rules: ReadonlyArray<Rule>, view: RepositoryVie
  */
 const pairProblems = (rule: Rule, pair: LivePair, view: RepositoryView): ReadonlyArray<string> => {
   const problems: Array<string> = []
-  const sides = [
+  const sides: ReadonlyArray<readonly [string, LivePair["valid"]]> = [
     ["valid", pair.valid],
-    ["invalid", pair.invalid]
-  ] as const
+    ["invalid", pair.invalid],
+    ...(pair.also ?? []).map((side, index) => [`also ${index + 1}`, side] as const)
+  ]
   for (const [name, side] of sides) {
     const setup = view.ruleCatalog.get(side.scenario)
     if (setup === undefined) problems.push(`${rule.id}: the ${name} side ${side.scenario} is not a scenario of harness/scenario/catalog/rules.ts`)
@@ -185,8 +186,8 @@ const pairProblems = (rule: Rule, pair: LivePair, view: RepositoryView): Readonl
     else if (row.observation !== expected) problems.push(`${rule.id}: the ${name} side ${side.scenario} observed ${row.observation.replace(/\s+/g, " ")}, but the registry expects ${expected.replace(/\s+/g, " ")}`)
     return row
   })
-  const [valid, invalid] = rows
-  if (valid !== undefined && invalid !== undefined && valid.setup !== invalid.setup) problems.push(`${rule.id}: the two sides ran on different setups`)
+  const ran = rows.filter((row) => row !== undefined)
+  if (ran.length === rows.length && new Set(ran.map((row) => row.setup)).size > 1) problems.push(`${rule.id}: the sides ran on different setups`)
   return problems
 }
 
@@ -270,8 +271,53 @@ export const coverageProblems = (rows: ReadonlyArray<CoverageRow>): ReadonlyArra
   return problems
 }
 
+// ---- events (§5.5, M7) ----------------------------------------------------------------------------------
+
+/** A session row as the events check reads it: the event it observes and the intents it identified with. */
+export interface SessionView {
+  readonly event: string
+  readonly intents: ReadonlyArray<string>
+}
+
+/**
+ * Every events-check problem (§5.5): each event in `EventIntents` that needs an intent has a registry rule whose live
+ * pair's valid side expects `EventDelivered { event }` from a session that declared one of the event's intents, and
+ * whose invalid side expects `EventAbsent { event, canary }`, with a canary, from a session that declared none of
+ * them. The pair's rows and observations themselves are the live-pair checks' (`registryProblems`).
+ */
+export const eventProblems = (
+  rules: ReadonlyArray<Rule>,
+  eventIntents: Readonly<Record<string, ReadonlyArray<string>>>,
+  sessionOf: (scenario: string) => SessionView | undefined
+): ReadonlyArray<string> => {
+  const problems: Array<string> = []
+  for (const [event, intents] of Object.entries(eventIntents)) {
+    if (intents.length === 0) continue
+    const pairs = rules.flatMap((rule) => (rule.live.kind === "pair" ? [{ rule, pair: rule.live }] : []))
+    const found = pairs.find(({ pair }) => pair.valid.expect._tag === "EventDelivered" && pair.valid.expect.event === event)
+    if (found === undefined) {
+      problems.push(`event ${event}: no rule has a live intent pair for it`)
+      continue
+    }
+    const { rule, pair } = found
+    const invalid = pair.invalid.expect
+    if (invalid._tag !== "EventAbsent" || invalid.event !== event || invalid.canary === "none") {
+      problems.push(`event ${event}: ${rule.id}'s invalid side does not expect EventAbsent of ${event} with a canary`)
+    }
+    const valid = sessionOf(pair.valid.scenario)
+    const without = sessionOf(pair.invalid.scenario)
+    if (valid === undefined || valid.event !== event || !valid.intents.some((intent) => intents.includes(intent))) {
+      problems.push(`event ${event}: ${rule.id}'s valid side ${pair.valid.scenario} is not a session observing it with one of ${intents.join(", ")}`)
+    }
+    if (without === undefined || without.event !== event || without.intents.some((intent) => intents.includes(intent))) {
+      problems.push(`event ${event}: ${rule.id}'s invalid side ${pair.invalid.scenario} is not a session observing it without ${intents.join(", ")}`)
+    }
+  }
+  return problems
+}
+
 /** Checks of §5.5 whose inputs do not exist yet; rules-check prints them so they are never mistaken for passes. */
-export const pendingChecks: ReadonlyArray<string> = ["a live intent pair for every event in EventIntents (needs src/gateway/Intents.ts and the M7 intent sessions)"]
+export const pendingChecks: ReadonlyArray<string> = []
 
 /** One escalated rule part: the rule, which part, and the DESIGN §8 question it waits on. */
 export interface Escalation {

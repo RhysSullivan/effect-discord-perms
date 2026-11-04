@@ -33,13 +33,15 @@ import type * as Schemas from "../src/rest/Schemas.ts"
 import type { ChannelId, MessageId, RoleId, StickerId } from "../src/Snowflake.ts"
 import { ChannelId as ChannelIdSchema } from "../src/Snowflake.ts"
 import { deadline } from "./Drivers.ts"
-import { HarnessRest } from "./Identities.ts"
+import { HarnessRest, type Sessions, type TargetRest } from "./Identities.ts"
 import { LabGuard, labStep } from "./Lab.ts"
 import type * as LabIds from "./LabIds.ts"
 import type * as Materialize from "./Materialize.ts"
 import * as Outcome from "./Outcome.ts"
 import type { Observation } from "./scenario/Dsl.ts"
 import type { ProbeName } from "./scenario/Probes.ts"
+import { isSessionName } from "./scenario/catalog/intents.ts"
+import * as SessionRun from "./Sessions.ts"
 import type { RawOutcome } from "./TruthTable.ts"
 
 /** Everything a probe reads. */
@@ -151,8 +153,10 @@ export const asciiString = (count: number): string => "a".repeat(count)
 const day = 86_400_000
 
 /** Runs `probe` (see the module comment). */
-export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<ProbeResult, Transient | import("./Lab.ts").LabRequestFailed, SubjectRaw | HarnessRest | LabGuard> =>
+export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<ProbeResult, Transient | import("./Lab.ts").LabRequestFailed, SubjectRaw | HarnessRest | TargetRest | LabGuard | Sessions> =>
   Effect.gen(function* () {
+    // an intent session (M7) is a probe too: its own gateway session, trigger and canary (`Sessions.ts`)
+    if (isSessionName(probe)) return yield* SessionRun.run(probe, context)
     const { runtime, ids } = context
     const guildId = ids.guildId
     const here = context.channelId

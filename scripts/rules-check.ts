@@ -17,7 +17,9 @@ import { Observation, Setup } from "../harness/scenario/Dsl.ts"
 import { staticFactsOf } from "../harness/scenario/Facts.ts"
 import * as TruthTable from "../harness/TruthTable.ts"
 import { rules } from "../test/rules.ts"
-import { type CoverageRow, coverageProblems, openQuestionsOf, type PairRowView, pendingChecks, registryProblems } from "./lib/rules.ts"
+import { EventIntents } from "../src/gateway/Intents.ts"
+import { isSessionName, sessions } from "../harness/scenario/catalog/intents.ts"
+import { type CoverageRow, coverageProblems, eventProblems, openQuestionsOf, type PairRowView, pendingChecks, registryProblems } from "./lib/rules.ts"
 import { listTypeScriptFiles, repoRoot } from "./lib/tsc.ts"
 import { snapshotPathOf } from "./lib/typeTests.ts"
 
@@ -68,6 +70,16 @@ const problems = [
   })
 ]
 
+// every supported event has a live intent pair (M7)
+const sessionOf = (scenario: string) => {
+  const parsed = RuleCatalog.parseRuleScenario(scenario)
+  if (typeof parsed === "string" || !isSessionName(parsed.probe)) return undefined
+  const spec = sessions[parsed.probe]
+  return { event: spec.event, intents: spec.intents }
+}
+const eventsChecked = Object.values(EventIntents).filter((intents) => intents.length > 0).length
+problems.push(...eventProblems(rules, EventIntents, sessionOf))
+
 // flag coverage over the committed table's matrix rows (the rule rows test rules, not flags)
 const byId = new Map(scenarios.map((scenario) => [scenario.id, scenario]))
 const coverageRows: Array<CoverageRow> = []
@@ -98,8 +110,9 @@ const pairs = rules.filter((rule) => rule.live.kind === "pair")
 const summary =
   `${rules.length} rule(s) (${byKind("pair")} live pair, ${byKind("escalated")} escalated, ${byKind("not-live:pure-typing")} pure-typing, ` +
   `${rules.length - byKind("pair") - byKind("escalated") - byKind("not-live:pure-typing")} other not-live), ${failFixtures.length} fail fixture(s), ` +
-  `${pairs.length * 2} live sides checked against the table, flag coverage over ${coverageRows.length} matrix row(s)`
-console.log(`rules: not checked yet, because their inputs do not exist:\n- ${pendingChecks.join("\n- ")}`)
+  `${pairs.reduce((sum, rule) => sum + (rule.live.kind === "pair" ? 2 + (rule.live.also?.length ?? 0) : 0), 0)} live sides checked against the table, ` +
+  `${eventsChecked} event(s) with a live intent pair, flag coverage over ${coverageRows.length} matrix row(s)`
+if (pendingChecks.length > 0) console.log(`rules: not checked yet, because their inputs do not exist:\n- ${pendingChecks.join("\n- ")}`)
 if (problems.length > 0) {
   console.error(`rules FAIL ${problems.length} problem(s); ${summary}\n- ${problems.join("\n- ")}`)
   process.exit(1)

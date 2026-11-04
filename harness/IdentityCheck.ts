@@ -13,17 +13,19 @@
  * - the subject's gateway READY named the same user as its `getMyUser()` (the subject is the library's bot build,
  *   whose startup already ran checks 1-3 and waited for the lab guild's GUILD_CREATE).
  *
- * The intents the subject's codec sent in Identify need the codec (M7); until then that check is reported as
- * not checked.
+ * - the subject's codec (`gateway/Codec.ts`, M7) sent Identify with exactly the declared intents' bitfield and the
+ *   obfuscation capability, and READY then named the subject.
  *
  * On success the Lab guard is armed with the bots' user IDs and the protected channels, and writes may start.
  */
 import { Duration, Effect, Schema } from "effect"
 import { BotRuntime } from "../src/bot/Bot.ts"
+import { channelObfuscation, SentIdentify } from "../src/gateway/Codec.ts"
+import { intentBits } from "../src/gateway/Intents.ts"
 import { missingPrivilegedIntents, restChecks, type StartupFailed, type StartupIdentity } from "../src/bot/Startup.ts"
 import { Credentials } from "../src/config/Credentials.ts"
 import type { ChannelId } from "../src/Snowflake.ts"
-import { HarnessRest, TargetRest } from "./Identities.ts"
+import { HarnessRest, subjectBot, TargetRest } from "./Identities.ts"
 import { LabCheckFailed, LabGuard, type LabRequestFailed, labStep } from "./Lab.ts"
 import * as Wire from "./Wire.ts"
 
@@ -47,6 +49,8 @@ export interface IdentityReport {
   readonly protectedChannels: ReadonlyArray<{ readonly id: ChannelId; readonly name: string }>
   /** The harness's highest role, the top of the guild. */
   readonly harnessTopRole: Wire.Role
+  /** The intents bitfield the subject's Identify sent (the codec's record), which equals the declared intents. */
+  readonly sentIntents: number
   /** Checks that need parts built in later milestones. */
   readonly notCheckedYet: ReadonlyArray<string>
 }
@@ -57,7 +61,7 @@ const fail = (check: string, detail: string) => Effect.fail(new LabCheckFailed({
 export const run: Effect.Effect<
   IdentityReport,
   StartupFailed | LabCheckFailed | LabRequestFailed,
-  HarnessRest | TargetRest | BotRuntime | Credentials | LabGuard
+  HarnessRest | TargetRest | BotRuntime | SentIdentify | Credentials | LabGuard
 > = Effect.gen(function* () {
   const credentials = yield* Credentials
   const harnessRest = yield* HarnessRest
@@ -69,6 +73,12 @@ export const run: Effect.Effect<
   const subject = runtime.identity
   const missing = missingPrivilegedIntents(subject.applicationFlags, ["GuildMembers", "MessageContent"])
   if (missing.length > 0) return yield* fail("identity", `the subject application lacks the portal flag for ${missing.join(", ")}`)
+  // what Identify actually sent (§4.4): the declared intents' bitfield and the obfuscation capability (D20)
+  const sent = (yield* (yield* SentIdentify).identified).at(-1)
+  const declared = intentBits(subjectBot.intents)
+  if (sent === undefined) return yield* fail("identity", "the subject's codec recorded no Identify")
+  if (sent.intents !== declared) return yield* fail("identity", `the subject's Identify sent intents ${sent.intents}, but it declares ${declared} (${subjectBot.intents.join(", ")})`)
+  if (sent.capabilities !== channelObfuscation) return yield* fail("identity", `the subject's Identify sent capabilities ${sent.capabilities}, not ChannelObfuscation (${channelObfuscation})`)
   const readyUser = (yield* runtime.guildState.snapshot).botUserId
   if (readyUser !== subject.userId) {
     return yield* fail("identity", `the subject gateway's READY named ${readyUser ?? "nobody"}, but its token belongs to ${subject.userId}`)
@@ -121,6 +131,7 @@ export const run: Effect.Effect<
     harnessHasMessageContent: missingPrivilegedIntents(harness.applicationFlags, ["MessageContent"]).length === 0,
     protectedChannels: protectedChannels.map((channel) => ({ id: channel.id, name: channel.name })),
     harnessTopRole: top,
-    notCheckedYet: ["intents sent in Identify (needs the codec, M7)"]
+    sentIntents: sent.intents,
+    notCheckedYet: []
   }
 })

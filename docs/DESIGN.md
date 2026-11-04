@@ -153,6 +153,8 @@ src/
     Channel.ts *                 kinds, ChannelKinds<G>, the kind interfaces, DMChannel, GuildChannel, MessageChannel,
                                  SendMethod (one shared generic-`this` send), Channels.get, Channels.isMessageChannel
     Message.ts *                 OwnMessage<K>, ForeignMessage<K> (per kind), OwnMessages<K>, ForeignMessages<K> (unions)
+    Direct.ts                    (M7) DM handles: the DM channel's send and a DM message's edit and delete, through
+                                 `DiscordApi.executeDirect` (no guild, so no preflight and no recompute)
     Ops.ts                       implementations: each public op is an overload over a wide implementation (§4.7);
                                  the pipeline (`perform`), the handles (`channelHandle`, `messageHandle`, internal) and
                                  `Channels` (M6: the wire-to-handle decoding lives here too; no separate Decode.ts)
@@ -180,10 +182,13 @@ src/
     Hook.ts                      DispatchHook layer: decode the minimum, reduce, bump generations; never fails
   gateway/
     Intents.ts *                 Intent names (equal to dfx's keys), EventIntents (supported events only), IntentCheck
-    Events.ts *                  EventPayloads<I>, MessageCreate<I> (guild and DM branches), ReceivedMessage, ContentUnavailable
+    Events.ts *                  EventPayloads<I>, MessageCreate<I> (guild and DM branches), ReceivedMessage, ContentUnavailable;
+                                 (M7) the runtime decoding of each supported dispatch into handles
     Codec.ts                     JSON codec that adds Identify capabilities (G7) and records the sent intents
+    Dispatches.ts                (M7) the build's own dispatch stream, fed by the hook after the reducer; `bot.on` subscribes to it
   bot/
     Bot.ts *                     Bot.make, Bot.layerWith (platform open), Bot.layer (Bun), Bot.on; per-event fibers
+    Runtime.ts                   (M7) BotRuntime, BotConfig and the event source, apart from Bot.ts so handles import no cycle
     Handler.ts *                 Handled<A,E,R>, UnhandledErrors<What> (T3O by category, D1/D6)
     Startup.ts                   fail-fast checks (D19) -> StartupFailed; restChecks (checks 1-3) from M2
     Internals.ts *               NOT exported: layerWith returning BotRuntime | SubjectRaw (harness only)
@@ -227,6 +232,8 @@ harness/
   Pacing.ts                      global token bucket, invalid-request counter and cap, write counter per route
   Wire.ts                        schemas for the Discord objects the harness reads (dfx casts 2xx bodies); raw
                                  requests through rest.httpClient for routes dfx lacks (GuildMedia create)
+  Sessions.ts                    (M7) the intent sessions: a fresh subject session per row (`Identities.Sessions`), READY and
+                                 the sent intents checked, the trigger, the canary, the observation and the library's check
   Smoke.ts                       harness:smoke's oracle reads (with a target positive control) and `inventory`
   SelfTest.ts                    harness:selftest: dirt, a spec-based read-back that must see it, reset, read-back,
                                  a second reset with zero writes (§5.7)
@@ -250,7 +257,9 @@ harness/
     catalog/rules.ts             live valid/invalid pairs for every rule in test/rules.ts: the named setups and one scenario per side
     catalog/coverage.ts          (M6) one row per (operation row, flag) the families leave without a first-failure row
     Probes.ts                    (M6) the probe names and what each touches, renames and mentions (pure; Facts and Safety read it)
-    catalog/intents.ts           gateway sessions with and without intents, each with a canary
+    catalog/intents.ts           gateway sessions with and without intents, each with a canary (M7: pure descriptions; the
+                                 sessions are rule probes on `catalog/rules.ts`'s `text-messages` setup, run by
+                                 `harness/Sessions.ts`)
     catalog/commands.ts          registration rule pairs, readback and the diff check
     Safety.ts                    static checks every scenario must pass (no human pings, kick/ban must fail, edit budget)
 test/
@@ -869,6 +878,21 @@ export declare const Bot: {
   readonly layer: <I extends Intent>(bot: Bot<I>, config: BotConfig) => Layer.Layer<BotRuntime, StartupFailed | Config.ConfigError>
 }
 ```
+
+(M7, as built in `src/gateway/{Intents,Events}.ts` and `src/bot/{Bot,Handler}.ts`.) `EventIntents` is a runtime
+table the type derives from and rules-check's events check reads: `READY` (no intent), `MESSAGE_CREATE`
+(GuildMessages or DirectMessages), `MESSAGE_REACTION_ADD` (GuildMessageReactions or DirectMessageReactions),
+`TYPING_START` (GuildMessageTyping or DirectMessageTyping), `GUILD_MEMBER_UPDATE` (GuildMembers) and
+`CHANNEL_UPDATE` (Guilds), each with its live intent pair (`R-intent-*`, §5.5). `GUILD_MEMBER_ADD` is not
+supported: no member can join Perms Lab without a human (or a kicked bot re-invited), so it can have no live pair.
+The intent check's message is a named interface, so the diagnostic reads
+`'"GUILD_MEMBER_UPDATE" & MissingIntent<"GuildMembers">'`. A reaction's emoji is `ReactionEmoji`, `unicode` by name
+or `custom` by ID (a dispatch does not say whether a custom emoji is the guild's, so the send-side
+`guild`/`external` split cannot be decoded). `CHANNEL_UPDATE` hands `{ channel: GuildChannel, obfuscated }` (any
+guild channel kind; one the bot cannot view arrives obfuscated, H-160), not a `MessageChannel`. `READY` already
+received when a handler registers (the build waits for the guild, so the first one always is) runs it once, then on
+each new session. A dispatch the library cannot decode (malformed, or a channel it cannot resolve even after a
+refresh) is logged and dropped, never handed on half-typed.
 
 **The handler boundary names categories, not tags (D1 with a change).** The
 message lists the non-transient categories that remain (at most four names) and
@@ -1891,11 +1915,18 @@ orchestrator sets that flag, and §4.4 reads it back.
 **Events.**
 
 - `Bot.on(name, handler)` registers via dfx `handleDispatch(name, wrapped)`.
+  (M7: on the build's own dispatch stream instead, `gateway/Dispatches.ts`: the
+  `DispatchHook` publishes every dispatch to it after the reducer, so a handler
+  sees a state that includes its event, and `subscribe` takes its subscription in
+  the caller's fiber before it returns. dfx's `handleDispatch` subscribes inside a
+  forked fiber, so a dispatch right after `bot.on(...)` returned was lost: the
+  first unit test of `bot.on` dropped its first event.)
 - `wrapped` decodes the event, builds handles, and runs
   `handler(event).pipe(Effect.scoped, Effect.withSpan(...), Effect.catchCause(report))`.
   `Effect.scoped` gives each event its own scope, so a handler's finalizers run
   when that event finishes, not at bot shutdown (`[re:runtime-races.txt]` 3).
-  It can never fail, so `handleDispatch` never stops (dfx.md §4).
+  It can never fail, so `handleDispatch` never stops (dfx.md §4). (M7: each
+  matching dispatch is forked in the subscriber's scope.)
 - `report` logs unhandled transient errors at Warning with the tag, and defects
   at Error. The span records the failure.
 - Handlers run concurrently and unordered (dfx semantics, documented in the
@@ -1948,7 +1979,14 @@ orchestrator sets that flag, and §4.4 reads it back.
 - The truth-table header records `obfuscation: "codec"`.
 - Live check: a scenario denies View on `lab-text`, and the subject's state
   must show `obfuscated: true` (H-160). If it does not, the run fails with "the
-  gateway ignored capabilities".
+  gateway ignored capabilities". (M7: `Runner.obfuscationProblem`, after the wait of
+  every row whose desired state hides `lab-text` from the subject.)
+- (M7) The replay rebuilds the subject's state as the codec makes it
+  (`Predict.snapshotOf`): a lab channel the subject cannot view is obfuscated with no
+  overwrites. Its consequence for the catalog: a timed-out row that hides View is
+  now blind (the obfuscated channel hides the timeout from preflight), so its
+  ViewChannel flip is no longer clean, and those keys take a derived coverage row
+  instead (§5.9).
 
 ---
 
@@ -2193,8 +2231,16 @@ byte-identical Setup, which rules-check asserts.
   rules (`needs-second-guild`), and the granted side of `@everyone`
   (`forbidden-action`). The families leave some pairs without a first-failure
   row; `catalog/coverage.ts` derives one for each, §5.9;)
-- **events**: every event in `EventIntents` has a live intent pair;
+- **events**: every event in `EventIntents` has a live intent pair; (M7, as built in
+  `scripts/lib/rules.ts` `eventProblems`: for each event that needs an intent, a rule whose valid side
+  expects `EventDelivered { event }` from a session that declared one of its intents, and whose invalid side
+  expects `EventAbsent { event, canary }`, with a canary, from a session that declared none of them; the
+  pair's rows are the live-pair checks')
 - a non-`pure-typing` rule lacks a `LOG.md` line.
+
+(M7) A `pair` may list `also`: further sides on the same setup that the rule's valid case covers, each with its
+own full expectation, checked like the two (catalog, table row, observation, one setup).
+`R-message-content` uses it for the mention, ping-on reply and own-message exceptions.
 
 Staging: M0's rules-check implements every check whose inputs exist. A `pair`
 rule fails closed ("cannot verify yet") until the catalog and truth-table
@@ -2244,6 +2290,13 @@ restriction is `R-no-topic-on-voice`.)
 | custom-id-routing | send a component whose custom_id a route built at 100 characters, read `custom_id` back from the create response, and decode it with the route: Succeeded / raw component with 101 characters: Rejected 50035 with the `custom_id` path; remainder: handler delivery escalated (Q-18) |
 | intent-guilds, -guild-messages, -guild-members, -reactions, -typing | session with intent: EventDelivered / without: EventAbsent with a canary (§5.10) |
 | message-content | with the intent: content filled / without: a target's plain message has empty content (Ignored); the mention, ping-on reply and own exceptions are filled; remainder: the DM exception is escalated (Q-17) |
+
+(M7, as built: the five intent rules are `R-intent-guilds` (CHANNEL_UPDATE, canary GUILD_MEMBER_UPDATE about the
+subject), `R-intent-guild-messages` (MESSAGE_CREATE), `R-intent-guild-members` (GUILD_MEMBER_UPDATE about the
+target), `R-intent-reactions` (MESSAGE_REACTION_ADD) and `R-intent-typing` (TYPING_START), the last four with the
+canary CHANNEL_UPDATE; `R-message-content` is `Applied`/`Ignored` `content`, with the three exceptions as `also`
+sides; all sixteen sides are `rule/text-messages/session-*` rows. `R-handler-boundary` and
+`R-transient-only-escapes` are pure-typing, on `test/types/fail/bot.ts`.)
 | command-name-lowercase, -name-length, -name-spaces, option-order, option-count, option-name-lowercase, subcommand-nesting, subcommand-mixing (each at top level and nested) | typed registration / raw registration: Rejected 50035 with the field path (single command name, H-205) |
 | options-typed | register a command with choices, a required option and channel_types; GET it back and compare canonically: Applied / raw registration with a choice value of the wrong type: Rejected 50035; remainder: delivered option values escalated (Q-18) |
 | registration-diff | sync identical: Writes 0 / after each canonical-field mutation: Writes 1, counted at the base HttpClient (§5.10) |
@@ -2848,6 +2901,19 @@ GUILD_MEMBER_UPDATE about the subject itself (H-175, which becomes an asserted
 observation). `EventAbsent` counts only if the canary arrived. The trigger for
 member events targets the **target**, not the subject, because events about the
 subject arrive without the intent.
+
+(M7, as built: `catalog/intents.ts` describes fifteen sessions and `harness/Sessions.ts` runs them as rule probes
+on `catalog/rules.ts`'s `text-messages` setup, so they share the rule rows' safety, cleanup and agreement. Each
+opens a fresh subject session, the library's own build with the codec, over the shared client
+(`Identities.Sessions`, opens at least 6 s apart for Identify's limit), records every dispatch from the first
+through the hook (`DispatchTap`), and subscribes the library's `bot.on` to the event. READY must name the subject
+and the codec's Identify must carry exactly the declared intents, or the run aborts. The triggers are the
+target's message, mention of the subject, ping-on reply to the subject's message, reaction and typing, the
+subject's own message, a harness nickname edit of the target, and a harness slowmode edit of `lab-bots-only`; the
+canary is a harness slowmode edit of `lab-bots-only` (CHANNEL_UPDATE), or for the Guilds pair a nickname edit of
+the subject. The session waits up to 10 s for the canary, then up to 2 s more for the trigger's own dispatch, which
+must also have reached `bot.on` decoded, with `contentDelivered` saying what Discord delivered; a disagreement is an
+observation no expectation accepts.)
 
 **Registration writes** are counted at the shared base `HttpClient` (PUT, POST
 and PATCH to the commands routes), never by the library itself. A property

@@ -20,13 +20,16 @@
 import { BunHttpClient, BunSocket } from "@effect/platform-bun"
 import { DiscordConfig, DiscordRESTMemoryLive } from "dfx"
 import { DiscordREST, type DiscordRestService } from "dfx/DiscordREST"
-import { Config, Context, Effect, Layer, Option } from "effect"
+import { Clock, Config, Context, Duration, Effect, Layer, Option, Ref, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
-import type * as Socket from "effect/socket/Socket"
-import { Bot, type BotRuntime } from "../src/bot/Bot.ts"
+import * as Socket from "effect/socket/Socket"
+import { Bot, BotRuntime } from "../src/bot/Bot.ts"
 import { BotInternals, type SubjectRaw } from "../src/bot/Internals.ts"
+import { type Identified, SentIdentify } from "../src/gateway/Codec.ts"
+import type { Intent } from "../src/gateway/Intents.ts"
+import { DispatchTap } from "../src/state/Hook.ts"
 import type { StartupFailed } from "../src/bot/Startup.ts"
 import { Credentials, type IdentityCredentials, type LabCredentials, layer as credentialsLayer } from "../src/config/Credentials.ts"
 import { cannedRoute, Capture, DryRun } from "./DryRun.ts"
@@ -107,7 +110,7 @@ const as = <I>(tag: Context.Service<I, DiscordRestService>, identity: Layer.Laye
 export const subjectBot = Bot.make({ intents: ["Guilds", "GuildMembers"] })
 
 /** The subject: the library's bot build for the subject token in the lab guild (its own fresh build). */
-export const subject: Layer.Layer<BotRuntime | SubjectRaw, StartupFailed | Config.ConfigError, HttpClient.HttpClient | Socket.WebSocketConstructor | Credentials> = Layer.unwrap(
+export const subject: Layer.Layer<BotRuntime | SubjectRaw | SentIdentify, StartupFailed | Config.ConfigError, HttpClient.HttpClient | Socket.WebSocketConstructor | Credentials> = Layer.unwrap(
   Effect.map(Effect.service(Credentials), (credentials) =>
     BotInternals.layerWith(subjectBot, { token: Config.succeed(credentials.subject.token), guildId: credentials.guildId })
   )
@@ -119,8 +122,56 @@ export const restIdentities: Layer.Layer<HarnessRest | TargetRest, never, HttpCl
   as(TargetRest, restIdentity((credentials) => credentials.target))
 )
 
+/** One extra subject session (the intent sessions, M7): its runtime, and what its codec sent. */
+export interface Session {
+  readonly runtime: BotRuntime["Service"]
+  readonly identified: Effect.Effect<ReadonlyArray<Identified>>
+}
+
+/**
+ * Opens extra gateway sessions of the subject (DESIGN §5.10 "Intent sessions", M7): each is the library's real bot
+ * build for the subject's token (its own fresh dfx stack, the capabilities codec, startup checks 1-3), over the
+ * shared base client (guarded, paced, counted) and the run's WebSocket, identified with exactly the given intents.
+ * The lab guild is configured (membership checked, GUILD_CREATE awaited) only when the intents include Guilds, the
+ * one intent that delivers it. `tap` sees every dispatch from the first. The session closes with the caller's scope.
+ * Opens are spaced at least {@link identifySpacing} apart, Discord's one Identify per 5 s per bot (max_concurrency 1).
+ */
+export class Sessions extends Context.Service<
+  Sessions,
+  { readonly open: (intents: ReadonlyArray<Intent>, tap: (event: string, data: unknown) => Effect.Effect<void>) => Effect.Effect<Session, StartupFailed | Config.ConfigError, Scope.Scope> }
+>()("harness/Sessions") {}
+
+/** The least time between two session opens (Identify is limited to one per 5 s per bot). */
+export const identifySpacing = Duration.seconds(6)
+
+const sessionsLayer: Layer.Layer<Sessions, never, HttpClient.HttpClient | Socket.WebSocketConstructor | Credentials> = Layer.effect(
+  Sessions,
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+    const socket = yield* Socket.WebSocketConstructor
+    const credentials = yield* Credentials
+    const lastOpened = yield* Ref.make<number | undefined>(undefined)
+    const open = (intents: ReadonlyArray<Intent>, tap: (event: string, data: unknown) => Effect.Effect<void>) =>
+      Effect.gen(function* () {
+        const last = yield* Ref.get(lastOpened)
+        const now = yield* Clock.currentTimeMillis
+        const wait = last === undefined ? 0 : last + Duration.toMillis(identifySpacing) - now
+        if (wait > 0) yield* Effect.sleep(Duration.millis(wait))
+        yield* Ref.set(lastOpened, yield* Clock.currentTimeMillis)
+        const build = BotInternals.layerWith(
+          { intents },
+          { token: Config.succeed(credentials.subject.token), ...(intents.includes("Guilds") ? { guildId: credentials.guildId } : {}) }
+        ).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(HttpClient.HttpClient, client), Layer.succeed(Socket.WebSocketConstructor, socket), Layer.succeed(DispatchTap, tap))))
+        const context = yield* Layer.build(build)
+        const sent = Context.get(context, SentIdentify)
+        return { runtime: Context.get(context, BotRuntime), identified: sent.identified }
+      })
+    return Sessions.of({ open })
+  })
+)
+
 /** Everything the harness's commands use. */
-export type Services = HarnessRest | TargetRest | SubjectRaw | BotRuntime | PacingModule.Pacing | Lab.LabGuard | Credentials
+export type Services = HarnessRest | TargetRest | SubjectRaw | BotRuntime | SentIdentify | Sessions | PacingModule.Pacing | Lab.LabGuard | Credentials
 
 /**
  * The single harness wiring: the identities over the shared client, with pacing and the guard exposed so the
@@ -136,7 +187,7 @@ export const compose = <E1, E2>(
 ): Layer.Layer<Services, E1 | E2 | StartupFailed | Config.ConfigError> => {
   const guard = Layer.unwrap(Effect.map(Effect.service(Credentials), (lab) => Lab.layer(lab.guildId)))
   const shared = SharedHttpClient.pipe(Layer.provideMerge(Layer.mergeAll(PacingModule.layer(pacing), guard)), Layer.provide(base))
-  return Layer.mergeAll(restIdentities, subject).pipe(Layer.provide(socket), Layer.provideMerge(shared), Layer.provideMerge(credentials))
+  return Layer.mergeAll(restIdentities, subject, sessionsLayer).pipe(Layer.provide(socket), Layer.provideMerge(shared), Layer.provideMerge(credentials))
 }
 
 /** The live wiring: Bun's HTTP client and WebSocket, and the real credentials (which take the live lock). */

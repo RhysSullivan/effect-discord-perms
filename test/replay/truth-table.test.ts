@@ -55,7 +55,7 @@ describe("the truth table against the catalog", () => {
 
   it("was written in the environment the replay assumes: the oracle available, real overwrites for hidden channels", () => {
     expect(table.env.oracle).toBe("available")
-    expect(table.env.obfuscation).toBe("default")
+    expect(table.env.obfuscation).toBe(Predict.obfuscation)
     expect(table.env.everyoneBaseline).toEqual([])
   })
 })

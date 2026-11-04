@@ -5,13 +5,24 @@
  */
 import type { Observation } from "../harness/scenario/Dsl.ts"
 
-/** A live pair: both sides run on a byte-identical Setup, and each side has its own full expectation. */
+/** One side of a live pair: its scenario ID and full expectation. */
+export interface LiveSide {
+  readonly scenario: string
+  readonly expect: Observation
+}
+
+/**
+ * A live pair: both sides run on a byte-identical Setup, and each side has its own full expectation. `also` holds
+ * further sides on the same setup that the rule's valid case covers (M7: the message-content exceptions, a mention,
+ * a ping-on reply and the bot's own message, each delivered without the intent), checked like the two.
+ */
 export interface LivePair {
   readonly kind: "pair"
   /** The name of the Setup both sides share. */
   readonly setup: string
-  readonly valid: { readonly scenario: string; readonly expect: Observation }
-  readonly invalid: { readonly scenario: string; readonly expect: Observation }
+  readonly valid: LiveSide
+  readonly invalid: LiveSide
+  readonly also?: ReadonlyArray<LiveSide>
 }
 
 /** Why a rule (or the remainder of one) has no live pair. Each reason is allowed only for listed rule ids. */
@@ -55,6 +66,13 @@ const pair = (setup: string, valid: readonly [probe: string, expect: Observation
 })
 
 const typedSend = ["typed-send", succeeded] as const
+
+const delivered = (event: string): Observation => ({ _tag: "EventDelivered", event })
+const absent = (event: string, canary: string): Observation => ({ _tag: "EventAbsent", event, canary })
+
+/** An intent rule's pair (M7): the session with one of the event's intents receives it; the one without does not, after a canary. */
+const intentPair = (name: string, event: string, canary: string): LivePair =>
+  pair("text-messages", [`session-${name}-with`, delivered(event)], [`session-${name}-without`, absent(event, canary)])
 
 /**
  * The registry. Phase 1's rules (DESIGN §5.5): every type restriction of §2.1-§2.6 and its live pair, in which
@@ -435,5 +453,81 @@ export const rules: ReadonlyArray<Rule> = [
     fail: "test/types/fail/limits.ts",
     claims: ["TimeoutTooLong"],
     live: pair("members", ["typed-timeout-max", succeeded], ["raw-timeout-over", refused(400, 50035, [{ path: "communication_disabled_until", code: "INVALID_COMMUNICATION_DISABLED_TIMESTAMP" }])])
+  },
+  // ---- intents, events and message content (§2.7, M7) ----
+  {
+    id: "R-intent-guild-messages",
+    statement: "bot.on(\"MESSAGE_CREATE\") compiles only with GuildMessages or DirectMessages; a guild message arrives only with GuildMessages",
+    pass: "test/types/pass/bot.ts",
+    fail: "test/types/fail/bot.ts",
+    claims: ["GuildMessages"],
+    live: intentPair("guild-messages", "MESSAGE_CREATE", "CHANNEL_UPDATE")
+  },
+  {
+    id: "R-intent-reactions",
+    statement: "bot.on(\"MESSAGE_REACTION_ADD\") compiles only with GuildMessageReactions or DirectMessageReactions; a guild reaction arrives only with GuildMessageReactions",
+    pass: "test/types/pass/bot.ts",
+    fail: "test/types/fail/bot.ts",
+    claims: ["GuildMessageReactions"],
+    live: intentPair("reactions", "MESSAGE_REACTION_ADD", "CHANNEL_UPDATE")
+  },
+  {
+    id: "R-intent-typing",
+    statement: "bot.on(\"TYPING_START\") compiles only with GuildMessageTyping or DirectMessageTyping; guild typing arrives only with GuildMessageTyping",
+    pass: "test/types/pass/bot.ts",
+    fail: "test/types/fail/bot.ts",
+    claims: ["GuildMessageTyping"],
+    live: intentPair("typing", "TYPING_START", "CHANNEL_UPDATE")
+  },
+  {
+    id: "R-intent-guild-members",
+    statement: "bot.on(\"GUILD_MEMBER_UPDATE\") compiles only with GuildMembers; an update about another member arrives only with GuildMembers",
+    pass: "test/types/pass/bot.ts",
+    fail: "test/types/fail/bot.ts",
+    claims: ["GuildMembers"],
+    live: intentPair("guild-members", "GUILD_MEMBER_UPDATE", "CHANNEL_UPDATE")
+  },
+  {
+    id: "R-intent-guilds",
+    statement: "bot.on(\"CHANNEL_UPDATE\") compiles only with Guilds; a channel update arrives only with Guilds",
+    pass: "test/types/pass/bot.ts",
+    fail: "test/types/fail/bot.ts",
+    claims: ["Guilds"],
+    live: intentPair("guilds", "CHANNEL_UPDATE", "GUILD_MEMBER_UPDATE")
+  },
+  {
+    id: "R-message-content",
+    statement:
+      "message.content is a string only where Discord delivers it: with MessageContent, or (contentDelivered) for the bot's own messages, messages that mention it, ping-on replies to it and DMs; elsewhere it is ContentUnavailable",
+    pass: "test/types/pass/bot.ts",
+    fail: "test/types/fail/bot.ts",
+    claims: ["ContentUnavailable"],
+    live: {
+      ...pair("text-messages", ["session-content-with", applied("content")], ["session-content-without", ignored("content")]),
+      also: [
+        { scenario: "rule/text-messages/session-content-mention", expect: applied("content") },
+        { scenario: "rule/text-messages/session-content-reply", expect: applied("content") },
+        { scenario: "rule/text-messages/session-content-own", expect: applied("content") }
+      ]
+    },
+    remainder: { kind: "escalated", question: "Q-17" }
+  },
+  // ---- the handler boundary (§2.7, D1, D6) ----
+  {
+    id: "R-handler-boundary",
+    statement:
+      "a handler registered with bot.on compiles only if every error it can still fail with is purely transient: a permission, payload, access or state error, or an uncategorised one, names what to handle",
+    pass: "test/types/pass/bot.ts",
+    fail: "test/types/fail/bot.ts",
+    claims: ["permission", "state", "payload", "Oops"],
+    live: { kind: "not-live", reason: "pure-typing" }
+  },
+  {
+    id: "R-transient-only-escapes",
+    statement: "only a purely transient error may escape a handler; one that is transient and also state must be handled (D6)",
+    pass: "test/types/pass/bot.ts",
+    fail: "test/types/fail/bot.ts",
+    claims: ["Flaky"],
+    live: { kind: "not-live", reason: "pure-typing" }
   }
 ]

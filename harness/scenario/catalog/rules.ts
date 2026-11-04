@@ -89,7 +89,9 @@ export const parseRuleScenario = (id: string): { readonly setup: RuleSetupName; 
 }
 
 /** Every rule side of the registry: its scenario ID and expectation, with the rule it belongs to. */
-const sides = rules.flatMap((rule) => (rule.live.kind === "pair" ? [{ rule: rule.id, ...rule.live.valid }, { rule: rule.id, ...rule.live.invalid }] : []))
+const sides = rules.flatMap((rule) =>
+  rule.live.kind === "pair" ? [rule.live.valid, rule.live.invalid, ...(rule.live.also ?? [])].map((side) => ({ rule: rule.id, ...side })) : []
+)
 
 const sameObservation = (a: Observation, b: Observation): boolean => JSON.stringify(a) === JSON.stringify(b)
 

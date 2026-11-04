@@ -1,0 +1,42 @@
+L24:36 TS2345
+Argument of type '"GUILD_MEMBER_UPDATE"' is not assignable to parameter of type '"GUILD_MEMBER_UPDATE" & MissingIntent<"GuildMembers">'.
+  Type 'string' is not assignable to type 'MissingIntent<"GuildMembers">'.
+
+L26:32 TS2345
+Argument of type '"MESSAGE_REACTION_ADD"' is not assignable to parameter of type '"MESSAGE_REACTION_ADD" & MissingIntent<"DirectMessageReactions" | "GuildMessageReactions">'.
+  Type 'string' is not assignable to type 'MissingIntent<"DirectMessageReactions" | "GuildMessageReactions">'.
+
+L28:30 TS2345
+Argument of type '"TYPING_START"' is not assignable to parameter of type '"TYPING_START" & MissingIntent<"DirectMessageTyping" | "GuildMessageTyping">'.
+  Type 'string' is not assignable to type 'MissingIntent<"DirectMessageTyping" | "GuildMessageTyping">'.
+
+L30:33 TS2345
+Argument of type '"MESSAGE_CREATE"' is not assignable to parameter of type '"MESSAGE_CREATE" & MissingIntent<"DirectMessages" | "GuildMessages">'.
+  Type 'string' is not assignable to type 'MissingIntent<"DirectMessages" | "GuildMessages">'.
+
+L32:39 TS2345
+Argument of type '"CHANNEL_UPDATE"' is not assignable to parameter of type '"CHANNEL_UPDATE" & MissingIntent<"Guilds">'.
+  Type 'string' is not assignable to type 'MissingIntent<"Guilds">'.
+
+L34:93 TS2339
+Property 'toUpperCase' does not exist on type 'string | ContentUnavailable'.
+  Property 'toUpperCase' does not exist on type 'ContentUnavailable'.
+
+L36:59 TS2741
+Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<void | Sent<"announcement" | "announcement-thread" | "private-thread" | "public-thread" | "stage" | "text" | "voice">, MissingConnect | MissingSendMessages | ... 4 more ... | Transient, never>' but required in type 'UnhandledErrors<"access" | "permission">'.
+
+L38:58 TS2741
+Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<void | Sent<"announcement" | "announcement-thread" | "private-thread" | "public-thread" | "stage" | "text" | "voice">, CommunicationDisabled | RateLimited | ThreadLocked | UnknownChannel | Transient, never>' but required in type 'UnhandledErrors<"state">'.
+
+L40:52 TS2741
+Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<never, Oops, never>' but required in type 'UnhandledErrors<"Oops">'.
+
+L44:3 TS2345
+Argument of type '(event: GuildMessageCreate<false>) => Effect<void, EmbedTooLarge | MissingConnect | MissingEmbedLinks | ... 5 more ... | Transient, never>' is not assignable to parameter of type '(event: GuildMessageCreate<false>) => UnhandledErrors<"access" | "payload" | "permission">'.
+  Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<void, EmbedTooLarge | MissingConnect | MissingEmbedLinks | MissingSendMessages | MissingSendMessagesInThreads | MissingViewChannel | PermissionDeniedUnattributed | RateLimited | Transient, never>' but required in type 'UnhandledErrors<"access" | "payload" | "permission">'.
+
+L49:53 TS2741
+Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<never, Flaky, never>' but required in type 'UnhandledErrors<"state">'.
+
+L51:60 TS2741
+Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<SentDegradable<"announcement" | "announcement-thread" | "private-thread" | "public-thread" | "stage" | "text" | "voice", "MentionEveryone" | "SendTTSMessages" | "UseExternalEmojis">, CommunicationDisabled | ... 17 more ... | Transient, never>' but required in type 'UnhandledErrors<"access" | "payload" | "permission" | "state">'.

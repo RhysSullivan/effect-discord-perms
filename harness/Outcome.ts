@@ -90,6 +90,9 @@ export const rejected = (response: DiscordResponse): RawOutcome => ({
   mappedTag: dedicatedCodeTags.get(response.code) ?? "n/a"
 })
 
+/** An intent session's outcome (§5.10, M7): whether the trigger's own dispatch arrived. */
+export const event = (delivered: boolean): RawOutcome => ({ class: delivered ? "event-delivered" : "event-absent", status: 0, code: 0, inner: [], degraded: [], mappedTag: "n/a" })
+
 /** A setup Discord would not build (§5.10). */
 export const unsupported = (reason: NonNullable<RawOutcome["unsupported"]>, status = 0, code = 0): RawOutcome => ({
   class: "setup-unsupported",

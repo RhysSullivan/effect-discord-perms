@@ -11,7 +11,28 @@
  */
 export * from "./Snowflake.ts"
 export * from "./errors/index.ts"
-export { Bot, BotRuntime, type BotConfig, type Intent } from "./bot/Bot.ts"
+export { Bot, BotRuntime, type BotConfig, type Runtime } from "./bot/Bot.ts"
+export type { Handled, UnhandledErrors } from "./bot/Handler.ts"
+export { StartupFailed } from "./bot/Startup.ts"
+export { EventIntents, type EventName, type Intent, Intents, type IntentCheck, type MissingIntent } from "./gateway/Intents.ts"
+export {
+  type ChannelUpdate,
+  type ContentUnavailable,
+  contentUnavailable,
+  type Delivered,
+  type DirectMessage,
+  type DirectMessageCreate,
+  type EventPayloads,
+  type GuildMessageCreate,
+  type MemberUpdate,
+  type MessageCreate,
+  type ReactionAdd,
+  type ReactionEmoji,
+  type Ready,
+  type ReceivedMessage,
+  type TypingStart,
+  type Undelivered
+} from "./gateway/Events.ts"
 export type { Transient, OpErrors, OpName, OpFlags, OpTags, OpPermissionErrors } from "./permissions/Operations.ts"
 export type {
   AnnouncementChannel,

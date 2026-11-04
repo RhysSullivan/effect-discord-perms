@@ -9,6 +9,13 @@ milestone appends its entries.
 
 ## Waiting for Rhys
 
+- **Q-17, the DM content exception (`R-message-content`'s remainder; an unmet Done criterion until decided).** PROMPT
+  asks for the message-content exceptions to be verified live; M7's sessions verify the mention, ping-on reply and
+  own-message exceptions with bots, but a DM needs a human: a bot cannot DM another bot (H-158), and the harness
+  never DMs Rhys. Rhys decides: send the subject a DM himself once (the subject would identify with DirectMessages
+  and without MessageContent and must receive the content), or accept the DM branch as typed and unit-tested
+  (`test/unit/bot-events.test.ts` drives it through a fake gateway) without a live row. Nothing else waits on it.
+
 - **GuildMedia channels (decision, not blocking).** Perms Lab cannot have a media channel: creating one
   (`POST /guilds/{guild.id}/channels`, type 16) answers 400 50024 "Cannot execute action on this channel type",
   even with a minimal body `{name, type}` (M2). Provisioning records `lab-media` as unavailable in
@@ -379,6 +386,19 @@ Where dfx got in the way and we wrapped or adapted it, and why.
   retries them as before. `ErrorMap.classify` turns the `StatusCodeError` back into a 429 answer with the code. The
   harness's subject is that build, so `SubjectRaw` (step (c)) now sees a coded 429 as a refusal with its code
   instead of a dfx retry; no M4 row met a coded 429, so no recorded row changes.
+
+- **M7: the gateway is dfx's `DiscordLive` re-composed with our codec** (`src/gateway/Codec.ts`,
+  `DiscordLiveWithCapabilities`; D20, G7). dfx 1.1.1's Identify has no `capabilities`, and `DiscordLive` provides
+  its JSON codec internally, so the build composes dfx's own eight-line `DiscordLive` with a codec that delegates to
+  dfx's JSON codec for every opcode but Identify, to which it adds `capabilities: 32768` (ChannelObfuscation), and
+  records the intents and capabilities it sent (`SentIdentify`). The composition uses dfx's layer values
+  (`DiscordRESTLive`, `MemoryRateLimitStoreLive`, ...), so the build's REST client and rate-limit store are still the
+  one memoised instance.
+- **M7: `bot.on` does not use dfx's `handleDispatch`.** It subscribes inside a forked fiber, so a dispatch that
+  arrives right after the subscribing effect returns can be lost (the first `bot.on` unit test lost its first event
+  that way), and its first handler failure ends the whole subscription (dfx.md §4). The library's `DispatchHook`
+  already sees every dispatch serially before dfx publishes it; it now also publishes it to the build's own stream
+  (`src/gateway/Dispatches.ts`) after the reducer, and `bot.on` subscribes there, synchronously, before it returns.
 
 ## Design deviations
 
@@ -1072,6 +1092,39 @@ the same commit.
   - **`R-mention-everyone-degrades` observed the library's own readback**: the role-mention probes now read the
     created message back through the harness and observe `mention_roles` (Applied or Ignored), as
     `typed-mention-user` does, and the library's `degraded` must say the same, or the probe stops the run as a defect.
+
+- **M7: the supported events are the six with a live intent pair** (§2.7 updated). Revision 2's `EventIntents` listed
+  eleven; each needs a live intent pair (§5.5), so the table holds READY (no intent), MESSAGE_CREATE,
+  MESSAGE_REACTION_ADD, TYPING_START, GUILD_MEMBER_UPDATE and CHANNEL_UPDATE (`R-intent-*`). GUILD_MEMBER_ADD cannot have
+  one: no member joins Perms Lab without a human or a re-invited bot. MESSAGE_UPDATE, MESSAGE_DELETE, THREAD_CREATE
+  and GUILD_ROLE_UPDATE would each need their own pair of sessions (a role update also a role edit from the scarce
+  bucket), so they wait until a bot needs them. `test/types/fail/bot.ts` uses GUILD_MEMBER_UPDATE for the missing
+  intent that revision 2 showed with GUILD_MEMBER_ADD.
+- **M7: smaller event-API decisions** (§2.7 updated). `IntentCheck`'s message is the named interface `MissingIntent<...>`
+  (the diagnostic prints `MissingIntent<"GuildMembers">` instead of the object literal, shorter and still naming the
+  intent). A reaction's emoji is `ReactionEmoji` (`unicode` or `custom`): a dispatch does not say whether a custom
+  emoji is the guild's, so the send-side `Emoji`'s `guild`/`external` split cannot be decoded. `CHANNEL_UPDATE` hands
+  `{ channel: GuildChannel, obfuscated }`, not a `MessageChannel` (a category or forum update is a channel update too;
+  `[sd:src/bot-use.ts]`'s r4 called `send` on it, which now needs `isMessageChannel`). READY already received when a
+  handler registers runs it once (the build waits for the guild, so the first READY always precedes the handlers).
+  `BotRuntime` carries `events` (the dispatch stream); `BotRuntime`, `BotConfig` and the event source live in
+  `src/bot/Runtime.ts` so the handles import no cycle through `Bot.ts`.
+- **M7: DM handles run outside the guild pipeline** (`src/channels/Direct.ts`, `DiscordApi.executeDirect`). M6 had the
+  DM types only. A DM has no guild permissions, so its send, and a DM message's edit and delete, run the local checks
+  and then `executeDirect`, which maps Discord's answer against the operation's row and gives a permission-like
+  refusal the code's own tag (no recompute, no guess). Unit-tested through a fake gateway only (Q-17).
+- **M7: the intent sessions are rule probes** (§5.5, §5.10 updated). Revision 2 planned a `session{intents, trigger,
+  canary}` operation; every check that keeps rule rows out of the matrix (`operation._tag === "rule"`: the replay, the
+  error map, the recompute, flag coverage, the request check) would have needed the new tag too. As rule probes on
+  `catalog/rules.ts`'s `text-messages` setup they share the rule rows' machinery and add no role state (the run still
+  needs 80 role edits). `catalog/intents.ts` keeps the pure descriptions the design names.
+- **M7: the replay models the codec** (§4.15, §5.12 updated): the table is `obfuscation: "codec"`, and
+  `Predict.snapshotOf` rebuilds a channel the subject cannot view obfuscated, with no overwrites. Its consequence for
+  the catalog: a timed-out row that hides View resolves `obfuscated`, which hides the timeout from preflight, so its
+  ViewChannel flip is no longer clean (it would fail with `CommunicationDisabled`, which the blind original does not
+  list); those (operation, ViewChannel) keys now take derived coverage rows, normal and without an administrator, whose
+  flips must pass. The catalog changes from 486 to 495 matrix and rule rows, plus 15 sessions, 510 in all: 11 coverage
+  rows and their flips added, 13 flips of timed-out View rows replaced.
 
 ## Escalated rules
 
