@@ -20,6 +20,13 @@
  * The event name is checked against the declared intents (`IntentCheck`, D24), and the handler's result against
  * the boundary (`Handled`, D1, D6): only purely transient errors may escape.
  *
+ * **The declared intents must be the running build's.** The types of `bot.on` (which events compile, whether
+ * `content` is a `string`) follow the intents of the `Bot` whose `on` is called, while delivery follows the build in
+ * `BotRuntime`. Registering on a `Bot` that declares an intent the running build did not identify with (a program
+ * provided `Bot.layer` of another `Bot`) would let `content: string` compile and receive `ContentUnavailable`, so
+ * `on` dies at registration naming the intents the build lacks (after the M7 verifier). A build with more intents
+ * than the `Bot` only makes the types conservative.
+ *
  * **Layers.** `Bot.layerWith(bot, config)` is the library's real build (`Internals.ts`: startup checks, guild
  * state, REST wrapper, the gateway with the capabilities codec) with the base `HttpClient` and the
  * `WebSocketConstructor` left open, so tests and the harness can wrap or replace them; `Bot.layer` provides Bun's.
@@ -83,12 +90,19 @@ const report = (event: EventName) => <E>(cause: Cause.Cause<E>): Effect.Effect<v
  * declared intents; the implementation hands `run` what `decode` built, which for those intents is that type.
  */
 function subscribe<I extends Intent, K extends EventName, A, E, R>(
+  declared: ReadonlyArray<I>,
   event: K,
   run: (payload: EventPayloads<I>[K]) => Effect.Effect<A, E, R>
 ): Effect.Effect<void, never, Exclude<R, Scope.Scope> | BotRuntime | Scope.Scope>
-function subscribe<A, E, R>(event: EventName, run: (payload: AnyEvent) => Effect.Effect<A, E, R>): Effect.Effect<void, never, Exclude<R, Scope.Scope> | BotRuntime | Scope.Scope> {
+function subscribe<A, E, R>(declared: ReadonlyArray<Intent>, event: EventName, run: (payload: AnyEvent) => Effect.Effect<A, E, R>): Effect.Effect<void, never, Exclude<R, Scope.Scope> | BotRuntime | Scope.Scope> {
   return Effect.gen(function* () {
     const runtime = yield* BotRuntime
+    const lacking = declared.filter((intent) => !runtime.intents.includes(intent))
+    if (lacking.length > 0) {
+      return yield* Effect.die(
+        new Error(`bot.on("${event}"): this Bot declares ${lacking.join(", ")}, which the running bot build did not identify with; provide Bot.layer of the same Bot`)
+      )
+    }
     const once = (payload: Effect.Effect<AnyEvent, Dropped | import("../errors/Transient.ts").Transient>) =>
       payload.pipe(Effect.flatMap(run), Effect.scoped, Effect.withSpan(`discord.event.${event}`), Effect.catchCause(report(event)))
     if (event === "READY") {
@@ -104,7 +118,7 @@ const makeBot = <I extends Intent>(intents: ReadonlyArray<I>): Bot<I> => {
     event: K & IntentCheck<K, NoInfer<I>>,
     handler: (event: EventPayloads<I>[K]) => Handled<A, E, R>
   ): Effect.Effect<void, never, Exclude<R, Scope.Scope> | BotRuntime | Scope.Scope> {
-    return subscribe<I, K, A, E, R>(event, (payload) => handled(handler(payload)))
+    return subscribe<I, K, A, E, R>(intents, event, (payload) => handled(handler(payload)))
   }
   return { intents, on }
 }

@@ -45,7 +45,7 @@ export const fn = bot.on(
     yield* event.channel.send({ content: "x", embeds: [{ title: "t" }] }).pipe(catchCategory("state", () => Effect.void))
   })
 )
-// @expect-error TS2741 Flaky
+// @expect-error TS2741 UnhandledErrors<"state">
 export const flaky = bot.on("CHANNEL_UPDATE", () => Effect.fail(new Flaky()))
 // @expect-error TS2741 payload
 export const payload = bot.on("MESSAGE_CREATE", (event) => event.channel.send(render()))

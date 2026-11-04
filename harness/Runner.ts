@@ -49,7 +49,7 @@ import * as Oracle from "../src/rest/Oracle.ts"
 import { send } from "../src/rest/Request.ts"
 import * as Schemas from "../src/rest/Schemas.ts"
 import { type ChannelId, type EmojiId, ForumTagId, type MessageId, type RoleId, type StickerId } from "../src/Snowflake.ts"
-import { isThreadKind, type Snapshot } from "../src/state/Snapshot.ts"
+import { isThreadKind } from "../src/state/Snapshot.ts"
 import { escalatedRules } from "../scripts/lib/rules.ts"
 import { rules } from "../test/rules.ts"
 import { agreement, flipAgreement, matrixRowAgreement, ruleAgreement } from "./Agreement.ts"
@@ -266,20 +266,6 @@ const isForumName = (name: Materialize.LabName): boolean => name === "lab-forum"
 
 const TagsOf = Schema.Struct({ available_tags: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))) })
 
-/**
- * The obfuscation check (DESIGN §4.15, H-160; M7): in a scenario whose desired state hides `lab-text` from the
- * subject, the subject's gateway state must show `lab-text` obfuscated, because the subject identifies with the
- * ChannelObfuscation capability (`gateway/Codec.ts`). A problem is `undefined` when the check holds or does not
- * apply. The runner fails the run with it: the table's `obfuscation: "codec"` would be false.
- */
-export const obfuscationProblem = (state: Materialize.Desired, ids: Materialize.Ids, snapshot: Snapshot, now: number): string | undefined => {
-  if (state.channel !== "lab-text") return undefined
-  const view = Materialize.project(state, ids, now).channels.get("lab-text")
-  if (view === undefined || view._tag !== "Hidden") return undefined
-  const seen = snapshot.guilds.get(ids.guildId)?.channels.get(view.id)
-  return seen?.obfuscated === true ? undefined : `the gateway ignored capabilities: the subject cannot view lab-text, but its state shows it ${seen === undefined ? "absent" : "with real overwrites"}, not obfuscated (H-160)`
-}
-
 /** Runs one scenario and returns its row (see the module comment for the steps). */
 const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
   Effect.gen(function* () {
@@ -385,8 +371,6 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
         )
     const settled = yield* Wait.settle({ scenario: scenario.id, state, ids, guildState: runtime.guildState, guildId: ids.guildId, channel: channelId, readOracle, channels, converged: { view: converged.view, written } })
     yield* lap("wait")
-    const obfuscation = obfuscationProblem(state, ids, yield* runtime.guildState.snapshot, yield* Clock.currentTimeMillis)
-    if (obfuscation !== undefined) return yield* Effect.die(new Error(`${scenario.id}: ${obfuscation}`))
     // the next Converge may start from this read-back: role permissions and the subject change only through Converge
     // and the subject's fixtures; the target also through a member operation or a probe, so not after one
     const touchesTarget = operation._tag === "member" || operation._tag === "rule"

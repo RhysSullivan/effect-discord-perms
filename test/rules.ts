@@ -461,7 +461,9 @@ export const rules: ReadonlyArray<Rule> = [
     pass: "test/types/pass/bot.ts",
     fail: "test/types/fail/bot.ts",
     claims: ["GuildMessages"],
-    live: intentPair("guild-messages", "MESSAGE_CREATE", "CHANNEL_UPDATE")
+    live: intentPair("guild-messages", "MESSAGE_CREATE", "CHANNEL_UPDATE"),
+    // the DM intents' delivery needs a human DM (Q-22, the M7 verifier)
+    remainder: { kind: "escalated", question: "Q-22" }
   },
   {
     id: "R-intent-reactions",
@@ -469,7 +471,9 @@ export const rules: ReadonlyArray<Rule> = [
     pass: "test/types/pass/bot.ts",
     fail: "test/types/fail/bot.ts",
     claims: ["GuildMessageReactions"],
-    live: intentPair("reactions", "MESSAGE_REACTION_ADD", "CHANNEL_UPDATE")
+    live: intentPair("reactions", "MESSAGE_REACTION_ADD", "CHANNEL_UPDATE"),
+    // the DM intents' delivery needs a human DM (Q-22, the M7 verifier)
+    remainder: { kind: "escalated", question: "Q-22" }
   },
   {
     id: "R-intent-typing",
@@ -477,7 +481,9 @@ export const rules: ReadonlyArray<Rule> = [
     pass: "test/types/pass/bot.ts",
     fail: "test/types/fail/bot.ts",
     claims: ["GuildMessageTyping"],
-    live: intentPair("typing", "TYPING_START", "CHANNEL_UPDATE")
+    live: intentPair("typing", "TYPING_START", "CHANNEL_UPDATE"),
+    // the DM intents' delivery needs a human DM (Q-22, the M7 verifier)
+    remainder: { kind: "escalated", question: "Q-22" }
   },
   {
     id: "R-intent-guild-members",
@@ -527,7 +533,8 @@ export const rules: ReadonlyArray<Rule> = [
     statement: "only a purely transient error may escape a handler; one that is transient and also state must be handled (D6)",
     pass: "test/types/pass/bot.ts",
     fail: "test/types/fail/bot.ts",
-    claims: ["Flaky"],
+    // the category the boundary names, not the error's name, which tsc prints in the effect's type anyway (M7 verifier)
+    claims: ['UnhandledErrors<"state">'],
     live: { kind: "not-live", reason: "pure-typing" }
   }
 ]

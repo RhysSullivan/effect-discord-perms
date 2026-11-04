@@ -187,7 +187,7 @@ describe("coverageProblems", () => {
 describe("documents", () => {
   it("reads DESIGN.md §8's open questions", () => {
     const design = fs.readFileSync(path.join(import.meta.dirname, "..", "..", "docs", "DESIGN.md"), "utf8")
-    expect([...openQuestionsOf(design)]).toEqual(Array.from({ length: 21 }, (_, i) => i + 1))
+    expect([...openQuestionsOf(design)]).toEqual(Array.from({ length: 22 }, (_, i) => i + 1))
   })
 
   it("reads only the Waiting for Rhys section of LOG.md", () => {

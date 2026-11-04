@@ -16,6 +16,14 @@ milestone appends its entries.
   and without MessageContent and must receive the content), or accept the DM branch as typed and unit-tested
   (`test/unit/bot-events.test.ts` drives it through a fake gateway) without a live row. Nothing else waits on it.
 
+- **Q-22, DM delivery under the DM intents (`R-intent-guild-messages`, `R-intent-reactions` and `R-intent-typing`'s
+  remainder; an unmet Done criterion until decided; the M7 verifier).** `bot.on("MESSAGE_CREATE")` compiles with
+  DirectMessages, `MESSAGE_REACTION_ADD` with DirectMessageReactions and `TYPING_START` with DirectMessageTyping, but the
+  live intent pairs verify only the guild intents: a bot cannot DM another bot (H-158) and the harness never DMs Rhys.
+  Rhys decides: message, react and type in a DM with the subject once (the subject would identify with the three DM
+  intents and must receive each event, and without them must not), or accept the DM half as typed and unit-tested
+  through the fake gateway (`test/unit/bot-events.test.ts`). The same DM would answer Q-17. Nothing else waits on it.
+
 - **GuildMedia channels (decision, not blocking).** Perms Lab cannot have a media channel: creating one
   (`POST /guilds/{guild.id}/channels`, type 16) answers 400 50024 "Cannot execute action on this channel type",
   even with a minimal body `{name, type}` (M2). Provisioning records `lab-media` as unavailable in
@@ -1179,11 +1187,41 @@ the same commit.
   rows added, and 11 flip controls replaced by 11 others (the 9 coverage rows' flips and two family rows' that are now
   the first clean ones of their keys).
 
+- **Before M8 (the M7 verifier's six minor findings).**
+  - **The obfuscation check could not fire** (§4.15 updated). Under the codec the wait already required every hidden
+    lab channel to be obfuscated before it returned, so `Runner.obfuscationProblem`, which ran after it, could never
+    see an unobfuscated `lab-text`, and a gateway that ignored the capability would have stopped the run with a
+    `SetupTimeout`. The wait is now the check (`Wait.awaitSubjectState`): a channel it resent that Discord sends again,
+    its generation moved, and still unobfuscated fails the run with `CapabilitiesIgnored` ("the gateway ignored
+    capabilities ... (H-160)"); one Discord sends nothing for is still a `SetupTimeout` (a late or lost event, as in
+    M6 and M7). `obfuscationProblem` is gone. `test/unit/obfuscation.test.ts` drives the wait itself over a guild
+    state: settled at once, resent then obfuscated, resent then unobfuscated (`CapabilitiesIgnored`), resent then
+    silent (`SetupTimeout`).
+  - **The DM intents had no live side and no escalation** (§8 item 22 added). `R-intent-guild-messages`,
+    `R-intent-reactions` and `R-intent-typing` now carry the escalated remainder Q-22 ("Waiting for Rhys"), so
+    `verify:live` lists them as unmet Done criteria. Dropping the DM intents from `EventIntents` instead would make a
+    DM bot impossible to write, and the DM branch is unit-tested through the fake gateway.
+  - **`bot.on`'s types and the running build's intents were not tied** (§2.7 updated). `on` now dies at registration
+    when the running build lacks an intent its `Bot` declares, naming them; a build with more intents only makes the
+    types conservative. `test/unit/bot-events.test.ts`: a `Bot` with MessageContent registered on a build without it
+    dies with the message; one with fewer intents registers.
+  - **R-transient-only-escapes claimed `Flaky`**, which tsc prints in the effect's type anyway. The directive's
+    mention is now `UnhandledErrors<"state">`, the category the boundary names, and the rule claims it. The snapshot is
+    unchanged.
+  - **The identity check's capabilities comparison was tautological.** The codec's record is now read back from the
+    encoded Identify text the socket receives (`Codec.identifiedIn`; capabilities absent when the text has none), so
+    the identity check and the sessions compare what went out. `test/unit/codec.test.ts`; the fake-gateway tests still
+    parse the IDENTIFY frame.
+  - **The 30-minute target** (carried from M6): no change in M8, as the verifier expected; raising §5.11's cap or
+    revising the target is the orchestrator's decision. M8's run times are in its milestone below.
+
 ## Escalated rules
 
 Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria.
 
 - `R-message-content` (remainder, Q-17, M7): the DM content exception needs a human DM ("Waiting for Rhys").
+- `R-intent-guild-messages`, `R-intent-reactions`, `R-intent-typing` (remainder, Q-22, after the M7 verifier): the
+  delivery of each event under its DM intent needs a human DM ("Waiting for Rhys").
 
 ## Notes for every milestone
 

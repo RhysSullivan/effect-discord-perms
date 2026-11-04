@@ -894,6 +894,13 @@ received when a handler registers (the build waits for the guild, so the first o
 each new session. A dispatch the library cannot decode (malformed, or a channel it cannot resolve even after a
 refresh) is logged and dropped, never handed on half-typed.
 
+(After the M7 verifier) `bot.on`'s types follow the intents of the `Bot` value whose `on` is called, while content
+and event delivery follow the build in `BotRuntime`, which is not parameterised by intents. A program that calls
+`on` on a `Bot` declaring `MessageContent` but is provided `Bot.layer` of a `Bot` without it would compile with
+`content: string` and receive `ContentUnavailable`. So `on` dies at registration when the running build lacks any
+intent its `Bot` declares, naming them (a wiring defect, `test/unit/bot-events.test.ts`); a build with more intents
+than the `Bot` only makes the types conservative.
+
 **The handler boundary names categories, not tags (D1 with a change).** The
 message lists the non-transient categories that remain (at most four names) and
 the tags of uncategorised errors. Revision 1 listed every tag, so with default
@@ -1976,14 +1983,22 @@ orchestrator sets that flag, and §4.4 reads it back.
 - `gateway/Codec.ts` replaces `DiscordWSCodec` with a JSON codec that adds
   `capabilities: 32768` to Identify (op 2) and leaves other opcodes unchanged
   (`[cc:src/capabilities-codec.ts]`). It also records the intents bitfield it
-  encoded, for the identity check (§4.4).
+  encoded, for the identity check (§4.4). (After the M7 verifier: the record, intents
+  and capabilities, is read back from the encoded text the socket receives,
+  `Codec.identifiedIn`.)
 - `DiscordLiveWithCapabilities` is dfx's 8-line `DiscordLive` composition with
   this codec (compiled in cross-check). `LOG.md` records the deviation.
 - The truth-table header records `obfuscation: "codec"`.
 - Live check: a scenario denies View on `lab-text`, and the subject's state
   must show `obfuscated: true` (H-160). If it does not, the run fails with "the
-  gateway ignored capabilities". (M7: `Runner.obfuscationProblem`, after the wait of
-  every row whose desired state hides `lab-text` from the subject.)
+  gateway ignored capabilities". (After the M7 verifier: the wait is the check. Under
+  the codec it requires every hidden lab channel but the category to be obfuscated,
+  and resends one still shown with its real overwrites (§5.10 step 3); a resent channel
+  Discord then sends again, its generation moved, and still unobfuscated fails the run
+  with `Wait.CapabilitiesIgnored`, whose message is "the gateway ignored capabilities".
+  One Discord sends nothing for is a late or lost event, a `setup-timeout`. M7's
+  `Runner.obfuscationProblem` ran after the wait had already required obfuscation, so it
+  could never fire.)
 - (M7) The replay rebuilds the subject's state as the codec makes it
   (`Predict.snapshotOf`): a lab channel the subject cannot view is obfuscated with no
   overwrites. Its consequence for the catalog: a timed-out row that hides View is
@@ -3491,6 +3506,18 @@ fails if a constant disagrees with the table.
 21. **Role assignment and the target's rank (H-061).** The table assumes it
     does not matter. If the matrix shows it does, `TargetAboveInHierarchy` is
     added to the role rows and the resolver rule flips.
+22. **DM delivery under the DM intents (after the M7 verifier).** `EventIntents`
+    lets `bot.on("MESSAGE_CREATE")` compile with DirectMessages,
+    `MESSAGE_REACTION_ADD` with DirectMessageReactions and `TYPING_START` with
+    DirectMessageTyping, but the live intent pairs verify only the guild intents:
+    a bot cannot DM another bot (H-158) and the harness never DMs Rhys. Verifying
+    the DM half needs a human to message, react and type in a DM with the subject.
+    Escalated like 17: the remainder of `R-intent-guild-messages`,
+    `R-intent-reactions` and `R-intent-typing` is `escalated` (§5.5), an unmet Done
+    criterion until Rhys decides (a human DM session, or accepting the DM branch as
+    typed and unit-tested through the fake gateway). The alternative, dropping the
+    DM intents from `EventIntents` until they are verified, would make a DM bot
+    impossible to write.
 
 ---
 

@@ -8,11 +8,14 @@
  *   nothing, when Converge found the setup in place): the rest of the view is Converge's read, which nothing changed
  *   since. A read-back that still differs is retried with every read Converge makes (`Converge.readView`);
  * - the subject's guild state equals the desired state's subject-observable projection
- *   (`Materialize.projectionProblems`), watched through `GuildState.changes`, so no request is made. With the codec a
- *   channel the subject cannot view must be obfuscated there; when one still shows its real overwrites after
- *   {@link resendAfter}, the harness resends that channel's own overwrites (`Converge.resendOverwrites`), which makes
- *   Discord send it again, obfuscated for the subject (M7 live: no update arrives on its own when the subject loses
- *   Administrator);
+ *   (`Materialize.projectionProblems`), watched through `GuildState.changes`, so no request is made
+ *   ({@link awaitSubjectState}). With the codec a channel the subject cannot view must be obfuscated there; when one
+ *   still shows its real overwrites after {@link resendAfter}, the harness resends that channel's own overwrites
+ *   (`Converge.resendOverwrites`), which makes Discord send it again, obfuscated for the subject (M7 live: no update
+ *   arrives on its own when the subject loses Administrator). This is the obfuscation check of DESIGN §4.15 (H-160):
+ *   a resent channel that Discord sent again and still shows unobfuscated means the gateway ignored the capability,
+ *   and the run fails with {@link CapabilitiesIgnored}; one Discord sent nothing for is a late or lost event, a
+ *   {@link SetupTimeout};
  * - two oracle reads {@link oracleGap} apart are identical (when the oracle is available and the operation has a
  *   channel);
  * - a further {@link settleGap} has passed.
@@ -23,6 +26,7 @@
 import { Clock, Duration, Effect, Option, Schema, Stream } from "effect"
 import type * as GuildState from "../src/state/GuildState.ts"
 import type { ChannelId, GuildId } from "../src/Snowflake.ts"
+import { entityKey, generationOf, type Snapshot } from "../src/state/Snapshot.ts"
 import * as Converge from "./Converge.ts"
 import type { HarnessRest } from "./Identities.ts"
 import type { LabRequestFailed } from "./Lab.ts"
@@ -47,6 +51,86 @@ export const resendAfter = Duration.seconds(2)
 
 /** The setup did not settle within the cap: an infrastructure abort, never a row. */
 export class SetupTimeout extends Schema.TaggedError<SetupTimeout>()("SetupTimeout", { scenario: Schema.String, detail: Schema.String }) {}
+
+/**
+ * The obfuscation check failed (DESIGN §4.15, H-160): a lab channel the subject cannot view, which the wait resent,
+ * arrived again with its real overwrites instead of obfuscated, so the gateway ignored the ChannelObfuscation
+ * capability the subject identifies with (`gateway/Codec.ts`). The run fails: the table's `obfuscation: "codec"`
+ * would be false.
+ */
+export class CapabilitiesIgnored extends Schema.TaggedError<CapabilitiesIgnored>()("CapabilitiesIgnored", {
+  scenario: Schema.String,
+  /** The resent channels Discord sent again unobfuscated. */
+  channels: Schema.Array(Schema.String)
+}) {
+  override get message(): string {
+    return `the gateway ignored capabilities: the subject cannot view ${this.channels.join(", ")}, but Discord sent ${this.channels.length === 1 ? "it" : "them"} again with real overwrites, not obfuscated (H-160)`
+  }
+}
+
+/** The generation of each of `names`' channels in the subject's snapshot (0 when the guild or channel is absent). */
+const channelGenerations = (projection: Materialize.Projection, snapshot: Snapshot, guildId: GuildId, names: ReadonlyArray<LabIds.ChannelName>): ReadonlyMap<LabIds.ChannelName, number> => {
+  const guild = snapshot.guilds.get(guildId)
+  return new Map(names.map((name) => {
+    const view = projection.channels.get(name)
+    return [name, guild === undefined || view === undefined ? 0 : generationOf(guild, entityKey.channel(view.id))] as const
+  }))
+}
+
+/**
+ * Waits until the subject's guild state shows `projection` (see the module comment): first for up to `resendAfterMs`,
+ * then, if channels the subject cannot view still show their real overwrites, after `resend` of those channels, for
+ * what remains of the wait. Succeeds with the channels resent. When the wait runs out, a resent channel whose state
+ * Discord updated since the resend and still shows unobfuscated fails with {@link CapabilitiesIgnored}; anything else
+ * is a {@link SetupTimeout} naming the last differences.
+ */
+export const awaitSubjectState = <E, R>(input: {
+  readonly scenario: string
+  readonly projection: Materialize.Projection
+  readonly guildState: GuildState.Interface
+  readonly guildId: GuildId
+  /** The milliseconds left of the scenario's wait. */
+  readonly remainingMs: Effect.Effect<number>
+  readonly resendAfterMs: number
+  readonly resend: (names: ReadonlyArray<LabIds.ChannelName>) => Effect.Effect<void, E, R>
+}): Effect.Effect<ReadonlyArray<LabIds.ChannelName>, SetupTimeout | CapabilitiesIgnored | E, R> =>
+  Effect.gen(function* () {
+    const { projection, guildState, guildId } = input
+    let last: ReadonlyArray<string> = []
+    const matchedWithin = (ms: number) =>
+      guildState.changes.pipe(
+        Stream.mapEffect((snapshot) =>
+          Effect.map(Clock.currentTimeMillis, (at) => {
+            last = Materialize.projectionProblems(projection, snapshot, guildId, at)
+            return last.length === 0
+          })
+        ),
+        Stream.filter((ok) => ok),
+        Stream.runHead,
+        Effect.timeoutOrElse({ duration: Duration.millis(ms), orElse: () => Effect.succeedNone })
+      )
+    let resent: ReadonlyArray<LabIds.ChannelName> = []
+    let before: ReadonlyMap<LabIds.ChannelName, number> = new Map()
+    let matched = yield* matchedWithin(Math.min(input.resendAfterMs, yield* input.remainingMs))
+    if (Option.isNone(matched)) {
+      const snapshot = yield* guildState.snapshot
+      const stale = Materialize.staleUnobfuscated(projection, snapshot, guildId)
+      if (stale.length > 0) {
+        before = channelGenerations(projection, snapshot, guildId, stale)
+        yield* input.resend(stale)
+        resent = stale
+      }
+      matched = yield* matchedWithin(yield* input.remainingMs)
+    }
+    if (Option.isSome(matched)) return resent
+    // Discord sent a resent channel again (its generation moved) and it is still unobfuscated: the capability was ignored
+    const snapshot = yield* guildState.snapshot
+    const after = channelGenerations(projection, snapshot, guildId, resent)
+    const stillShown = new Set(Materialize.staleUnobfuscated(projection, snapshot, guildId))
+    const ignored = resent.filter((name) => stillShown.has(name) && (after.get(name) ?? 0) > (before.get(name) ?? 0))
+    if (ignored.length > 0) return yield* new CapabilitiesIgnored({ scenario: input.scenario, channels: ignored })
+    return yield* new SetupTimeout({ scenario: input.scenario, detail: `subject state: ${last.join("; ")}` })
+  })
 
 /**
  * An oracle read as the wait compares it: the permissions, the route's absence, or no channel to read (member
@@ -79,7 +163,7 @@ export const settle = (input: {
   readonly channels: ReadonlySet<LabIds.ChannelName>
   /** Converge's read of the lab, and what was written since. */
   readonly converged: { readonly view: Converge.LabView; readonly written: Converge.Written }
-}): Effect.Effect<Settled, SetupTimeout | LabRequestFailed, HarnessRest> =>
+}): Effect.Effect<Settled, SetupTimeout | CapabilitiesIgnored | LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {
     const started = yield* Clock.currentTimeMillis
     const remaining = Effect.map(Clock.currentTimeMillis, (now) => Math.max(0, Duration.toMillis(cap) - (now - started)))
@@ -99,36 +183,19 @@ export const settle = (input: {
       yield* Effect.sleep(Duration.millis(500))
     }
 
-    // the subject's state, against the projection
-    const now = yield* Clock.currentTimeMillis
-    const projection = Materialize.project(input.state, input.ids, now, Predict.obfuscation)
-    let last: ReadonlyArray<string> = []
-    const matchedWithin = (ms: number) =>
-      input.guildState.changes.pipe(
-        Stream.mapEffect((snapshot) =>
-          Effect.map(Clock.currentTimeMillis, (at) => {
-            last = Materialize.projectionProblems(projection, snapshot, input.guildId, at)
-            return last.length === 0
-          })
-        ),
-        Stream.filter((ok) => ok),
-        Stream.runHead,
-        Effect.timeoutOrElse({ duration: Duration.millis(ms), orElse: () => Effect.succeedNone })
-      )
-    let resent: ReadonlyArray<LabIds.ChannelName> = []
-    let matched = yield* matchedWithin(Math.min(Duration.toMillis(resendAfter), yield* remaining))
-    if (Option.isNone(matched)) {
-      // M7 live: Discord sends no obfuscated update for the channels a bot stops seeing when it loses Administrator,
-      // so its state keeps their real overwrites; resending a channel's own overwrites makes Discord send it again,
-      // obfuscated for the subject
-      const stale = Materialize.staleUnobfuscated(projection, yield* input.guildState.snapshot, input.guildId)
-      if (stale.length > 0) {
-        yield* Converge.resendOverwrites(input.state, input.ids, stale)
-        resent = stale
-      }
-      matched = yield* matchedWithin(yield* remaining)
-    }
-    if (Option.isNone(matched)) return yield* timeout(`subject state: ${last.join("; ")}`)
+    // the subject's state, against the projection. M7 live: Discord sends no obfuscated update for the channels a
+    // bot stops seeing when it loses Administrator, so its state keeps their real overwrites; resending a channel's
+    // own overwrites makes Discord send it again, obfuscated for the subject
+    const projection = Materialize.project(input.state, input.ids, yield* Clock.currentTimeMillis, Predict.obfuscation)
+    const resent = yield* awaitSubjectState({
+      scenario: input.scenario,
+      projection,
+      guildState: input.guildState,
+      guildId: input.guildId,
+      remainingMs: remaining,
+      resendAfterMs: Duration.toMillis(resendAfter),
+      resend: (names) => Converge.resendOverwrites(input.state, input.ids, names)
+    })
 
     // the oracle, stable across two reads
     let previous = yield* input.readOracle

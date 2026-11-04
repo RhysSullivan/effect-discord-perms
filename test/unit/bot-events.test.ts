@@ -228,6 +228,20 @@ describe("bot.on", () => {
     )
   )
 
+  it.live("dies at registration when the Bot declares an intent the running build lacks, and accepts a Bot with fewer (the M7 verifier)", () =>
+    withBot(["Guilds", "GuildMessages"], () =>
+      Effect.gen(function* () {
+        // typed with MessageContent (content: string), but the build identified without it
+        const wider = Bot.make({ intents: ["Guilds", "GuildMessages", "MessageContent"] })
+        const exit = yield* Effect.exit(Effect.scoped(wider.on("MESSAGE_CREATE", (event) => Effect.log(event.message.content.toUpperCase()))))
+        expect(Exit.isFailure(exit) && !exit.cause.reasons.some((reason) => reason._tag === "Fail")).toBe(true)
+        expect(Exit.isFailure(exit) ? String(exit.cause) : "").toContain("this Bot declares MessageContent, which the running bot build did not identify with")
+        const narrower = Bot.make({ intents: ["Guilds"] })
+        expect(yield* Effect.exit(Effect.scoped(narrower.on("CHANNEL_UPDATE", () => Effect.void)))).toStrictEqual(Exit.void)
+      })
+    )
+  )
+
   it.live("hands CHANNEL_UPDATE a handle of the channel's kind, flagged when Discord obfuscated it (H-160)", () =>
     withBot(["Guilds"], (gateway) =>
       Effect.gen(function* () {
