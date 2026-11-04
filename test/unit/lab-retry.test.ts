@@ -1,3 +1,4 @@
+import * as CommandBudget from "../../harness/CommandBudget.ts"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit, Fiber, Option, Ref } from "effect"
 import * as TestClock from "effect/testing/TestClock"
@@ -125,7 +126,7 @@ describe("lab steps through the shared client", () => {
         const reads = (yield* client.recorded).length - before
         const stats = yield* (yield* Pacing).stats
         return { read, reads, retries: stats.labRetries }
-      }).pipe(Effect.provide(compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 })))
+      }).pipe(Effect.provide(compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 }, CommandBudget.layerMemory())))
       expect(result.read).toMatchObject({ id: "300000000000000001" })
       expect(result.reads).toBe(2)
       expect(result.retries).toEqual([["test: read a channel", 1]])

@@ -1,3 +1,4 @@
+import * as CommandBudget from "../../harness/CommandBudget.ts"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit, Option } from "effect"
 import * as Headers from "effect/http/Headers"
@@ -25,7 +26,7 @@ describe("harness identities", () => {
     Effect.gen(function* () {
       const client = yield* makeRecordingClient(withStartup(() => ({ status: 200, body: { id: "200000000000000009", username: "fake" } })))
       const gateway = yield* fakeSubjectGateway()
-      const layer = compose(client.layer, gateway.layer, fakeCredentials, pacing)
+      const layer = compose(client.layer, gateway.layer, fakeCredentials, pacing, CommandBudget.layerMemory())
       const { before, after, startup } = yield* Effect.gen(function* () {
         const harness = yield* HarnessRest
         const target = yield* TargetRest
@@ -74,7 +75,7 @@ describe("harness identities", () => {
         })
       )
       const gateway = yield* fakeSubjectGateway()
-      const layer = compose(client.layer, gateway.layer, fakeCredentials, pacing)
+      const layer = compose(client.layer, gateway.layer, fakeCredentials, pacing, CommandBudget.layerMemory())
       const { before, after, target, subject } = yield* Effect.gen(function* () {
         const before = yield* (yield* Pacing).stats
         yield* (yield* HarnessRest).getChannel("300000000000000001")
@@ -100,7 +101,7 @@ describe("harness identities", () => {
     Effect.gen(function* () {
       const client = yield* makeRecordingClient(withStartup(() => ({ status: 200, body: {} })))
       const gateway = yield* fakeSubjectGateway()
-      const layer = compose(client.layer, gateway.layer, fakeCredentials, pacing)
+      const layer = compose(client.layer, gateway.layer, fakeCredentials, pacing, CommandBudget.layerMemory())
       const { exit, sent } = yield* Effect.gen(function* () {
         const startup = (yield* client.recorded).length
         const target = yield* TargetRest

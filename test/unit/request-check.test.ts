@@ -1,3 +1,4 @@
+import * as CommandBudget from "../../harness/CommandBudget.ts"
 import { describe, expect, it } from "@effect/vitest"
 import { BunFileSystem } from "@effect/platform-bun"
 import { Cause, Effect, Exit, Option, Schema } from "effect"
@@ -136,7 +137,7 @@ const inLab = <A>(answer: (request: HttpClientRequest.HttpClientRequest) => Answ
       for (const [name, id] of ids.channels) yield* guard.admitChannel({ id, name })
       for (const [name, id] of ids.roles) yield* guard.admitRole({ id, name, botId: undefined })
       return yield* body(yield* BotRuntime, canned)
-    }).pipe(Effect.provide(Identities.compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 })))
+    }).pipe(Effect.provide(Identities.compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 }, CommandBudget.layerMemory())))
     return { result, sent: yield* client.recorded }
   })
 

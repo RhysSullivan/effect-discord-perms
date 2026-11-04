@@ -2,8 +2,8 @@
  * The live harness's identities (DESIGN §4.2, §5.6; G1, D13).
  *
  * - **One shared base `HttpClient`**, outside every `Layer.fresh`: it runs the Perms Lab guard on every request
- *   (`Lab.ts`), takes a slot of the global bucket and counts the request (`Pacing.ts`), and counts 401, 403
- *   and 429 responses. It records the methods a lab step sends (`Lab.CurrentLabStep`), so the step is retried
+ *   (`Lab.ts`), counts the command creates a request may make against the daily budget (`CommandBudget.ts`, M8), takes
+ *   a slot of the global bucket and counts the request (`Pacing.ts`), and counts 401, 403 and 429 responses. It records the methods a lab step sends (`Lab.CurrentLabStep`), so the step is retried
  *   after a 5xx only when they are repeatable, and counts each retry. Because it is outside every fresh boundary, there is exactly one bucket and one set of
  *   counters for all identities (a shared service provided inside a fresh layer would be rebuilt per identity).
  * - **Each identity's dfx stack is wrapped in `Layer.fresh`.** Without it Effect memoises `DiscordRESTLive` by
@@ -17,7 +17,7 @@
  * (which takes the live lock and reads `.env`); the identity tests pass a recording fake client, a fake gateway
  * and fake credentials, and nothing else differs.
  */
-import { BunHttpClient, BunSocket } from "@effect/platform-bun"
+import { BunFileSystem, BunHttpClient, BunSocket } from "@effect/platform-bun"
 import { DiscordConfig, DiscordRESTMemoryLive } from "dfx"
 import { DiscordREST, type DiscordRestService } from "dfx/DiscordREST"
 import { Clock, Config, Context, Duration, Effect, Layer, Option, Ref, type Scope } from "effect"
@@ -32,6 +32,7 @@ import type { Intent } from "../src/gateway/Intents.ts"
 import { DispatchTap } from "../src/state/Hook.ts"
 import type { StartupFailed } from "../src/bot/Startup.ts"
 import { Credentials, type IdentityCredentials, type LabCredentials, layer as credentialsLayer } from "../src/config/Credentials.ts"
+import * as CommandBudget from "./CommandBudget.ts"
 import { cannedRoute, Capture, DryRun } from "./DryRun.ts"
 import * as Lab from "./Lab.ts"
 import * as PacingModule from "./Pacing.ts"
@@ -49,12 +50,13 @@ export class TargetRest extends Context.Service<TargetRest, DiscordRestService>(
  * and is answered with its canned body instead of being sent; under a capture a request that passes the guard is
  * recorded, then sent.
  */
-export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpClient.HttpClient | PacingModule.Pacing | Lab.LabGuard> = Layer.effect(
+export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpClient.HttpClient | PacingModule.Pacing | Lab.LabGuard | CommandBudget.CommandBudget> = Layer.effect(
   HttpClient.HttpClient,
   Effect.gen(function* () {
     const base = yield* HttpClient.HttpClient
     const pacing = yield* PacingModule.Pacing
     const guard = yield* Lab.LabGuard
+    const budget = yield* CommandBudget.CommandBudget
     const sent = base.pipe(
       HttpClient.tapRequest((request) => pacing.take(request.method, request.url)),
       HttpClient.transformResponse(
@@ -78,7 +80,10 @@ export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpCli
           if (Option.isSome(step) && (yield* step.value.record(request.method))) yield* pacing.recordRetry(step.value.step)
           const capture = yield* Capture
           if (Option.isSome(capture)) yield* capture.value.record(request)
-          return yield* sent.execute(request)
+          yield* budget.take(request)
+          const response = yield* sent.execute(request)
+          yield* budget.answered(request, response.status)
+          return response
         }
         // nothing is sent: the guard judges the request as it would the live one, with no kick or ban permit used
         yield* guard.checkDry(request)
@@ -171,7 +176,7 @@ const sessionsLayer: Layer.Layer<Sessions, never, HttpClient.HttpClient | Socket
 )
 
 /** Everything the harness's commands use. */
-export type Services = HarnessRest | TargetRest | SubjectRaw | BotRuntime | SentIdentify | Sessions | PacingModule.Pacing | Lab.LabGuard | Credentials
+export type Services = HarnessRest | TargetRest | SubjectRaw | BotRuntime | SentIdentify | Sessions | PacingModule.Pacing | Lab.LabGuard | CommandBudget.CommandBudget | Credentials
 
 /**
  * The single harness wiring: the identities over the shared client, with pacing and the guard exposed so the
@@ -183,12 +188,17 @@ export const compose = <E1, E2>(
   base: Layer.Layer<HttpClient.HttpClient, E1>,
   socket: Layer.Layer<Socket.WebSocketConstructor>,
   credentials: Layer.Layer<Credentials, E2>,
-  pacing: PacingModule.Options
+  pacing: PacingModule.Options,
+  budget: Layer.Layer<CommandBudget.CommandBudget>
 ): Layer.Layer<Services, E1 | E2 | StartupFailed | Config.ConfigError> => {
   const guard = Layer.unwrap(Effect.map(Effect.service(Credentials), (lab) => Lab.layer(lab.guildId)))
-  const shared = SharedHttpClient.pipe(Layer.provideMerge(Layer.mergeAll(PacingModule.layer(pacing), guard)), Layer.provide(base))
+  const shared = SharedHttpClient.pipe(Layer.provideMerge(Layer.mergeAll(PacingModule.layer(pacing), guard, budget)), Layer.provide(base))
   return Layer.mergeAll(restIdentities, subject, sessionsLayer).pipe(Layer.provide(socket), Layer.provideMerge(shared), Layer.provideMerge(credentials))
 }
 
-/** The live wiring: Bun's HTTP client and WebSocket, and the real credentials (which take the live lock). */
-export const live = (pacing: PacingModule.Options) => compose(BunHttpClient.layer, BunSocket.layerWebSocketConstructor, credentialsLayer, pacing)
+/**
+ * The live wiring: Bun's HTTP client and WebSocket, the real credentials (which take the live lock), and the command
+ * budget over its ledger in `/tmp`.
+ */
+export const live = (pacing: PacingModule.Options) =>
+  compose(BunHttpClient.layer, BunSocket.layerWebSocketConstructor, credentialsLayer, pacing, CommandBudget.layerFile().pipe(Layer.provide(BunFileSystem.layer)))

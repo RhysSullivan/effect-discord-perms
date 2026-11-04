@@ -12,6 +12,7 @@
 import { Schema } from "effect"
 import type { OpName } from "../../src/permissions/Operations.ts"
 import type * as LabIds from "../LabIds.ts"
+import { commandProbeNames } from "./catalog/commands.ts"
 import { sessionNames } from "./catalog/intents.ts"
 
 /** Every probe. */
@@ -92,7 +93,9 @@ export const ProbeName = Schema.Literals([
   "typed-timeout-max",
   "raw-timeout-over",
   // the intent sessions (M7, `catalog/intents.ts`): text, the subject's and the harness's messages
-  ...sessionNames
+  ...sessionNames,
+  // registration and custom_id routes (M8, `catalog/commands.ts`): text, View and SendMessages
+  ...commandProbeNames
 ])
 /** A probe. */
 export type ProbeName = typeof ProbeName.Type
@@ -117,6 +120,12 @@ const send = (touches: ReadonlyArray<LabIds.ChannelName> = []): ProbeMeta => ({ 
  * subject, a bot.
  */
 const session: ProbeMeta = send(["lab-bots-only"])
+
+/**
+ * A registration or route probe (M8, `catalog/commands.ts`): resolved on the channel row of its setup (registration reads
+ * no channel permissions; the route probes send in the scenario channel), touching no other channel.
+ */
+const command: ProbeMeta = send()
 
 /** Each probe's description. */
 export const probes: { readonly [P in ProbeName]: ProbeMeta } = {
@@ -198,5 +207,35 @@ export const probes: { readonly [P in ProbeName]: ProbeMeta } = {
   "session-content-without": session,
   "session-content-mention": session,
   "session-content-reply": session,
-  "session-content-own": session
+  "session-content-own": session,
+  "typed-register-options": command,
+  "typed-register-subcommands": command,
+  "typed-register-choices": command,
+  "typed-sync-identical": command,
+  "typed-sync-channel-types": command,
+  "typed-sync-choices": command,
+  "typed-sync-description": command,
+  "typed-sync-name": command,
+  "typed-sync-option-name": command,
+  "typed-sync-required": command,
+  "raw-command-name-upper": command,
+  "raw-command-name-space": command,
+  "raw-command-name-33": command,
+  "raw-subcommand-name-upper": command,
+  "raw-subcommand-name-space": command,
+  "raw-subcommand-name-33": command,
+  "raw-option-name-upper": command,
+  "raw-option-name-upper-nested": command,
+  "raw-option-order": command,
+  "raw-option-order-nested": command,
+  "raw-option-count": command,
+  "raw-option-count-nested": command,
+  "raw-subcommand-count-nested": command,
+  "raw-group-in-subcommand": command,
+  "raw-group-in-group": command,
+  "raw-subcommand-mixed": command,
+  "raw-subcommand-mixed-nested": command,
+  "raw-choice-wrong-type": command,
+  "typed-custom-id-max": command,
+  "raw-custom-id-over": command
 }

@@ -70,7 +70,12 @@ export const ruleSetups = {
   /** A text channel with ManageChannels (and Connect, which a stage channel's edits need). */
   "text-manage-channels": new Setup({ channel: "text", grants: [{ flags: ["ViewChannel", "ManageChannels", "Connect"], via: "role" }], removals: [], memberState: "normal", fixtures: [] }),
   /** The subject above the target, with ManageNicknames and ModerateMembers. */
-  members: new Setup({ channel: "text", grants: [{ flags: ["ManageNicknames", "ModerateMembers"], via: "role" }], removals: [], memberState: "normal", targetRank: "below", targetAdmin: false, fixtures: [] })
+  members: new Setup({ channel: "text", grants: [{ flags: ["ManageNicknames", "ModerateMembers"], via: "role" }], removals: [], memberState: "normal", targetRank: "below", targetAdmin: false, fixtures: [] }),
+  /**
+   * Registration and custom_id routes (M8): a text channel with View and SendMessages, so the route probes can post a
+   * component (registration reads no channel permissions). Its role state is `text-send`'s, so it costs no role edit.
+   */
+  commands: new Setup({ channel: "text", grants: [{ flags: ["ViewChannel", "SendMessages"], via: "role" }], removals: [], memberState: "normal", fixtures: [] })
 } as const
 
 /** A setup name. */

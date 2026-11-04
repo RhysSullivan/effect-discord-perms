@@ -1,3 +1,4 @@
+import * as CommandBudget from "../../harness/CommandBudget.ts"
 import { describe, expect, it } from "@effect/vitest"
 import { ApplicationFlags } from "discord-api-types/v10"
 import { Effect, Exit, Option } from "effect"
@@ -108,7 +109,7 @@ const attempt = (world: World, admitLabText: boolean) =>
       const write = yield* Effect.exit((yield* TargetRest).createMessage(labText, { content: "after the identity checks" }))
       const writeSent = (yield* client.recorded).length > sentBefore
       return { checked, admitted, welcomeAdmitted, write, writeSent }
-    }).pipe(Effect.provide(compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 })))
+    }).pipe(Effect.provide(compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 }, CommandBudget.layerMemory())))
   })
 
 const failedCheck = <A, E>(exit: Exit.Exit<A, E>): LabCheckFailed | undefined => {

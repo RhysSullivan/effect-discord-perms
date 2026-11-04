@@ -15,6 +15,9 @@
  * `inventory` (no package script) runs the identity checks and lists the lab guild's channels and roles,
  * read-only, for inspecting the lab by hand.
  *
+ * `record-commands` (no package script, M8) runs the identity checks and records how Discord stores the subject's
+ * commands in `fixtures/commands-canonical.json` (`RecordCommands.ts`), leaving the subject with no guild commands.
+ *
  * Every command takes the live lock through `Credentials` and talks to Discord only through the identities of
  * `Identities.ts` (guarded, paced, counted). Failures are printed as their tag and safe fields; tokens are
  * `Redacted` and never reach the output.
@@ -25,7 +28,9 @@ import * as Identities from "./Identities.ts"
 import * as IdentityCheck from "./IdentityCheck.ts"
 import { LabCheckFailed } from "./Lab.ts"
 import { Pacing, defaults as pacingDefaults } from "./Pacing.ts"
+import * as CommandBudget from "./CommandBudget.ts"
 import * as Provision from "./Provision.ts"
+import * as RecordCommands from "./RecordCommands.ts"
 import * as Reset from "./Reset.ts"
 import * as Runner from "./Runner.ts"
 import * as SelfTest from "./SelfTest.ts"
@@ -34,7 +39,7 @@ import * as Smoke from "./Smoke.ts"
 /** Every live command is an infrastructure abort after this long; the matrix gets 60 minutes (§5.11). */
 const commandDeadline = (name: string) => (name === "run" ? Duration.minutes(60) : Duration.minutes(30))
 
-const usage = "usage: bun harness/main.ts reset | smoke | selftest | inventory | run [--repeat N] [--only glob] [--write] [--compare]"
+const usage = "usage: bun harness/main.ts reset | smoke | selftest | inventory | record-commands | run [--repeat N] [--only glob] [--write] [--compare]"
 
 const printIdentities = (report: IdentityCheck.IdentityReport) => {
   console.log(`identities: harness ${report.harness.userId} (${report.harness.username}), subject ${report.subject.userId} (${report.subject.username}), target ${report.target.userId} (${report.target.username})`)
@@ -123,6 +128,19 @@ const command = (name: string, args: ReadonlyArray<string>) =>
         console.log(`second reset: ${Reset.summary(result.secondReset)}`)
         const stats = yield* (yield* Pacing).stats
         console.log(`requests: ${stats.requests}, writes: ${stats.writes}, invalid (401/403/429): ${stats.invalid}, lab steps retried after a 5xx: ${Runner.retriedSince([], stats.labRetries)}`)
+        return
+      }
+      case "record-commands": {
+        const report = yield* IdentityCheck.run
+        printIdentities(report)
+        const fixture = yield* RecordCommands.run(report)
+        for (const command of fixture.commands) {
+          const added = Object.keys(command.stored).filter((key) => !(key in command.sent)).sort()
+          console.log(`  ${String(command.sent["name"])}: stored with ${added.join(", ") || "nothing"} beyond what was sent`)
+        }
+        console.log(`written: ${RecordCommands.fixturePath}`)
+        const budget = yield* (yield* CommandBudget.CommandBudget).stats
+        console.log(`command creates counted: ${budget.thisProcess} now, ${budget.last24h} in the last 24 hours (cap ${CommandBudget.dailyCap})`)
         return
       }
       case "inventory": {

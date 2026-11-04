@@ -13,8 +13,10 @@ export interface LiveSide {
 
 /**
  * A live pair: both sides run on a byte-identical Setup, and each side has its own full expectation. `also` holds
- * further sides on the same setup that the rule's valid case covers (M7: the message-content exceptions, a mention,
- * a ping-on reply and the bot's own message, each delivered without the intent), checked like the two.
+ * further sides of the rule on the same setup, checked like the two: more valid cases (M7: the message-content
+ * exceptions, a mention, a ping-on reply and the bot's own message, each delivered without the intent), or the rule at
+ * another level or for another field (M8: a command rule nested in subcommands and groups, a mutation of each
+ * canonical field).
  */
 export interface LivePair {
   readonly kind: "pair"
@@ -69,6 +71,28 @@ const typedSend = ["typed-send", succeeded] as const
 
 const delivered = (event: string): Observation => ({ _tag: "EventDelivered", event })
 const absent = (event: string, canary: string): Observation => ({ _tag: "EventAbsent", event, canary })
+
+/**
+ * A registration rule's sides (M8, `catalog/commands.ts`): the typed top-level registration succeeds, `invalid` is the
+ * top-level raw side, and `also` holds the nested typed registration (which succeeds) and the nested raw sides.
+ */
+const commandSides = (invalid: string, expect: Observation, nested: ReadonlyArray<readonly [probe: string, expect: Observation]>): LivePair => ({
+  kind: "pair",
+  setup: "commands",
+  valid: { scenario: "rule/commands/typed-register-options", expect: succeeded },
+  invalid: { scenario: `rule/commands/${invalid}`, expect },
+  also: [{ scenario: "rule/commands/typed-register-subcommands", expect: succeeded }, ...nested.map(([probe, observation]) => ({ scenario: `rule/commands/${probe}`, expect: observation }))]
+})
+
+/** A name rule: `raw-command-name-<kind>` at the top level and `raw-subcommand-name-<kind>` nested. */
+const commandPair = (id: `R-${string}`, statement: string, claims: readonly [string, ...Array<string>], kind: "upper" | "space" | "33", top: Observation, nested: Observation): Rule => ({
+  id,
+  statement,
+  pass: "test/types/pass/commands.ts",
+  fail: "test/types/fail/commands.ts",
+  claims,
+  live: commandSides(`raw-command-name-${kind}`, top, [[`raw-subcommand-name-${kind}`, nested]])
+})
 
 /** An intent rule's pair (M7): the session with one of the event's intents receives it; the one without does not, after a canary. */
 const intentPair = (name: string, event: string, canary: string): LivePair =>
@@ -517,6 +541,134 @@ export const rules: ReadonlyArray<Rule> = [
       ]
     },
     remainder: { kind: "escalated", question: "Q-17" }
+  },
+  // ---- commands and registration (§2.8, §4.14, M8): typed registrations through the library / raw POSTs under one
+  // command name (H-205), at the top level and nested ----
+  commandPair(
+    "R-command-name-lowercase",
+    "command, subcommand and group names are lowercase (a literal name that is not fails with its lowercase form)",
+    ['\'"ban"\'', "names must be lowercase: add"],
+    "upper",
+    { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "name", code: "APPLICATION_COMMAND_INVALID_NAME" }] },
+    { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.name", code: "APPLICATION_COMMAND_INVALID_NAME" }] }
+  ),
+  commandPair(
+    "R-command-name-spaces",
+    "command, subcommand and group names have no spaces",
+    ["names cannot contain spaces: ban user", "names cannot contain spaces: lab sub"],
+    "space",
+    { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "name", code: "STRING_TYPE_REGEX" }] },
+    { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.name", code: "STRING_TYPE_REGEX" }] }
+  ),
+  commandPair(
+    "R-command-name-length",
+    "command, subcommand and group names are 1 to 32 characters (the typed sides register 32)",
+    ["names are 1 to 32 characters"],
+    "33",
+    { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "name", code: "BASE_TYPE_BAD_LENGTH" }] },
+    { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.name", code: "BASE_TYPE_BAD_LENGTH" }] }
+  ),
+  {
+    id: "R-option-name-lowercase",
+    statement: "value option names are lowercase, at the top level and in subcommands",
+    pass: "test/types/pass/commands.ts",
+    fail: "test/types/fail/commands.ts",
+    claims: ["names must be lowercase: reason", "names must be lowercase: user"],
+    live: commandSides("raw-option-name-upper", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.name", code: "APPLICATION_COMMAND_INVALID_NAME" }] }, [
+      ["raw-option-name-upper-nested", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.options.0.name", code: "APPLICATION_COMMAND_INVALID_NAME" }] }]
+    ])
+  },
+  {
+    id: "R-option-order",
+    statement: "required options come before every optional option, at the top level and in subcommands",
+    pass: "test/types/pass/commands.ts",
+    fail: "test/types/fail/commands.ts",
+    claims: ["required option feature must come before every optional option", "required option user must come before every optional option"],
+    live: commandSides("raw-option-order", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.1", code: "APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID" }] }, [
+      ["raw-option-order-nested", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.options.1", code: "APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID" }] }]
+    ])
+  },
+  {
+    id: "R-option-count",
+    statement: "at most 25 options, and at most 25 subcommands and groups, per level (the typed sides register 25)",
+    pass: "test/types/pass/commands.ts",
+    fail: "test/types/fail/commands.ts",
+    claims: ["at most 25 options per level", "at most 25 subcommands per level"],
+    live: commandSides("raw-option-count", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options", code: "BASE_TYPE_MAX_LENGTH" }] }, [
+      ["raw-option-count-nested", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.options", code: "BASE_TYPE_MAX_LENGTH" }] }],
+      ["raw-subcommand-count-nested", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.options", code: "BASE_TYPE_MAX_LENGTH" }] }]
+    ])
+  },
+  {
+    id: "R-subcommand-nesting",
+    statement: "a group holds only subcommands and a subcommand only value options: no group in a group or a subcommand (H-196)",
+    pass: "test/types/pass/commands.ts",
+    fail: "test/types/fail/commands.ts",
+    claims: ['\'"subcommand"\'', '\'"group"\''],
+    live: {
+      kind: "pair",
+      setup: "commands",
+      valid: { scenario: "rule/commands/typed-register-subcommands", expect: succeeded },
+      // a group's or a subcommand's options admit only subcommands or only value options: a group there fails the union
+      invalid: { scenario: "rule/commands/raw-group-in-group", expect: { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.options.0", code: "UNION_TYPE_CHOICES" }] } },
+      also: [{ scenario: "rule/commands/raw-group-in-subcommand", expect: { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.options.0", code: "UNION_TYPE_CHOICES" }] } }]
+    }
+  },
+  {
+    id: "R-subcommand-mixing",
+    statement: "no value options next to subcommands, at the top level (Command.withSubcommands) and in a group (H-197)",
+    pass: "test/types/pass/commands.ts",
+    fail: "test/types/fail/commands.ts",
+    claims: ["subcommands and groups go in Command.withSubcommands", '\'"string"\''],
+    // H-197 holds: the top level refuses a subcommand after a value option; a group refuses a value option among its subcommands
+    live: commandSides("raw-subcommand-mixed", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.1", code: "APPLICATION_COMMAND_OPTIONS_TYPE_INVALID" }] }, [
+      ["raw-subcommand-mixed-nested", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.options.1", code: "UNION_TYPE_CHOICES" }] }]
+    ])
+  },
+  {
+    id: "R-options-typed",
+    statement:
+      "a handler's option values are typed from the definition: required versus optional, choices as their literal union (of the option's type), channel options as the handles of their kinds",
+    pass: "test/types/pass/commands.ts",
+    fail: "test/types/fail/commands.ts",
+    claims: ["Type 'number' is not assignable to type 'string'", "possibly 'undefined'", "have no overlap", "Property 'createPost' does not exist"],
+    live: pair(
+      "commands",
+      ["typed-register-choices", applied("options")],
+      ["raw-choice-wrong-type", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.choices.0.value", code: "STRING_TYPE_CONVERT" }] }]
+    ),
+    // a handler receiving real option values needs a human to run the command (Q-18)
+    remainder: { kind: "escalated", question: "Q-18" }
+  },
+  {
+    id: "R-registration-diff",
+    statement:
+      "a bot registers only commands Command.* built (so every definition passed its checks), and registration writes only when a canonical field changed: once per change, never for the same definitions",
+    pass: "test/types/pass/commands.ts",
+    fail: "test/types/fail/commands.ts",
+    claims: ["InvocationType"],
+    live: {
+      kind: "pair",
+      setup: "commands",
+      valid: { scenario: "rule/commands/typed-sync-identical", expect: { _tag: "Writes", count: 0 } },
+      invalid: { scenario: "rule/commands/typed-sync-description", expect: { _tag: "Writes", count: 1 } },
+      also: (["channel-types", "choices", "name", "option-name", "required"] as const).map((field) => ({ scenario: `rule/commands/typed-sync-${field}`, expect: { _tag: "Writes", count: 1 } }))
+    }
+  },
+  {
+    id: "R-custom-id-routing",
+    statement:
+      "a component's custom_id comes from a route: schema-typed data, checked against 100 characters when built (CustomIdTooLong), decoded back to the same data; a route name has no ':'",
+    pass: "test/types/pass/routes.ts",
+    fail: "test/types/fail/routes.ts",
+    claims: ["route names cannot contain ':'", 'UnhandledErrors<"payload">', "Type '\"maybe\"' is not assignable", "have no overlap"],
+    live: pair(
+      "commands",
+      ["typed-custom-id-max", succeeded],
+      ["raw-custom-id-over", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "components.0.components.0.custom_id", code: "BASE_TYPE_BAD_LENGTH" }] }]
+    ),
+    // a handler receiving a real click needs a human (Q-18)
+    remainder: { kind: "escalated", question: "Q-18" }
   },
   // ---- the handler boundary (§2.7, D1, D6) ----
   {

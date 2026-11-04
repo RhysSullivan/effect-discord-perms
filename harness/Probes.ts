@@ -27,7 +27,7 @@ import type { AllErrors } from "../src/errors/index.ts"
 import type { Transient } from "../src/errors/Transient.ts"
 import { memberHandle } from "../src/members/Member.ts"
 import { row, textDisplay } from "../src/payload/Components.ts"
-import { Limits } from "../src/payload/Limits.ts"
+import { Limits, lengthOf } from "../src/payload/Limits.ts"
 import { type Answered, send } from "../src/rest/Request.ts"
 import type * as Schemas from "../src/rest/Schemas.ts"
 import type { ChannelId, MessageId, RoleId, StickerId } from "../src/Snowflake.ts"
@@ -42,6 +42,9 @@ import type { Observation } from "./scenario/Dsl.ts"
 import type { ProbeName } from "./scenario/Probes.ts"
 import { isSessionName } from "./scenario/catalog/intents.ts"
 import * as SessionRun from "./Sessions.ts"
+import * as CommandProbes from "./CommandProbes.ts"
+import { isRegistrationProbe } from "./CommandProbes.ts"
+import type { Pacing } from "./Pacing.ts"
 import type { RawOutcome } from "./TruthTable.ts"
 
 /** Everything a probe reads. */
@@ -90,6 +93,9 @@ const MessageRead = Schema.Struct({
   tts: Schema.Boolean,
   mentions: Schema.Array(Schema.Struct({ id: Schema.String })),
   mention_roles: Schema.Array(Schema.String)
+})
+const ComponentsRead = Schema.Struct({
+  components: Schema.Array(Schema.Struct({ components: Schema.Array(Schema.Struct({ custom_id: Schema.optionalKey(Schema.String) })) }))
 })
 const ChannelRead = Schema.Struct({ id: Schema.String, topic: Schema.optionalKey(Schema.NullOr(Schema.String)), rate_limit_per_user: Schema.optionalKey(Schema.Int) })
 
@@ -153,10 +159,12 @@ export const asciiString = (count: number): string => "a".repeat(count)
 const day = 86_400_000
 
 /** Runs `probe` (see the module comment). */
-export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<ProbeResult, Transient | import("./Lab.ts").LabRequestFailed, SubjectRaw | HarnessRest | TargetRest | LabGuard | Sessions> =>
+export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<ProbeResult, Transient | import("./Lab.ts").LabRequestFailed, SubjectRaw | HarnessRest | TargetRest | LabGuard | Sessions | Pacing> =>
   Effect.gen(function* () {
     // an intent session (M7) is a probe too: its own gateway session, trigger and canary (`Sessions.ts`)
     if (isSessionName(probe)) return yield* SessionRun.run(probe, context)
+    // so is a registration (M8, `CommandProbes.ts`)
+    if (isRegistrationProbe(probe)) return yield* CommandProbes.run(probe, context)
     const { runtime, ids } = context
     const guildId = ids.guildId
     const here = context.channelId
@@ -470,6 +478,22 @@ export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<Prob
         const timedOut = yield* typed(member.timeout(new Date(now + Limits.timeoutDays * day)))
         return result(timedOut.observation, timedOut.raw)
       }
+      // ---- custom_id routes (M8): an ID built at exactly the limit is read back and decoded; one over is refused ----
+      case "typed-custom-id-max": {
+        const route = ComponentRoute.make("lab-route", Schema.Struct({ pad: Schema.String }))
+        const data = { pad: "x".repeat(Limits.customId - lengthOf(`lab-route:{"pad":""}`)) }
+        const customId = yield* route.customId(data).pipe(Effect.mapError((error) => new Error(`probe: the route built ${error.length} characters`)), Effect.orDie)
+        const sent = yield* typedSend({ content: "lab rule", components: [row([{ kind: "button", style: "primary", label: "Go", customId }])] })
+        if (sent.value === undefined) return result(sent.observation, sent.raw)
+        // the custom_id as Discord stores it, through the harness's own read of the message, decoded by the route
+        const message = yield* harness.getMessage(here, sent.value.message.id).pipe(labStep("probe: read the message back"), Effect.flatMap(decodeOrDie(ComponentsRead, "the message")))
+        const stored = message.components[0]?.components[0]?.custom_id
+        const decoded = stored === undefined ? Option.none() : route.decode(stored)
+        const roundTripped = stored !== undefined && lengthOf(stored) === Limits.customId && Option.isSome(decoded) && decoded.value.pad === data.pad
+        return result(roundTripped ? succeeded : { _tag: "Rejected", status: 0, code: 0, inner: [{ path: "library", code: `custom_id read back as ${stored ?? "nothing"}` }] }, sent.raw)
+      }
+      case "raw-custom-id-over":
+        return fromRaw(yield* rawCreate(here, { content: "lab rule", components: [{ type: 1, components: [{ type: 2, style: 1, label: "Go", custom_id: "x".repeat(Limits.customId + 1) }] }] }))
       case "raw-timeout-over": {
         const until = new Date(context.now + Limits.timeoutDays * day + 3_600_000).toISOString()
         return fromRaw(yield* raw("/guilds/{guild.id}/members/{user.id}", "PATCH", (subject) => subject.updateGuildMember(guildId, ids.targetUserId, { communication_disabled_until: until })))

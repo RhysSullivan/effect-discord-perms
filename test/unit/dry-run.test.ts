@@ -1,3 +1,4 @@
+import * as CommandBudget from "../../harness/CommandBudget.ts"
 import { describe, expect, it } from "@effect/vitest"
 import { BunFileSystem } from "@effect/platform-bun"
 import { Effect, Exit, Option } from "effect"
@@ -38,7 +39,7 @@ describe("the dry run", () => {
         const sentDuringDryRun = (yield* client.recorded).length - before
         const live = yield* target.createMessage(labText, { content: "live" })
         return { dry, refused, sentDuringDryRun, live, sentAfter: (yield* client.recorded).length - before }
-      }).pipe(Effect.provide(compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 })))
+      }).pipe(Effect.provide(compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 }, CommandBudget.layerMemory())))
       expect(result.dry.id).toBe("100000000000000001")
       expect(Exit.isFailure(result.refused) && String(result.refused)).toContain("lab guard refused")
       expect(result.sentDuringDryRun).toBe(0)
@@ -70,7 +71,7 @@ describe("the dry run", () => {
         // the dry kick used no permit, and created none: the live kick is refused
         const liveKick = yield* Effect.exit(target.deleteGuildMember(fakeGuildId, targetUser))
         return { harnessKick, sentDuringDryRun, liveKick }
-      }).pipe(Effect.provide(compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 })))
+      }).pipe(Effect.provide(compose(client.layer, gateway.layer, fakeCredentials, { requestsPerSecond: 5, invalidCap: 1500 }, CommandBudget.layerMemory())))
       expect(String(result.harnessKick)).toContain("lab guard refused")
       expect(String(result.liveKick)).toContain("a kick needs a permit")
       expect(result.sentDuringDryRun).toBe(0)
