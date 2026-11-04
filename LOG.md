@@ -1881,6 +1881,12 @@ Live, in order (each alone under the lock, on minisforum):
     `bun run verify:offline` is green with it (gen:errors, typecheck, 1,440 tests in 47 files, test:types 9 pass and 10
     fail fixtures with 63 diagnostics, hover 4 files and 16 markers, rules, budget). It took 428 s longer than the
     2,479 s run with the same request count: every step's average was 20 to 30% slower (Discord's latency at 2 a.m.).
+  - **exit run A**, after the bucket refilled, on `a3fb37b` (only LOG.md changed since W): `bun run verify:live`
+    (`run --write --compare`) exited 0: role budget 90 left (88 needed; a start four minutes earlier stopped before any
+    scenario with 87), 512 scenarios in 2,516 s, 8,966 requests, 2,708 writes, 600 invalid, 429s retried by dfx on 13
+    reactions and one channel edit, no lab step retried, oracle available, **0 mismatches**, `compare: identical to the
+    previous table` (W's, committed); it wrote the same bytes (`8476671c...8fbe30`). 23 rows again needed the
+    obfuscation resend.
 - **Run time (the M6 verifier's first finding), before and after.** M6's full runs: 3,131 to 3,243 s for 486
   scenarios (6.4 to 6.7 s each), some 11,077 requests (23 a scenario). M7's complete run above: 2,479 s for 510
   scenarios (4.9 s each, the 15 sessions included), 8,928 requests (17.5 a scenario). Per row, from the run logs
