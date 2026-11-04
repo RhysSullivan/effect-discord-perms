@@ -70,6 +70,24 @@ export interface Interface {
    * hidden object) to its errors; any other answer is an `UnmappedDiscordError` defect.
    */
   readonly read: <A, E>(read: Read<A, E>) => Effect.Effect<A, E | Transient>
+  /**
+   * Runs a request outside any guild (a DM, M7): bounded, mapped and decoded like `execute`'s, with no recompute:
+   * a DM has no guild permissions to refresh, so a permission-like refusal fails with the code's own tag (for
+   * 50013, `PermissionDeniedUnattributed`), never a guess.
+   */
+  readonly executeDirect: <A>(request: DirectRequest<A>) => Effect.Effect<A, ApiError>
+}
+
+/** One request outside any guild (a DM's send, edit or delete). */
+export interface DirectRequest<A> {
+  /** The operation-table row whose tags the answer is mapped against. */
+  readonly op: Recompute.Target["op"]
+  readonly args: Recompute.Target["args"]
+  readonly channelId: string
+  readonly route: Route
+  readonly call: (rest: DiscordRestService) => Effect.Effect<unknown, DiscordRESTError>
+  readonly response: Schema.Decoder<A>
+  readonly limits: LimitFacts
 }
 
 /** One lookup read. */
@@ -141,5 +159,32 @@ export const make = (rest: DiscordRestService, guildState: GuildState.Interface)
         return yield* Effect.fail(refused)
       }).pipe(Effect.withSpan("discord.rest", { attributes: { "discord.route": lookup.route.template, "discord.method": lookup.route.method } }))
 
-    return DiscordApi.of({ execute, read })
+    const executeDirect = <A>(request: DirectRequest<A>): Effect.Effect<A, ApiError> =>
+      Effect.gen(function* () {
+        const { route, limits } = request
+        const extra = undeclarableFields(request.op, limits)
+        if (extra.length > 0) return yield* Effect.die(new Error(`DiscordApi: ${request.op} cannot declare ${extra.join(", ")}`))
+        const answer = yield* send(route.template, route.method, request.call(rest), config.requestDeadline)
+        if (answer._tag === "Ok") {
+          return yield* Schema.decodeUnknownEffect(request.response)(answer.body).pipe(
+            Effect.mapError((error) => new Error(`${route.method} ${route.template}: a 2xx body did not decode: ${error.message}`)),
+            Effect.orDie
+          )
+        }
+        const mapped = mapResponse({ op: request.op, args: request.args, limits }, answer.response, answer.retryAfterMs)
+        switch (mapped._tag) {
+          case "Unmapped":
+            return yield* Effect.die(new UnmappedDiscordError({ operation: request.op, reason: mapped.reason, response: answer.response }))
+          case "Fail":
+            return yield* Effect.fail(mapped.error)
+          case "Recompute":
+            return yield* Effect.fail(mapped.fallback)
+        }
+      }).pipe(
+        Effect.withSpan("discord.rest", {
+          attributes: { "discord.route": request.route.template, "discord.method": request.route.method, "discord.operation": request.op, "discord.channel_id": request.channelId }
+        })
+      )
+
+    return DiscordApi.of({ execute, read, executeDirect })
   })

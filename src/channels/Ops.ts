@@ -28,7 +28,7 @@
  */
 import type { MessageCreateRequest } from "dfx/DiscordREST/Generated"
 import { Clock, Effect, Schema } from "effect"
-import { BotRuntime } from "../bot/Bot.ts"
+import { BotRuntime } from "../bot/Runtime.ts"
 import { DiscordResponse, PreflightDecision } from "../errors/Cause.ts"
 import type { PermissionFlag } from "../errors/Missing.generated.ts"
 import type { ContentTooLong, EmbedTooLarge, MessageEmpty, NameTooLong, PollTooLarge, SlowmodeOutOfRange, TopicTooLong } from "../errors/Payload.ts"
@@ -212,8 +212,8 @@ const noPayload: Preflight.DecideArgs = { payload: [] }
 
 const contentLimit = (content: string | undefined): Pick<LimitFacts, "content"> => (content === undefined ? {} : { content: { length: Limits.lengthOf(content), limit: Limits.Limits.content } })
 
-/** The limits a create payload declares: every field the request carries (see `LimitFacts`). */
-const createLimits = (payload: MessagePayload): LimitFacts => {
+/** The limits a create payload declares: every field the request carries (see `LimitFacts`). Internal (the DM send uses it too). */
+export const createLimits = (payload: MessagePayload): LimitFacts => {
   if (isV2(payload)) return { empty: true }
   return {
     empty: true,

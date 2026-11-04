@@ -17,8 +17,8 @@ export interface GatewayWorld {
 /** The fake gateway and what it saw. */
 export interface FakeGateway {
   readonly layer: Layer.Layer<Socket.WebSocketConstructor>
-  /** Every IDENTIFY payload received: the token is replaced by the user it belongs to; intents are kept. */
-  readonly identified: Effect.Effect<ReadonlyArray<{ readonly user: string | undefined; readonly intents: number }>>
+  /** Every IDENTIFY payload received: the token is replaced by the user it belongs to; intents and capabilities are kept. */
+  readonly identified: Effect.Effect<ReadonlyArray<Identified>>
   /** Sends a dispatch to every socket that has identified. */
   readonly dispatch: (event: string, data: unknown) => Effect.Effect<void>
   /** When the first socket was opened, relative to other recorded events (see `openedAt`). */
@@ -27,12 +27,19 @@ export interface FakeGateway {
 
 type Listener = (event: Socket.WebSocketEvent) => void
 
+/** One IDENTIFY as the fake gateway saw it (`capabilities` is absent when the payload had none). */
+export interface Identified {
+  readonly user: string | undefined
+  readonly intents: number
+  readonly capabilities?: number
+}
+
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null
 
 /** Builds a fake gateway over `world`. `clock` orders socket opening against the caller's own records. */
 export const makeFakeGateway = (world: GatewayWorld, clock: () => number): Effect.Effect<FakeGateway> =>
   Effect.gen(function* () {
-    const identified = yield* Ref.make<ReadonlyArray<{ readonly user: string | undefined; readonly intents: number }>>([])
+    const identified = yield* Ref.make<ReadonlyArray<Identified>>([])
     const sockets = new Set<FakeSocket>()
     let opened = -1
 
@@ -71,8 +78,9 @@ export const makeFakeGateway = (world: GatewayWorld, clock: () => number): Effec
         if (parsed.op === 2 && isRecord(parsed.d)) {
           const token = typeof parsed.d.token === "string" ? parsed.d.token : ""
           const intents = typeof parsed.d.intents === "number" ? parsed.d.intents : -1
+          const capabilities = typeof parsed.d.capabilities === "number" ? { capabilities: parsed.d.capabilities } : {}
           const user = world.userFor(token)
-          Effect.runSync(Ref.update(identified, (entries) => [...entries, { user, intents }]))
+          Effect.runSync(Ref.update(identified, (entries) => [...entries, { user, intents, ...capabilities }]))
           if (user === undefined) {
             setTimeout(() => this.close(4004, "Authentication failed."), 0)
             return

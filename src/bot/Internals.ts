@@ -7,8 +7,10 @@
  * 1. dfx's REST client for the token runs the startup checks 1-3 (`Startup.ts`): a valid token, the portal
  *    flags of the declared privileged intents, and membership of the configured guild;
  * 2. the guild state and the REST wrapper (`rest/DiscordApi.ts`) are built over the same client, and dfx's
- *    gateway (`DiscordLive`) starts with the `DispatchHook` that feeds the state (`state/Hook.ts`), only after the
- *    checks pass;
+ *    gateway starts with the `DispatchHook` that feeds the state (`state/Hook.ts`), only after the checks pass. The
+ *    gateway is dfx's `DiscordLive` composition with the capabilities codec (`gateway/Codec.ts`, D20, M7), so the
+ *    bot identifies with channel obfuscation, and the codec records what Identify sent (`SentIdentify`, which the
+ *    build also returns, for the harness's identity check);
  * 3. with a guild configured, the build waits for its GUILD_CREATE (check 4, `guild-not-ready` after 30 s).
  *
  * `SubjectRaw` is the raw `DiscordREST` of that same build, so the matrix's step (c) shares the subject's token,
@@ -21,16 +23,19 @@
  */
 import { DiscordConfig, DiscordRESTMemoryLive } from "dfx"
 import { DiscordREST, type DiscordRestService } from "dfx/DiscordREST"
-import { DiscordGateway, DiscordLive } from "dfx/gateway"
+import { DiscordGateway } from "dfx/gateway"
 import { type Config, Context, Duration, Effect, Layer, Option } from "effect"
 import type * as HttpClient from "effect/http/HttpClient"
 import type * as Socket from "effect/socket/Socket"
+import { DiscordLiveWithCapabilities, SentIdentify } from "../gateway/Codec.ts"
+import * as Dispatches from "../gateway/Dispatches.ts"
+import { intentBits, privilegedIntents } from "../gateway/Intents.ts"
 import * as Coded429 from "../rest/Coded429.ts"
 import * as DiscordApi from "../rest/DiscordApi.ts"
 import * as RouteCheck from "../rest/RouteCheck.ts"
 import * as GuildState from "../state/GuildState.ts"
 import * as Hook from "../state/Hook.ts"
-import { type Bot, type BotConfig, BotRuntime, type Intent, intentBits, privilegedIntents } from "./Bot.ts"
+import { type BotConfig, type BotDefinition, BotRuntime, type EventSource } from "./Runtime.ts"
 import { restChecks, StartupFailed, type StartupIdentity } from "./Startup.ts"
 
 /** The subject's raw dfx REST client (internal; harness only). */
@@ -44,7 +49,7 @@ class Checked extends Context.Service<Checked, { readonly identity: StartupIdent
   "internal/Checked"
 ) {}
 
-const build = <I extends Intent>(bot: Bot<I>, guildId: BotConfig["guildId"]) => {
+const build = (bot: BotDefinition, guildId: BotConfig["guildId"]) => {
   const checked = Layer.effect(
     Checked,
     Effect.gen(function* () {
@@ -57,32 +62,36 @@ const build = <I extends Intent>(bot: Bot<I>, guildId: BotConfig["guildId"]) => 
     })
   )
   const state = Layer.effect(GuildState.GuildState, Effect.map(Effect.service(Checked), (value) => value.state))
-  const gateway = DiscordLive.pipe(Layer.provide(Hook.layer), Layer.provide(state))
+  const gateway = DiscordLiveWithCapabilities.pipe(Layer.provide(Hook.layer), Layer.provide(state))
   const runtime = Layer.effect(
     BotRuntime,
     Effect.gen(function* () {
       const { identity, state: guildState, api } = yield* Checked
       // the gateway is running once its layer is built; with a guild, wait for its GUILD_CREATE
       yield* DiscordGateway
+      const dispatches = yield* Dispatches.Dispatches
+      const events: EventSource = { subscribe: dispatches.subscribe }
       if (guildId !== undefined) {
         const ready = yield* guildState.awaitGuild(guildId, guildReadyWithin)
         if (Option.isNone(ready)) {
           return yield* new StartupFailed({ reason: "guild-not-ready", detail: `no GUILD_CREATE for ${guildId} within ${Duration.format(guildReadyWithin)}` })
         }
       }
-      return BotRuntime.of({ identity, intents: bot.intents, guildId, guildState, api })
+      return BotRuntime.of({ identity, intents: bot.intents, guildId, guildState, api, events })
     })
   )
   const raw = Layer.effect(SubjectRaw, Effect.map(Effect.service(DiscordREST), (rest) => SubjectRaw.of(rest)))
   // `checked` is built (and its checks pass) before `gateway`, which reuses the same memoised dfx REST client
-  return Layer.mergeAll(runtime, raw).pipe(Layer.provide(gateway), Layer.provide(checked), Layer.provide(DiscordRESTMemoryLive))
+  const identified = Layer.effect(SentIdentify, Effect.service(SentIdentify))
+  // one dispatch stream for the build: the hook (inside the gateway) publishes, the runtime's `events` subscribes
+  return Layer.mergeAll(runtime, raw, identified).pipe(Layer.provide(gateway), Layer.provide(checked), Layer.provide(Dispatches.layer), Layer.provide(DiscordRESTMemoryLive))
 }
 
 /** The library's bot build with the platform open (see the module comment). */
-export const layerWith = <I extends Intent>(
-  bot: Bot<I>,
+export const layerWith = (
+  bot: BotDefinition,
   config: BotConfig
-): Layer.Layer<BotRuntime | SubjectRaw, StartupFailed | Config.ConfigError, HttpClient.HttpClient | Socket.WebSocketConstructor> =>
+): Layer.Layer<BotRuntime | SubjectRaw | SentIdentify, StartupFailed | Config.ConfigError, HttpClient.HttpClient | Socket.WebSocketConstructor> =>
   Layer.fresh(
     Layer.unwrap(
       Effect.gen(function* () {

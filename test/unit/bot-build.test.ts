@@ -8,6 +8,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { Bot, BotRuntime, intentBits } from "../../src/bot/Bot.ts"
 import { BotInternals, SubjectRaw } from "../../src/bot/Internals.ts"
 import { StartupFailed } from "../../src/bot/Startup.ts"
+import { channelObfuscation, SentIdentify } from "../../src/gateway/Codec.ts"
 import * as DiscordApi from "../../src/rest/DiscordApi.ts"
 import { send } from "../../src/rest/Request.ts"
 import * as Schemas from "../../src/rest/Schemas.ts"
@@ -85,7 +86,9 @@ describe("the bot build", () => {
           `/guilds/${ids.guild}/members/${ids.bot}`,
           "/gateway/bot"
         ])
-        expect(yield* gateway.identified).toEqual([{ user: ids.bot, intents: intentBits(["Guilds", "GuildMembers"]) }])
+        // Identify carries the declared intents and the obfuscation capability (the codec, D20), and the codec recorded what it sent
+        expect(yield* gateway.identified).toEqual([{ user: ids.bot, intents: intentBits(["Guilds", "GuildMembers"]), capabilities: channelObfuscation }])
+        expect(yield* (yield* SentIdentify).identified).toEqual([{ intents: intentBits(["Guilds", "GuildMembers"]), capabilities: channelObfuscation }])
 
         // a later dispatch reaches the state through the hook
         yield* gateway.dispatch("CHANNEL_UPDATE", channelUpdate(ids.text, 0, [overwrite(ids.guild, 0, "0", "1024")]))

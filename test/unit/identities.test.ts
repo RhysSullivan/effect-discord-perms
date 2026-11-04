@@ -5,6 +5,7 @@ import { HarnessRest, TargetRest, compose } from "../../harness/Identities.ts"
 import { Pacing } from "../../harness/Pacing.ts"
 import { BotRuntime } from "../../src/bot/Bot.ts"
 import { SubjectRaw } from "../../src/bot/Internals.ts"
+import { channelObfuscation } from "../../src/gateway/Codec.ts"
 import { type Answer, fakeCredentials, fakeSubjectGateway, fakeSubjectUserId, makeRecordingClient, subjectStartupAnswer } from "../support/fakeDiscord.ts"
 
 /**
@@ -53,7 +54,8 @@ describe("harness identities", () => {
       ])
       expect(after.requests - before.requests).toBe(3)
       expect(after.writes).toBe(0)
-      expect(yield* gateway.identified).toEqual([{ user: fakeSubjectUserId, intents: 3 }])
+      // the subject is the library's real bot build: it identified through the capabilities codec (M7)
+      expect(yield* gateway.identified).toEqual([{ user: fakeSubjectUserId, intents: 3, capabilities: channelObfuscation }])
     })
   )
 

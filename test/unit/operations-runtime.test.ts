@@ -90,7 +90,9 @@ const runtimeWith = (options: { readonly before: Snapshot; readonly after?: Snap
       intents: [],
       guildId,
       guildState: stub.state,
-      api
+      api,
+      // these tests run operations only; no dispatch ever arrives
+      events: { subscribe: () => Effect.void }
     }
     return { runtime, sent, refreshes: stub.refreshes }
   })

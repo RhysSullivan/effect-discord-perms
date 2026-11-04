@@ -13,7 +13,7 @@
  * from the handle, which `Members.get` read from Discord; the recompute reads the target again (§4.9).
  */
 import { Clock, Effect, Schema } from "effect"
-import { BotRuntime } from "../bot/Bot.ts"
+import { BotRuntime } from "../bot/Runtime.ts"
 import { perform, type Runtime, type WideError } from "../channels/Ops.ts"
 import { PreflightDecision } from "../errors/Cause.ts"
 import type { NicknameTooLong, TimeoutTooLong } from "../errors/Payload.ts"
