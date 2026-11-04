@@ -2123,4 +2123,4 @@ Live, in order (each alone under the lock, on minisforum):
     left (88 needed), 542 scenarios in 2,905 s, 9,263 requests, 2,745 writes, 605 invalid, 429s retried by dfx on 15
     reactions, one channel edit, one command POST and two command PUTs, no lab step retried, oracle available, **0
     mismatches**. The table (`6199bf0d...b164b6`, 669,042 bytes) adds the 30 command rows; the 512 rows before them are
-    byte-for-byte M7's. The 30 command rows took 298 s of it (rows 173 to 202).
+    byte-for-byte M7's. The 30 command rows took 294 s of it (rows 173 to 202).
