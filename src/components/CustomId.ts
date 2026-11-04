@@ -6,8 +6,9 @@
  * The wire format always goes through the canonical JSON codec: `name + ":" +
  * encode(Schema.fromJsonString(Schema.toCodecJson(schema)))(data)`, decoded with the same codec, so dates,
  * bigints and sets round-trip. The schema needs no services. M6 brings the route and its ID builder, which the
- * component payloads need (`Components.ts`); M8 adds the routing of received interactions and the live
- * round-trip rule.
+ * component payloads need (`Components.ts`); M8 adds `routeNameOf`, the prefix a received `custom_id` is routed by
+ * (the runner that routes interactions is M9's), and the live round-trip rule (`R-custom-id-routing`: an ID built at
+ * exactly 100 characters is accepted, read back from the message and decoded to the same data; one of 101 is refused).
  */
 import { Effect, Option, Schema } from "effect"
 import { CustomIdTooLong } from "../errors/Payload.ts"
@@ -48,4 +49,13 @@ export const ComponentRoute = {
       decode: (customId) => (customId.startsWith(prefix) ? decodeJson(customId.slice(prefix.length)) : Option.none())
     }
   }
+}
+
+/**
+ * The route name a received `custom_id` is routed by: its prefix before the first `:` (route names contain none).
+ * `undefined` for an ID with no `:`, which no route built.
+ */
+export const routeNameOf = (customId: string): string | undefined => {
+  const at = customId.indexOf(":")
+  return at < 0 ? undefined : customId.slice(0, at)
 }

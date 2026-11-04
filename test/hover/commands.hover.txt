@@ -1,0 +1,32 @@
+export const banCommand = ban
+const banCommand: ChatInputCommand<"ban", {
+    readonly options: {
+        readonly days?: number;
+        readonly log?: AnnouncementChannel<never> | TextChannel<never>;
+        readonly reason?: "abuse" | "spam";
+        readonly user: ResolvedUser;
+    };
+}>
+
+export type BanOptions = InvocationOf<typeof ban>["options"]
+type BanOptions = {
+    readonly days?: number;
+    readonly log?: AnnouncementChannel<never> | TextChannel<never>;
+    readonly reason?: "abuse" | "spam";
+    readonly user: ResolvedUser;
+}
+
+export const adminCommand = admin
+const adminCommand: ChatInputCommand<"admin", {
+    readonly group: undefined;
+    readonly subcommand: "warn";
+    readonly options: {
+        readonly user: ResolvedUser;
+    };
+} | {
+    readonly group: "role";
+    readonly subcommand: "add";
+    readonly options: {
+        readonly role: ResolvedRole;
+    };
+}>

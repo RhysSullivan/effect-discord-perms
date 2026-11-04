@@ -5,22 +5,36 @@
  * depend on it without a cycle.
  */
 import { type Config, Context, type Effect, type Redacted, type Scope } from "effect"
+import type { AnyChatInputCommand } from "../commands/Command.ts"
 import type { EventName, Intent } from "../gateway/Intents.ts"
 import type * as DiscordApi from "../rest/DiscordApi.ts"
 import type { GuildId } from "../Snowflake.ts"
 import type * as GuildState from "../state/GuildState.ts"
 import type { StartupIdentity } from "./Startup.ts"
 
-/** What a bot build is configured with. */
-export interface BotConfig {
+/**
+ * What a bot build is configured with: the token, and optionally the guild the bot works in, with the chat-input
+ * commands to register there. Commands are registered in a guild only, never globally, so `commands` needs a guild.
+ */
+export type BotConfig = {
   /** The bot token, read only as `Redacted`. */
   readonly token: Config.Config<Redacted.Redacted<string>>
-  /**
-   * The guild the bot works in: startup checks membership (check 3) and waits for its GUILD_CREATE (check 4),
-   * which only a bot declaring `Guilds` receives.
-   */
-  readonly guildId?: GuildId
-}
+} & (
+  | {
+      /**
+       * The guild the bot works in: startup checks membership (check 3) and waits for its GUILD_CREATE (check 4),
+       * which only a bot declaring `Guilds` receives.
+       */
+      readonly guildId: GuildId
+      /**
+       * The guild's chat-input commands of this application (check 5, `commands/Registration.ts`): after GUILD_CREATE
+       * the build registers exactly these, writing only when the stored ones differ. Absent: the guild's commands are
+       * left alone; `[]` removes them.
+       */
+      readonly commands?: ReadonlyArray<AnyChatInputCommand>
+    }
+  | { readonly guildId?: undefined; readonly commands?: undefined }
+)
 
 /** What a build needs to know of a bot definition: its declared intents. */
 export interface BotDefinition {

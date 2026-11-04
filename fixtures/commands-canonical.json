@@ -1,0 +1,311 @@
+{
+  "commands": [
+    {
+      "sent": {
+        "type": 1,
+        "name": "lab-record-options",
+        "description": "Perms Lab: every option field",
+        "options": [
+          {
+            "type": 3,
+            "name": "text",
+            "description": "a string",
+            "required": true,
+            "choices": [
+              {
+                "name": "One",
+                "value": "one"
+              },
+              {
+                "name": "Two",
+                "value": "two"
+              }
+            ]
+          },
+          {
+            "type": 4,
+            "name": "count",
+            "description": "an integer",
+            "required": true,
+            "min_value": 1,
+            "max_value": 10
+          },
+          {
+            "type": 3,
+            "name": "free",
+            "description": "a string",
+            "autocomplete": true,
+            "min_length": 2,
+            "max_length": 50
+          },
+          {
+            "type": 4,
+            "name": "pick",
+            "description": "an integer",
+            "choices": [
+              {
+                "name": "Five",
+                "value": 5
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "name": "ratio",
+            "description": "a number",
+            "min_value": 0,
+            "max_value": 1.5
+          },
+          {
+            "type": 5,
+            "name": "flag",
+            "description": "a boolean",
+            "required": false
+          },
+          {
+            "type": 6,
+            "name": "user",
+            "description": "a user"
+          },
+          {
+            "type": 8,
+            "name": "role",
+            "description": "a role"
+          },
+          {
+            "type": 7,
+            "name": "where",
+            "description": "a channel",
+            "channel_types": [
+              5,
+              0,
+              11
+            ]
+          },
+          {
+            "type": 7,
+            "name": "anywhere",
+            "description": "any channel"
+          }
+        ]
+      },
+      "stored": {
+        "id": "{command.id}",
+        "application_id": "{application.id}",
+        "version": "{version}",
+        "default_member_permissions": null,
+        "type": 1,
+        "name": "lab-record-options",
+        "description": "Perms Lab: every option field",
+        "guild_id": "{guild.id}",
+        "options": [
+          {
+            "type": 3,
+            "name": "text",
+            "description": "a string",
+            "required": true,
+            "choices": [
+              {
+                "name": "One",
+                "value": "one"
+              },
+              {
+                "name": "Two",
+                "value": "two"
+              }
+            ]
+          },
+          {
+            "type": 4,
+            "name": "count",
+            "description": "an integer",
+            "required": true,
+            "min_value": 1,
+            "max_value": 10
+          },
+          {
+            "type": 3,
+            "name": "free",
+            "description": "a string",
+            "autocomplete": true,
+            "min_length": 2,
+            "max_length": 50
+          },
+          {
+            "type": 4,
+            "name": "pick",
+            "description": "an integer",
+            "choices": [
+              {
+                "name": "Five",
+                "value": 5
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "name": "ratio",
+            "description": "a number",
+            "min_value": 0,
+            "max_value": 1.5
+          },
+          {
+            "type": 5,
+            "name": "flag",
+            "description": "a boolean"
+          },
+          {
+            "type": 6,
+            "name": "user",
+            "description": "a user"
+          },
+          {
+            "type": 8,
+            "name": "role",
+            "description": "a role"
+          },
+          {
+            "type": 7,
+            "name": "where",
+            "description": "a channel",
+            "channel_types": [
+              0,
+              11,
+              5
+            ]
+          },
+          {
+            "type": 7,
+            "name": "anywhere",
+            "description": "any channel"
+          }
+        ],
+        "nsfw": false
+      }
+    },
+    {
+      "sent": {
+        "type": 1,
+        "name": "lab-record-subcommands",
+        "description": "Perms Lab: subcommands and a group",
+        "options": [
+          {
+            "type": 1,
+            "name": "plain",
+            "description": "no options"
+          },
+          {
+            "type": 1,
+            "name": "with",
+            "description": "options",
+            "options": [
+              {
+                "type": 6,
+                "name": "user",
+                "description": "a user",
+                "required": true
+              }
+            ]
+          },
+          {
+            "type": 2,
+            "name": "group",
+            "description": "a group",
+            "options": [
+              {
+                "type": 1,
+                "name": "one",
+                "description": "one"
+              },
+              {
+                "type": 1,
+                "name": "two",
+                "description": "two",
+                "options": [
+                  {
+                    "type": 5,
+                    "name": "flag",
+                    "description": "a boolean"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "stored": {
+        "id": "{command.id}",
+        "application_id": "{application.id}",
+        "version": "{version}",
+        "default_member_permissions": null,
+        "type": 1,
+        "name": "lab-record-subcommands",
+        "description": "Perms Lab: subcommands and a group",
+        "guild_id": "{guild.id}",
+        "options": [
+          {
+            "type": 1,
+            "name": "plain",
+            "description": "no options"
+          },
+          {
+            "type": 1,
+            "name": "with",
+            "description": "options",
+            "options": [
+              {
+                "type": 6,
+                "name": "user",
+                "description": "a user",
+                "required": true
+              }
+            ]
+          },
+          {
+            "type": 2,
+            "name": "group",
+            "description": "a group",
+            "options": [
+              {
+                "type": 1,
+                "name": "one",
+                "description": "one"
+              },
+              {
+                "type": 1,
+                "name": "two",
+                "description": "two",
+                "options": [
+                  {
+                    "type": 5,
+                    "name": "flag",
+                    "description": "a boolean"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nsfw": false
+      }
+    },
+    {
+      "sent": {
+        "type": 1,
+        "name": "lab-record-plain",
+        "description": "Perms Lab: no options"
+      },
+      "stored": {
+        "id": "{command.id}",
+        "application_id": "{application.id}",
+        "version": "{version}",
+        "default_member_permissions": null,
+        "type": 1,
+        "name": "lab-record-plain",
+        "description": "Perms Lab: no options",
+        "guild_id": "{guild.id}",
+        "nsfw": false
+      }
+    }
+  ]
+}

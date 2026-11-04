@@ -11,7 +11,9 @@
  *    gateway is dfx's `DiscordLive` composition with the capabilities codec (`gateway/Codec.ts`, D20, M7), so the
  *    bot identifies with channel obfuscation, and the codec records what Identify sent (`SentIdentify`, which the
  *    build also returns, for the harness's identity check);
- * 3. with a guild configured, the build waits for its GUILD_CREATE (check 4, `guild-not-ready` after 30 s).
+ * 3. with a guild configured, the build waits for its GUILD_CREATE (check 4, `guild-not-ready` after 30 s), then
+ *    registers the configured commands there (check 5, `commands/Registration.ts`: `command-rejected`,
+ *    `daily-command-limit`), writing only when the stored ones differ (M8).
  *
  * `SubjectRaw` is the raw `DiscordREST` of that same build, so the matrix's step (c) shares the subject's token,
  * HTTP client and rate-limit store with the library's operations. Every HTTP client in the build is the base
@@ -30,6 +32,7 @@ import type * as Socket from "effect/socket/Socket"
 import { DiscordLiveWithCapabilities, SentIdentify } from "../gateway/Codec.ts"
 import * as Dispatches from "../gateway/Dispatches.ts"
 import { intentBits, privilegedIntents } from "../gateway/Intents.ts"
+import * as Registration from "../commands/Registration.ts"
 import * as Coded429 from "../rest/Coded429.ts"
 import * as DiscordApi from "../rest/DiscordApi.ts"
 import * as RouteCheck from "../rest/RouteCheck.ts"
@@ -49,7 +52,8 @@ class Checked extends Context.Service<Checked, { readonly identity: StartupIdent
   "internal/Checked"
 ) {}
 
-const build = (bot: BotDefinition, guildId: BotConfig["guildId"]) => {
+const build = (bot: BotDefinition, config: BotConfig) => {
+  const guildId = config.guildId
   const checked = Layer.effect(
     Checked,
     Effect.gen(function* () {
@@ -76,6 +80,10 @@ const build = (bot: BotDefinition, guildId: BotConfig["guildId"]) => {
         if (Option.isNone(ready)) {
           return yield* new StartupFailed({ reason: "guild-not-ready", detail: `no GUILD_CREATE for ${guildId} within ${Duration.format(guildReadyWithin)}` })
         }
+        if (config.commands !== undefined) {
+          const { requestDeadline } = yield* DiscordApi.DiscordApiConfig
+          yield* Registration.sync(yield* DiscordREST, { applicationId: identity.applicationId, guildId }, config.commands, requestDeadline)
+        }
       }
       return BotRuntime.of({ identity, intents: bot.intents, guildId, guildState, api, events })
     })
@@ -97,7 +105,7 @@ export const layerWith = (
       Effect.gen(function* () {
         const token = yield* config.token
         const discordConfig = DiscordConfig.layer({ token, gateway: { intents: intentBits(bot.intents) } })
-        return build(bot, config.guildId).pipe(Layer.provide(discordConfig), Layer.provide(Coded429.layer), Layer.provide(RouteCheck.layer))
+        return build(bot, config).pipe(Layer.provide(discordConfig), Layer.provide(Coded429.layer), Layer.provide(RouteCheck.layer))
       })
     )
   )

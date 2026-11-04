@@ -85,4 +85,29 @@ export {
 } from "./payload/Components.ts"
 export { Limits } from "./payload/Limits.ts"
 export { ComponentRoute } from "./components/CustomId.ts"
+export {
+  type AnyChatInputCommand,
+  type BooleanOption,
+  type ChannelOption,
+  type ChatInputCommand,
+  type CheckedSubs,
+  type CheckName,
+  Command,
+  type CommandDefinition,
+  type GroupDef,
+  type IntegerOption,
+  type InvocationOf,
+  type NumberOption,
+  type OptionLike,
+  type OptionsOf,
+  type Ordered,
+  type ResolvedRole,
+  type ResolvedUser,
+  type RoleOption,
+  type StringOption,
+  type SubcommandDef,
+  type SubsInvocation,
+  type UserOption,
+  type ValueOption
+} from "./commands/Command.ts"
 export { DiscordApiConfig } from "./rest/DiscordApi.ts"

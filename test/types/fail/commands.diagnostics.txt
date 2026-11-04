@@ -1,0 +1,78 @@
+L37:42 TS2322
+Type '"Ban"' is not assignable to type '"ban"'.
+
+L39:184 TS2322
+Type '"Add"' is not assignable to type '"Add" & Invalid<"names must be lowercase: add">'.
+  Type 'string' is not assignable to type 'Invalid<"names must be lowercase: add">'.
+
+L41:43 TS2322
+Type '"ban user"' is not assignable to type '"names cannot contain spaces: ban user"'.
+
+L43:119 TS2322
+Type '"lab sub"' is not assignable to type '"lab sub" & Invalid<"names cannot contain spaces: lab sub">'.
+  Type 'string' is not assignable to type 'Invalid<"names cannot contain spaces: lab sub">'.
+
+L45:41 TS2322
+Type '"abcdefghijklmnopqrstuvwxyzabcdefg"' is not assignable to type '"names are 1 to 32 characters"'.
+
+L47:117 TS2322
+Type '"abcdefghijklmnopqrstuvwxyzabcdefg"' is not assignable to type '"abcdefghijklmnopqrstuvwxyzabcdefg" & Invalid<"names are 1 to 32 characters">'.
+  Type 'string' is not assignable to type 'Invalid<"names are 1 to 32 characters">'.
+
+L51:103 TS2322
+Type '"Reason"' is not assignable to type '"Reason" & Invalid<"names must be lowercase: reason">'.
+  Type 'string' is not assignable to type 'Invalid<"names must be lowercase: reason">'.
+
+L53:177 TS2322
+Type '"User"' is not assignable to type '"User" & Invalid<"names must be lowercase: user">'.
+  Type 'string' is not assignable to type 'Invalid<"names must be lowercase: user">'.
+
+L66:7 TS2322
+Type 'true' is not assignable to type 'true & Invalid<"required option feature must come before every optional option">'.
+  Type 'boolean' is not assignable to type 'Invalid<"required option feature must come before every optional option">'.
+
+L75:186 TS2322
+Type 'true' is not assignable to type 'true & Invalid<"required option user must come before every optional option">'.
+  Type 'boolean' is not assignable to type 'Invalid<"required option user must come before every optional option">'.
+
+L89:72 TS2322
+Type '"a26"' is not assignable to type '"a26" & Invalid<"at most 25 options per level">'.
+  Type 'string' is not assignable to type 'Invalid<"at most 25 options per level">'.
+
+L98:23 TS2322
+Type '"o26"' is not assignable to type '"o26" & Invalid<"at most 25 options per level">'.
+  Type 'string' is not assignable to type 'Invalid<"at most 25 options per level">'.
+
+L106:25 TS2322
+Type '"s26"' is not assignable to type '"s26" & Invalid<"at most 25 subcommands per level">'.
+  Type 'string' is not assignable to type 'Invalid<"at most 25 subcommands per level">'.
+
+L111:65 TS2322
+Type '"group"' is not assignable to type '"subcommand"'.
+
+L114:66 TS2322
+Type '"group"' is not assignable to type '"boolean" | "channel" | "integer" | "number" | "role" | "string" | "user"'.
+
+L118:132 TS2322
+Type '"subcommand"' is not assignable to type '"subcommand" & Invalid<"subcommands and groups go in Command.withSubcommands">'.
+  Type 'string' is not assignable to type 'Invalid<"subcommands and groups go in Command.withSubcommands">'.
+
+L121:118 TS2322
+Type '"string"' is not assignable to type '"subcommand"'.
+
+L125:159 TS2322
+Type 'number' is not assignable to type 'string'.
+
+L127:25 TS18048
+'options.days' is possibly 'undefined'.
+
+L129:27 TS2367
+This comparison appears to be unintentional because the types '"abuse" | "spam" | undefined' and '"other"' have no overlap.
+
+L131:38 TS2339
+Property 'createPost' does not exist on type 'AnnouncementChannel<never> | TextChannel<never>'.
+  Property 'createPost' does not exist on type 'AnnouncementChannel<never>'.
+
+L135:139 TS2322
+Type '{ kind: "chat-input"; name: string; definition: { name: string; description: string; options: []; }; }' is not assignable to type 'AnyChatInputCommand'.
+  Property '[InvocationType]' is missing in type '{ kind: "chat-input"; name: string; definition: { name: string; description: string; options: []; }; }' but required in type 'ChatInputCommand<string, unknown>'.

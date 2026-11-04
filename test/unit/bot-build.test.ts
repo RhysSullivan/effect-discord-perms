@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ApplicationFlags } from "discord-api-types/v10"
-import { Cause, Config, Context, Duration, Effect, Exit, Fiber, Layer, Option, Redacted } from "effect"
+import { Cause, Config, Context, Duration, Effect, Exit, Fiber, Layer, Option, Redacted, Schema } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import * as Headers from "effect/http/Headers"
 import * as HttpClient from "effect/http/HttpClient"
@@ -8,6 +8,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { Bot, BotRuntime, intentBits } from "../../src/bot/Bot.ts"
 import { BotInternals, SubjectRaw } from "../../src/bot/Internals.ts"
 import { StartupFailed } from "../../src/bot/Startup.ts"
+import { type AnyChatInputCommand, Command } from "../../src/commands/Command.ts"
 import { channelObfuscation, SentIdentify } from "../../src/gateway/Codec.ts"
 import * as DiscordApi from "../../src/rest/DiscordApi.ts"
 import { send } from "../../src/rest/Request.ts"
@@ -276,4 +277,58 @@ describe("the bot build", () => {
       })
     )
   })
+})
+
+describe("the bot build's command registration (startup check 5, M8)", () => {
+  const command = Command.chatInput({ name: "lab-ping", description: "Ping" })
+  /** A build over a world whose command store starts empty and answers a PUT with `putAnswer` (or stores it). */
+  const registering = (commands: ReadonlyArray<AnyChatInputCommand> | undefined, putAnswer?: { readonly status: number; readonly body: unknown }) =>
+    Effect.gen(function* () {
+      const seen: Array<string> = []
+      let stored: unknown = []
+      const commandsPath = `/applications/100000000000000002/guilds/${ids.guild}/commands`
+      const client = HttpClient.make((request) =>
+        Effect.gen(function* () {
+          const path = new URL(request.url).pathname.replace(/^\/api\/v\d+/, "")
+          const answer = (status: number, body: unknown) => HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }))
+          if (path === "/users/@me") return answer(200, { id: ids.bot, username: "Perms Subject" })
+          if (path === "/applications/@me") return answer(200, { id: "100000000000000002", flags: ApplicationFlags.GatewayGuildMembers })
+          if (path === `/guilds/${ids.guild}/members/${ids.bot}`) return answer(200, memberObject(ids.bot, [ids.roleA]))
+          if (path !== commandsPath) return answer(404, { message: "404: Not Found", code: 0 })
+          seen.push(request.method)
+          if (request.method === "GET") return answer(200, stored)
+          if (putAnswer !== undefined) return answer(putAnswer.status, putAnswer.body)
+          const body = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "[]"
+          stored = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.JsonObject)))(body).pipe(
+            Effect.map((sent) => sent.map((entry) => ({ id: "200000000000000001", application_id: "100000000000000002", version: "1", default_member_permissions: null, guild_id: ids.guild, nsfw: false, ...entry }))),
+            Effect.orDie
+          )
+          return answer(200, stored)
+        })
+      )
+      const gateway = yield* makeFakeGateway({ userFor: () => ids.bot, guildsFor: () => [guildCreate] }, () => 0)
+      const config = commands === undefined ? { token: Config.succeed(Redacted.make("fake-token")), guildId } : { token: Config.succeed(Redacted.make("fake-token")), guildId, commands }
+      const layer = Bot.layerWith(bot, config).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(HttpClient.HttpClient, client), gateway.layer)))
+      return { layer, seen }
+    })
+
+  it.live("registers the configured commands after GUILD_CREATE, writing only when the stored ones differ, and leaves them alone without any", () =>
+    Effect.gen(function* () {
+      const fresh = yield* registering([command])
+      yield* Effect.scoped(Effect.asVoid(Layer.build(fresh.layer)))
+      expect(fresh.seen).toEqual(["GET", "PUT", "GET"])
+      const none = yield* registering(undefined)
+      yield* Effect.scoped(Effect.asVoid(Layer.build(none.layer)))
+      expect(none.seen).toEqual([])
+    })
+  )
+
+  it.live("fails the build with command-rejected on a 50035 and daily-command-limit on a 30034", () =>
+    Effect.gen(function* () {
+      const rejected = yield* registering([command], { status: 400, body: { code: 50035, message: "Invalid Form Body", errors: { "0": { name: { _errors: [{ code: "APPLICATION_COMMAND_INVALID_NAME", message: "invalid" }] } } } } })
+      expect(reasonOf(yield* Effect.exit(Effect.scoped(Layer.build(rejected.layer))))).toBe("command-rejected")
+      const limited = yield* registering([command], { status: 429, body: { code: 30034, message: "Max number of daily application command creates has been reached (200)", retry_after: 3600, global: false } })
+      expect(reasonOf(yield* Effect.exit(Effect.scoped(Layer.build(limited.layer))))).toBe("daily-command-limit")
+    })
+  )
 })

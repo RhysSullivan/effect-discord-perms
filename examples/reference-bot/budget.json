@@ -1,0 +1,9 @@
+{
+  "typescript": "7.0.2",
+  "perCommand": {
+    "commands": 20,
+    "options": 25,
+    "types": 7245,
+    "instantiations": 42102
+  }
+}
