@@ -58,6 +58,8 @@ export interface Bot<I extends Intent> {
  * the wide implementation (rule 7 of §2.12); anything else is a defect.
  */
 function handled<A, E, R>(value: Handled<A, E, R>): Effect.Effect<A, E, R>
+// SAFETY: the wide implementation only passes the value through. `Handled<A, E, R>` resolves to `Effect<A, E, R>`
+// in every program that compiles, and `UnhandledErrors` is a type with no runtime value, so the value is that Effect.
 function handled(value: Effect.Effect<unknown, unknown, unknown> | UnhandledErrors<string>): Effect.Effect<unknown, unknown, unknown> {
   return Effect.isEffect(value) ? value : Effect.die(new Error("Bot.on: a handler returned no Effect"))
 }
