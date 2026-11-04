@@ -12,6 +12,8 @@
  *   zero (§5.7).
  * - **Invalid requests.** 401, 403 and 429 responses are counted. Discord bans an IP at 10,000 per 10 minutes
  *   (H-094); the run aborts at `invalidCap` (1,500, 15% of that) with a defect, which no scenario can catch.
+ * - **Lab-step retries.** A lab step Discord answered with a 5xx and sent again (`Lab.withLabRetries`) is counted
+ *   per step, so every run reports how many it needed (§5.11).
  */
 import { Clock, Context, Duration, Effect, Layer, Ref } from "effect"
 
@@ -27,6 +29,8 @@ export interface Stats {
   readonly invalid: number
   /** 429 responses per route, sorted by route (dfx waits and retries them; each costs time). */
   readonly rateLimitedByRoute: ReadonlyArray<readonly [route: string, count: number]>
+  /** Lab steps sent again after a 5xx, per step name, sorted by step (`Lab.withLabRetries`). */
+  readonly labRetries: ReadonlyArray<readonly [step: string, count: number]>
 }
 
 /** The pacing service. */
@@ -40,6 +44,8 @@ export interface Interface {
    * invalid-request count reaches the cap.
    */
   readonly recordStatus: (status: number, method: string, url: string, limit?: RateLimitHeaders) => Effect.Effect<void>
+  /** Counts one retry of lab step `step` after a 5xx. */
+  readonly recordRetry: (step: string) => Effect.Effect<void>
   /** The counters so far. */
   readonly stats: Effect.Effect<Stats>
 }
@@ -91,6 +97,7 @@ interface Counters {
   readonly writes: ReadonlyMap<string, number>
   readonly invalid: number
   readonly rateLimited: ReadonlyMap<string, number>
+  readonly retries: ReadonlyMap<string, number>
 }
 
 /** Builds the pacing service. Fails fast (a defect) on options outside 0 < rps <= 5 or a cap below 1. */
@@ -103,7 +110,7 @@ export const make = (options: Options): Effect.Effect<Interface> =>
       return yield* Effect.die(new Error(`invalidCap must be a positive integer, got ${options.invalidCap}`))
     }
     const interval = 1000 / options.requestsPerSecond
-    const counters = yield* Ref.make<Counters>({ nextSlot: 0, requests: 0, writes: new Map(), invalid: 0, rateLimited: new Map() })
+    const counters = yield* Ref.make<Counters>({ nextSlot: 0, requests: 0, writes: new Map(), invalid: 0, rateLimited: new Map(), retries: new Map() })
 
     const take = (method: string, url: string): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -144,6 +151,9 @@ export const make = (options: Options): Effect.Effect<Interface> =>
         ))
         : Effect.void
 
+    const recordRetry = (step: string): Effect.Effect<void> =>
+      Ref.update(counters, (current) => ({ ...current, retries: new Map(current.retries).set(step, (current.retries.get(step) ?? 0) + 1) }))
+
     const stats = Ref.get(counters).pipe(
       Effect.map((current): Stats => {
         const writesByRoute = [...current.writes.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
@@ -152,12 +162,13 @@ export const make = (options: Options): Effect.Effect<Interface> =>
           writes: writesByRoute.reduce((sum, [, count]) => sum + count, 0),
           writesByRoute,
           invalid: current.invalid,
-          rateLimitedByRoute: [...current.rateLimited.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          rateLimitedByRoute: [...current.rateLimited.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+          labRetries: [...current.retries.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         }
       })
     )
 
-    return Pacing.of({ take, recordStatus, stats })
+    return Pacing.of({ take, recordStatus, recordRetry, stats })
   })
 
 /** The pacing layer with the given options. */

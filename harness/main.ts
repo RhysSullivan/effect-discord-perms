@@ -107,7 +107,7 @@ const command = (name: string, args: ReadonlyArray<string>) =>
           oracle.control.permissions === undefined ? "unavailable" : oracle.control.permissions === oracle.control.expected ? "matches lab-target's allow" : `DIFFERS: ${flags(oracle.control.permissions)}`
         console.log(`  control, target in lab-text: ${control} (expected ${flags(oracle.control.expected)})`)
         const stats = yield* (yield* Pacing).stats
-        console.log(`requests: ${stats.requests}, writes: ${stats.writes}, invalid (401/403/429): ${stats.invalid}`)
+        console.log(`requests: ${stats.requests}, writes: ${stats.writes}, invalid (401/403/429): ${stats.invalid}, lab steps retried after a 5xx: ${Runner.retriedSince([], stats.labRetries)}`)
         yield* Smoke.checkOracle(oracle)
         return
       }
@@ -121,7 +121,7 @@ const command = (name: string, args: ReadonlyArray<string>) =>
         console.log("read-back after reset: at baseline")
         console.log(`second reset: ${Reset.summary(result.secondReset)}`)
         const stats = yield* (yield* Pacing).stats
-        console.log(`requests: ${stats.requests}, writes: ${stats.writes}, invalid (401/403/429): ${stats.invalid}`)
+        console.log(`requests: ${stats.requests}, writes: ${stats.writes}, invalid (401/403/429): ${stats.invalid}, lab steps retried after a 5xx: ${Runner.retriedSince([], stats.labRetries)}`)
         return
       }
       case "inventory": {

@@ -10,12 +10,12 @@
  * request type lacks (dfx.md §0), and the permission oracle (`src/rest/Oracle.ts`).
  */
 import type { DiscordRestService } from "dfx/DiscordREST"
-import { Clock, Duration, Effect, Option, Schema } from "effect"
+import { Clock, Duration, Effect, Exit, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import { DiscordErrorBody } from "../src/rest/ErrorMap.ts"
 import { ChannelId, EmojiId, GuildId, MessageId, RoleId, StickerId, UserId } from "../src/Snowflake.ts"
-import { LabRequestFailed, labStepDeadline } from "./Lab.ts"
+import { LabRequestFailed, labStepDeadline, withLabRetries } from "./Lab.ts"
 
 /** A permission bitfield as Discord serialises it: a decimal string. */
 export const Bitfield = Schema.String.check(Schema.isPattern(/^\d+$/))
@@ -169,7 +169,7 @@ export const raw = (
     const started = yield* Clock.currentTimeMillis
     const base = HttpClientRequest.make(method)(path, options.urlParams === undefined ? undefined : { urlParams: options.urlParams })
     const request = options.body === undefined ? base : yield* HttpClientRequest.bodyJson(base, options.body).pipe(Effect.orDie)
-    const response = yield* rest.httpClient.execute(request).pipe(
+    const send = rest.httpClient.execute(request).pipe(
       Effect.catch((error) =>
         Clock.currentTimeMillis.pipe(
           Effect.flatMap((now) =>
@@ -184,6 +184,8 @@ export const raw = (
         orElse: () => Effect.fail(new LabRequestFailed({ step, status: 0, code: 0, message: `no response within ${Duration.format(labStepDeadline)}` }))
       })
     )
+    // a 5xx to a repeatable method is sent again, as in `labStep`
+    const response = yield* withLabRetries(step, send, (exit) => (Exit.isSuccess(exit) && exit.value.status >= 500 ? exit.value.status : undefined))
     const body = yield* response.json.pipe(Effect.option)
     return { status: response.status, headers: response.headers, body }
   })

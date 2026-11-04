@@ -41,7 +41,7 @@
  * guild, so the stored IDs in `.lab-state.json` are never trusted on their own.
  */
 import type { DiscordRESTError } from "dfx/DiscordREST"
-import { Clock, Context, Duration, Effect, Layer, Option, Ref, Schema } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Ref, Schema } from "effect"
 import type * as HttpClientRequest from "effect/http/HttpClientRequest"
 import { classify } from "../src/rest/ErrorMap.ts"
 import type { ChannelId, GuildId, RoleId, UserId } from "../src/Snowflake.ts"
@@ -499,32 +499,102 @@ export class LabCheckFailed extends Schema.TaggedError<LabCheckFailed>()("LabChe
 export const labStepDeadline = Duration.seconds(90)
 
 /**
- * Runs one dfx call as a named lab step, within {@link labStepDeadline}. A Discord failure becomes
+ * How many times a lab step Discord answered with a 5xx is sent again, at most, when every request it sent is safe
+ * to repeat ({@link isRepeatable}). M6 verifier: three of five live attempts died on one 500, 502 or 503 in a lab
+ * step (a GET and two PUTs), each after up to 50 minutes of run.
+ */
+export const labStepRetries = 3
+
+/** The wait before retry `n` (1-based) of a lab step: 1 s, 2 s, 4 s. */
+export const labStepBackoff = (n: number): Duration.Duration => Duration.seconds(2 ** (n - 1))
+
+const repeatableMethods: ReadonlySet<string> = new Set(["GET", "HEAD", "PUT", "PATCH", "DELETE"])
+
+/**
+ * Whether a lab step that sent `methods` may be sent again: it sent something, and nothing but reads and the
+ * harness's PUT, PATCH and DELETE requests, which set absolute values (permissions, overwrites, settings, archived and
+ * locked, names, a timeout's end, a role or membership held or not) and so leave the same state when repeated. A
+ * POST (a message, thread, channel, role, sticker or bulk delete) is never sent again.
+ */
+export const isRepeatable = (methods: ReadonlyArray<string>): boolean => methods.length > 0 && methods.every((method) => repeatableMethods.has(method.toUpperCase()))
+
+/** The lab step in progress, as the shared base client sees it ({@link CurrentLabStep}). */
+export interface LabStepAttempt {
+  readonly step: string
+  /** 1 for the first send, 2 and up for the retries. */
+  readonly attempt: number
+  /** Records a request the step sent; `true` for the first request of a retry, which the client counts as one retry. */
+  readonly record: (method: string) => Effect.Effect<boolean>
+}
+
+/**
+ * The lab step whose requests the shared base client is sending (`Identities.SharedHttpClient` reads it): `None`
+ * outside a lab step (the subject's steps (c) and (d), the library's operations, which are never retried here).
+ */
+export const CurrentLabStep = Context.Reference<Option.Option<LabStepAttempt>>("harness/CurrentLabStep", { defaultValue: () => Option.none() })
+
+/**
+ * Runs `send` as lab step `step`, and sends it again after a 5xx while every request it sent is repeatable, up to
+ * {@link labStepRetries} times with {@link labStepBackoff}. Each retry is printed on stderr as it happens and counted
+ * by the shared client (`Pacing` stats, `labRetries`). `serverError` reads the 5xx status from an attempt's exit.
+ */
+export const withLabRetries = <A, E, R>(step: string, send: Effect.Effect<A, E, R>, serverError: (exit: Exit.Exit<A, E>) => number | undefined): Effect.Effect<A, E, R> => {
+  const attempt = (n: number): Effect.Effect<A, E, R> =>
+    Effect.gen(function* () {
+      const methods = yield* Ref.make<ReadonlyArray<string>>([])
+      const current: LabStepAttempt = { step, attempt: n, record: (method) => Ref.modify(methods, (sent): readonly [boolean, ReadonlyArray<string>] => [n > 1 && sent.length === 0, [...sent, method]]) }
+      const exit = yield* Effect.exit(send.pipe(Effect.provideService(CurrentLabStep, Option.some(current))))
+      const status = serverError(exit)
+      const sent = yield* Ref.get(methods)
+      if (status !== undefined && status >= 500 && n <= labStepRetries && isRepeatable(sent)) {
+        const wait = labStepBackoff(n)
+        yield* Effect.sync(() => console.error(`lab step retried: "${step}" (${sent.join(", ")}) answered ${status}; retry ${n} of ${labStepRetries} in ${Duration.format(wait)}`))
+        yield* Effect.sleep(wait)
+        return yield* attempt(n + 1)
+      }
+      return yield* exit
+    })
+  return attempt(1)
+}
+
+const failedStatus = <A>(exit: Exit.Exit<A, LabRequestFailed>): number | undefined => {
+  if (Exit.isSuccess(exit)) return undefined
+  return Option.match(Cause.findErrorOption(exit.cause), { onNone: () => undefined, onSome: (error) => error.status })
+}
+
+/**
+ * Runs one dfx call as a named lab step, within {@link labStepDeadline} per attempt. A Discord failure becomes
  * `LabRequestFailed` with only the status, code and message copied out (never the live request or response). A
- * rate-limited response that escaped dfx, and malformed or unencodable requests, are defects (§3.1).
+ * 5xx answer to a step that only reads or repeats absolute writes is sent again ({@link withLabRetries}); any
+ * other failure fails the step at once. A rate-limited response that escaped dfx, and malformed or unencodable
+ * requests, are defects (§3.1).
  */
 export const labStep =
   (step: string) =>
   <A, R>(effect: Effect.Effect<A, DiscordRESTError, R>): Effect.Effect<A, LabRequestFailed, R> =>
-    Effect.gen(function* () {
-      const started = yield* Clock.currentTimeMillis
-      return yield* effect.pipe(
-        Effect.catch((error) =>
-          Clock.currentTimeMillis.pipe(
-            Effect.flatMap((now) => classify(error, step, now - started)),
-            Effect.flatMap((failure) =>
-              failure._tag === "NoResponse"
-                ? Effect.fail(new LabRequestFailed({ step, status: 0, code: 0, message: `no response (${failure.cause.reason} after ${failure.cause.afterMs} ms)` }))
-                : Effect.fail(new LabRequestFailed({ step, status: failure.response.status, code: failure.response.code, message: failure.response.message }))
+    withLabRetries(
+      step,
+      Effect.gen(function* () {
+        const started = yield* Clock.currentTimeMillis
+        return yield* effect.pipe(
+          Effect.catch((error) =>
+            Clock.currentTimeMillis.pipe(
+              Effect.flatMap((now) => classify(error, step, now - started)),
+              Effect.flatMap((failure) =>
+                failure._tag === "NoResponse"
+                  ? Effect.fail(new LabRequestFailed({ step, status: 0, code: 0, message: `no response (${failure.cause.reason} after ${failure.cause.afterMs} ms)` }))
+                  : Effect.fail(new LabRequestFailed({ step, status: failure.response.status, code: failure.response.code, message: failure.response.message }))
+              )
             )
-          )
-        ),
-        Effect.timeoutOrElse({
-          duration: labStepDeadline,
-          orElse: () => Effect.fail(new LabRequestFailed({ step, status: 0, code: 0, message: `no response within ${Duration.format(labStepDeadline)}` }))
-        })
-      )
-    })
+          ),
+          Effect.timeoutOrElse({
+            duration: labStepDeadline,
+            orElse: () => Effect.fail(new LabRequestFailed({ step, status: 0, code: 0, message: `no response within ${Duration.format(labStepDeadline)}` }))
+          })
+        )
+      }),
+      failedStatus
+    )
 
 /** Like {@link labStep}, but a Discord response with one of `codes` (for example 10003 Unknown Channel) is `None`. */
 export const labStepUnless =

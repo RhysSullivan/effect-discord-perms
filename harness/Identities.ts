@@ -3,7 +3,8 @@
  *
  * - **One shared base `HttpClient`**, outside every `Layer.fresh`: it runs the Perms Lab guard on every request
  *   (`Lab.ts`), takes a slot of the global bucket and counts the request (`Pacing.ts`), and counts 401, 403
- *   and 429 responses. Because it is outside every fresh boundary, there is exactly one bucket and one set of
+ *   and 429 responses. It records the methods a lab step sends (`Lab.CurrentLabStep`), so the step is retried
+ *   after a 5xx only when they are repeatable, and counts each retry. Because it is outside every fresh boundary, there is exactly one bucket and one set of
  *   counters for all identities (a shared service provided inside a fresh layer would be rebuilt per identity).
  * - **Each identity's dfx stack is wrapped in `Layer.fresh`.** Without it Effect memoises `DiscordRESTLive` by
  *   reference and every identity would send the first token (G1: `auth=["Bot HARNESS","Bot HARNESS"]`). Each
@@ -69,6 +70,9 @@ export const SharedHttpClient: Layer.Layer<HttpClient.HttpClient, never, HttpCli
         const dry = yield* DryRun
         if (Option.isNone(dry)) {
           yield* guard.check(request)
+          // a lab step's requests are recorded, so it is sent again after a 5xx only when they are repeatable
+          const step = yield* Lab.CurrentLabStep
+          if (Option.isSome(step) && (yield* step.value.record(request.method))) yield* pacing.recordRetry(step.value.step)
           const capture = yield* Capture
           if (Option.isSome(capture)) yield* capture.value.record(request)
           return yield* sent.execute(request)

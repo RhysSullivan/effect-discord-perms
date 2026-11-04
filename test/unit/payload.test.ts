@@ -68,6 +68,12 @@ describe("ToDfx", () => {
     expect(ToDfx.editRequest({ suppressEmbeds: false }).flags).toBe(0)
   })
 
+  it("sends tts exactly as the payload has it, and leaves it out when absent (H-102)", () => {
+    expect(ToDfx.createRequest({ content: "hi", tts: true }).request).toEqual({ allowed_mentions: { parse: [] }, content: "hi", tts: true })
+    expect(ToDfx.createRequest({ content: "hi", tts: false }).request).toEqual({ allowed_mentions: { parse: [] }, content: "hi", tts: false })
+    expect("tts" in ToDfx.createRequest({ content: "hi" }).request).toBe(false)
+  })
+
   it("maps embeds, polls, stickers, replies, components and files", () => {
     const customId = CustomId.make("lab:{}")
     const wire = ToDfx.createRequest({
@@ -108,6 +114,15 @@ describe("Limits and the local checks", () => {
     expect(Limits.checkCreate(over, cause).map((failure) => failure._tag)).toEqual(["ContentTooLong", "EmbedTooLarge", "PollTooLarge"])
     expect(Limits.checkCreate({ content: "" }, cause).map((failure) => failure._tag)).toEqual(["MessageEmpty"])
     expect(Limits.checkCreate({ componentsV2: [] }, cause).map((failure) => failure._tag)).toEqual(["MessageEmpty"])
+  })
+
+  it("passes an edit exactly at the content and embed limits, and fails each one over, in tier 7's order", () => {
+    expect(Limits.checkEdit({ content: "a".repeat(Limits.Limits.content), embeds: [{ title: "t".repeat(Limits.Limits.embeds.title) }] }, cause)).toEqual([])
+    const over = Limits.checkEdit({ content: "😀".repeat(Limits.Limits.content + 1), embeds: [{ title: "t".repeat(Limits.Limits.embeds.title + 1) }] }, cause)
+    expect(over.map((failure) => failure._tag)).toEqual(["ContentTooLong", "EmbedTooLarge"])
+    expect(over[0]).toMatchObject({ length: Limits.Limits.content + 1, limit: Limits.Limits.content })
+    // an edit's emptiness is Discord's to decide (the message may keep its attachments)
+    expect(Limits.checkEdit({ content: "" }, cause)).toEqual([])
   })
 
   it("names the embed and poll limit exceeded", () => {

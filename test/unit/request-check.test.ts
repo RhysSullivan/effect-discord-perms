@@ -3,7 +3,8 @@ import { BunFileSystem } from "@effect/platform-bun"
 import { Cause, Effect, Exit, Option, Schema } from "effect"
 import type * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as Drivers from "../../harness/Drivers.ts"
-import { Capture, DryRun, loadCanned, makeCapture, makeRecorder, operationRequest, requestDifferences } from "../../harness/DryRun.ts"
+import { Capture, DryRun, librarySides, loadCanned, makeCapture, makeRecorder, operationRequest, type Recorded, requestCheck, requestDifferences } from "../../harness/DryRun.ts"
+import { matrixRowAgreement } from "../../harness/Agreement.ts"
 import * as Fixtures from "../../harness/Fixtures.ts"
 import * as Identities from "../../harness/Identities.ts"
 import { LabGuard } from "../../harness/Lab.ts"
@@ -218,4 +219,32 @@ describe("steps (c) and (d) live, under the capture", () => {
       expect(String(Exit.isFailure(result.aborted) ? Cause.squash(result.aborted.cause) : "")).toContain("infrastructure abort: step (d): DiscordUnavailable")
     })
   , 60_000)
+})
+
+describe("the request check's decision (pure, as the runner assembles it)", () => {
+  const sendRequest = (content: string): Recorded => ({ method: "POST", route: "POST /channels/{id}/messages", path: "/channels/1/messages", body: JSON.stringify({ allowed_mentions: { parse: [] }, content }) })
+  const refreshRead: Recorded = { method: "GET", route: "GET /channels/{id}", path: "/channels/1", body: "null" }
+  const raw = [sendRequest("hi")]
+
+  it("compares step (b) when it reached the stub, and step (d)'s own request when (d) ran; neither leaves the bypass fallback to the runner", () => {
+    expect(librarySides({ reachedStub: true, requests: raw }, undefined).map(([label]) => label)).toEqual(["step (b)"])
+    expect(librarySides({ reachedStub: false, requests: [] }, [sendRequest("hi"), refreshRead]).map(([label, requests]) => [label, requests.length])).toEqual([["step (d)", 1]])
+    expect(librarySides({ reachedStub: true, requests: raw }, [sendRequest("hi")]).map(([label]) => label)).toEqual(["step (b)", "step (d)"])
+    expect(librarySides({ reachedStub: false, requests: [] }, undefined)).toEqual([])
+  })
+
+  it("finds a step (d) request that differs from the raw call's, behind the recompute's reads, and passes the same one", () => {
+    expect(requestCheck(librarySides({ reachedStub: false, requests: [] }, [sendRequest("hi"), refreshRead]), [...raw, refreshRead])).toEqual([])
+    const problems = requestCheck(librarySides({ reachedStub: false, requests: [] }, [sendRequest("other"), refreshRead]), raw)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain("step (d): request 1: body")
+    expect(requestCheck(librarySides({ reachedStub: true, requests: [{ ...sendRequest("hi"), method: "PUT" }] }, undefined), raw)[0]).toContain("step (b): request 1: method PUT")
+  })
+
+  it("makes a row preflight-wiring before request-wiring, and request-wiring before the matrix's own judgment", () => {
+    expect(matrixRowAgreement(false, ["x"], "agree")).toBe("preflight-wiring")
+    expect(matrixRowAgreement(true, ["step (d): request 1: body ..."], "agree")).toBe("request-wiring")
+    expect(matrixRowAgreement(true, [], "level-vs-raw")).toBe("level-vs-raw")
+    expect(matrixRowAgreement(true, [], "agree")).toBe("agree")
+  })
 })

@@ -3,11 +3,18 @@
  * 15 s cap; otherwise the run aborts with `setup-timeout`, an infrastructure failure that is never recorded as
  * a mismatch:
  *
- * - the harness's read-back equals the desired state (`Converge.readbackProblems`);
+ * - the harness's read-back equals the desired state (`Converge.readbackProblems`). The first read-back re-reads
+ *   only what Converge, the fixtures and the thread's state wrote since Converge's own read (`Converge.rereadWritten`;
+ *   nothing, when Converge found the setup in place): the rest of the view is Converge's read, which nothing changed
+ *   since. A read-back that still differs is retried with every read Converge makes (`Converge.readView`);
  * - the subject's guild state equals the desired state's subject-observable projection
  *   (`Materialize.projectionProblems`), watched through `GuildState.changes`, so no request is made;
- * - two oracle reads 300 ms apart are identical (when the oracle is available and the operation has a channel);
- * - a further 250 ms has passed.
+ * - two oracle reads {@link oracleGap} apart are identical (when the oracle is available and the operation has a
+ *   channel);
+ * - a further {@link settleGap} has passed.
+ *
+ * (After the M6 verifier, for the run time of §5.11: the read-back re-read everything Converge reads, and the gaps
+ * were 300 and 250 ms.)
  */
 import { Clock, Duration, Effect, Option, Schema, Stream } from "effect"
 import type * as GuildState from "../src/state/GuildState.ts"
@@ -21,6 +28,12 @@ import * as Materialize from "./Materialize.ts"
 /** The cap on one scenario's wait. */
 export const cap = Duration.seconds(15)
 
+/** The pause between the two oracle reads that must agree (on top of the pacing's 200 ms between request starts). */
+export const oracleGap = Duration.millis(100)
+
+/** The settle after everything agrees. */
+export const settleGap = Duration.millis(100)
+
 /** The setup did not settle within the cap: an infrastructure abort, never a row. */
 export class SetupTimeout extends Schema.TaggedError<SetupTimeout>()("SetupTimeout", { scenario: Schema.String, detail: Schema.String }) {}
 
@@ -33,9 +46,11 @@ export type OracleValue = { readonly _tag: "Permissions"; readonly permissions: 
 const sameOracle = (a: OracleValue, b: OracleValue): boolean =>
   a._tag === "Permissions" ? b._tag === "Permissions" && a.permissions === b.permissions : a._tag === b._tag
 
-/** What the wait settled on: the oracle's stable value for the scenario channel. */
+/** What the wait settled on: the oracle's stable value for the scenario channel, and the harness's read-back. */
 export interface Settled {
   readonly oracle: OracleValue
+  /** The harness's view of the lab at the desired state (the runner keeps its roles and members for the next Converge). */
+  readonly view: Converge.LabView
 }
 
 /** Waits until the lab, the subject's state and the oracle agree with `state` (see the module comment). */
@@ -49,6 +64,8 @@ export const settle = (input: {
   readonly readOracle: Effect.Effect<OracleValue, LabRequestFailed>
   /** The lab channels whose overwrites the read-back checks (see `Converge.readView`). */
   readonly channels: ReadonlySet<LabIds.ChannelName>
+  /** Converge's read of the lab, and what was written since. */
+  readonly converged: { readonly view: Converge.LabView; readonly written: Converge.Written }
 }): Effect.Effect<Settled, SetupTimeout | LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {
     const started = yield* Clock.currentTimeMillis
@@ -57,8 +74,12 @@ export const settle = (input: {
 
     // the harness's read-back
     let problems: ReadonlyArray<string> = []
-    for (;;) {
-      const view = yield* Converge.readView(input.state, input.ids, input.channels)
+    let view: Converge.LabView
+    for (let attempt = 0; ; attempt++) {
+      view =
+        attempt === 0
+          ? yield* Converge.rereadWritten(input.state, input.ids, input.converged.view, input.converged.written)
+          : yield* Converge.readView(input.state, input.ids, input.channels)
       problems = Converge.readbackProblems(input.state, input.ids, view, yield* Clock.currentTimeMillis)
       if (problems.length === 0) break
       if ((yield* remaining) <= 500) return yield* timeout(`harness read-back: ${problems.join("; ")}`)
@@ -85,12 +106,12 @@ export const settle = (input: {
     // the oracle, stable across two reads
     let previous = yield* input.readOracle
     for (;;) {
-      yield* Effect.sleep(Duration.millis(300))
+      yield* Effect.sleep(oracleGap)
       const next = yield* input.readOracle
       if (sameOracle(previous, next)) break
       if ((yield* remaining) <= 300) return yield* timeout("the oracle did not settle")
       previous = next
     }
-    yield* Effect.sleep(Duration.millis(250))
-    return { oracle: previous }
+    yield* Effect.sleep(settleGap)
+    return { oracle: previous, view }
   })

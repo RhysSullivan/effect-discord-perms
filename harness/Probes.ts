@@ -250,9 +250,15 @@ export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<Prob
         const role: RoleId = yield* need(ids.roles.get(probe === "typed-mention-mentionable" ? "lab-mentionable" : "lab-unmentionable"), "the mentioned role")
         const sent = yield* typedSend({ content: `lab rule <@&${role}>`, mentions: { roles: [role] } })
         if (sent.value === undefined) return result(sent.observation, sent.raw)
-        // the library's degradation readback: a role mention Discord dropped is MentionEveryone (H-101)
-        const dropped = sent.value.degraded.includes("MentionEveryone")
-        return result(field(!dropped, "mention_roles"), Outcome.ok(dropped ? ["MentionEveryone"] : []))
+        // the observation is the harness's own read of the message (the M6 verifier), not the library's readback;
+        // the library's readback must say the same (a role mention Discord dropped is MentionEveryone, H-101)
+        const message = yield* readMessage(here, sent.value.message.id)
+        const applied = message.mention_roles.includes(role)
+        const libraryDropped = sent.value.degraded.includes("MentionEveryone")
+        if (libraryDropped === applied) {
+          return yield* Effect.die(new Error(`probe ${probe}: the library's readback says MentionEveryone ${libraryDropped ? "dropped" : "kept"} the role mention, the harness reads mention_roles ${applied ? "with" : "without"} it`))
+        }
+        return result(field(applied, "mention_roles"), Outcome.ok(applied ? [] : ["MentionEveryone"]))
       }
       case "typed-five-links": {
         const link = { kind: "button", style: "link", label: "Docs", url: "https://discord.com/developers/docs" } as const

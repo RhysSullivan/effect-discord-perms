@@ -5,7 +5,7 @@ import { Deferred, Duration, Effect, Fiber, Layer, Option } from "effect"
 import * as Flags from "../../src/permissions/Flags.ts"
 import * as GuildState from "../../src/state/GuildState.ts"
 import { reduce } from "../../src/state/Reducer.ts"
-import { botIsThreadMember, emptySnapshot, entityKey, generationOf, type GuildSnap, type Snapshot } from "../../src/state/Snapshot.ts"
+import { botIsThreadMember, type ChannelKind, channelTypes, emptySnapshot, entityKey, generationOf, type GuildSnap, kindOfType, type Snapshot } from "../../src/state/Snapshot.ts"
 import { ChannelId, GuildId, RoleId, UserId } from "../../src/Snowflake.ts"
 import { channelUpdate, guildCreate, ids, memberObject, overwrite, ready, role, threadObject } from "../support/dispatches.ts"
 import { json, type Scripted, scriptedRestEffect } from "../support/fakeDiscord.ts"
@@ -404,3 +404,29 @@ describe("GuildState", () => {
   )
 })
 
+
+describe("channel kinds by type (channel.mdx, Channel Types)", () => {
+  /** Discord's documented type numbers, written out here rather than derived from the module under test. */
+  const documented: ReadonlyArray<readonly [number, ChannelKind]> = [
+    [0, "text"],
+    [2, "voice"],
+    [4, "category"],
+    [5, "announcement"],
+    [10, "announcement-thread"],
+    [11, "public-thread"],
+    [12, "private-thread"],
+    [13, "stage"],
+    [15, "forum"],
+    [16, "media"]
+  ]
+
+  it.each(documented)("type %i is the %s kind, both ways", (type, kind) => {
+    expect(kindOfType(type)).toBe(kind)
+    expect(channelTypes[kind]).toBe(type)
+  })
+
+  it("models every kind exactly once, and no other type (DMs, group DMs, directories, unknown)", () => {
+    expect(Object.keys(channelTypes).sort()).toEqual(documented.map(([, kind]) => kind).sort())
+    for (const type of [1, 3, 6, 7, 8, 9, 14, 17]) expect(kindOfType(type)).toBeUndefined()
+  })
+})

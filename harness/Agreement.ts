@@ -123,3 +123,12 @@ const canonical = (observation: Observation): Observation =>
  * overwrites alone, so it reads View there even though the thread is invisible to the subject (H-033).
  */
 const privateThreadNonMember = (setup: Row["setup"]): boolean => setup.channel === "private-thread" && setup.subjectThreadMember !== true
+
+/**
+ * A matrix row's agreement as the runner decides it: `preflight-wiring` when step (b), the real operation, did not
+ * record `Preflight.decide`'s answer (`wired` false); then `request-wiring` when the request check found the library's
+ * request differs from the raw call's (`requestProblems`, `DryRun.requestCheck`); otherwise `judged`, the row's
+ * {@link agreement}.
+ */
+export const matrixRowAgreement = (wired: boolean, requestProblems: ReadonlyArray<string>, judged: AgreementKind): AgreementKind =>
+  !wired ? "preflight-wiring" : requestProblems.length > 0 ? "request-wiring" : judged

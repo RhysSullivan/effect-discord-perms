@@ -167,6 +167,31 @@ export const requestDifferences = (label: string, actual: ReadonlyArray<Recorded
   })
 }
 
+/** One library side of the request check: which step made the requests, and the requests. */
+export type RequestSide = readonly [label: string, requests: ReadonlyArray<Recorded>]
+
+/**
+ * The library's sides the request check holds to step (c)'s request (§5.10): step (b)'s, when (b) reached the stub,
+ * and step (d)'s own request as sent, when (d) ran. Empty when neither did; the runner then records the operation
+ * in bypass mode over the stub instead (`Library.bypassedRequests`).
+ */
+export const librarySides = (
+  stepB: { readonly reachedStub: boolean; readonly requests: ReadonlyArray<Recorded> },
+  stepD: ReadonlyArray<Recorded> | undefined
+): ReadonlyArray<RequestSide> => [
+  ...(stepB.reachedStub ? [["step (b)", stepB.requests] as const] : []),
+  ...(stepD === undefined ? [] : [["step (d)", operationRequest(stepD)] as const])
+]
+
+/**
+ * The request check (§5.10): every way a library side differs from the request step (c) sent (its first, as
+ * captured); empty when every side made exactly that request.
+ */
+export const requestCheck = (sides: ReadonlyArray<RequestSide>, rawCaptured: ReadonlyArray<Recorded>): ReadonlyArray<string> => {
+  const raw = operationRequest(rawCaptured)
+  return sides.flatMap(([label, requests]) => requestDifferences(label, requests, raw))
+}
+
 /** The canned bodies' directory. */
 export const cannedDirectory = new URL("../fixtures/canned/", import.meta.url).pathname
 

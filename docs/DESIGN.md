@@ -2649,7 +2649,14 @@ setup alone made 216.)
    off baseline (the scenario's, and the previous scenario's); every other lab
    channel has been at baseline since the opening reset, because only Converge
    and cleanup write overwrites. (M3 live: the guild channel list route answered
-   429 several times a run when read twice per scenario.)
+   429 several times a run when read twice per scenario.) (After the M6 verifier,
+   for §5.11's run time: the roles and both members are read only when the
+   previous scenario's settled read-back does not hold them current,
+   `Converge.KnownView`: role permissions change only through Converge and reset,
+   the subject only through Converge and its own fixtures, the target also through
+   a member operation or a rule probe, so the runner forgets each part when one of
+   those may have written it. A stale part would make Converge skip a write, which
+   the wait's projection check below turns into a `setup-timeout`, never a row.)
 2. **Fixtures.** (M4) The subject's own objects (`subject-message`, a
    `subject-thread`) are made before Converge, with temporary access: the
    harness lifts a leftover timeout and gives the subject a member overwrite on
@@ -2668,10 +2675,15 @@ setup alone made 216.)
    cap. On timeout the run aborts with `setup-timeout`, an infrastructure
    failure that is never recorded as a mismatch.
    - Harness read-back equals the desired state (the same reads as step 1).
+     (After the M6 verifier: the first read-back reads again only what Converge,
+     the fixtures and the thread's state wrote since Converge's read, nothing
+     when Converge found the setup in place; one that differs is retried with all
+     of step 1's reads.)
    - The subject's GuildState equals the **projection** of the desired state
      (§5.8).
-   - Two oracle reads 300 ms apart are identical.
-   - A further 250 ms settle has passed.
+   - Two oracle reads 100 ms apart are identical (revision 2: 300 ms; with the
+     pacing's 200 ms between request starts they start at least 300 ms apart).
+   - A further 100 ms settle has passed (revision 2: 250 ms).
 4. **(a) Resolver** over the subject's GuildState (M3: a scenario thread is
    refreshed first through `GuildState.refresh`, so the subject's view of it is a
    function of the setup, fetched when it can see it and unseen when it cannot,
@@ -2731,6 +2743,17 @@ setup alone made 216.)
    the stub (`Library.bypassedRequests`, `Drivers.dryRequests`; the guard judges
    a dry request as the live one, `LabGuard.checkDry`, §5.6), and fails on each
    of the five wrong requests; it also runs (c) and (d) under the capture.
+   (After the M6 verifier) Which sides are compared and how a difference makes the
+   row `request-wiring` is pure (`DryRun.librarySides`, `DryRun.requestCheck`,
+   `Agreement.matrixRowAgreement`) and unit-tested. **A limit of the check:** the
+   raw call's message bodies (send, createPost, edit) are built by the library's
+   own `ToDfx` with the same field choices (`harness/Drivers.ts`), so for those
+   bodies the comparison checks the operations' routing and arguments, not ToDfx's
+   wire mapping. That mapping is held to hand-written wire bodies offline
+   (`test/unit/payload.test.ts`: `allowed_mentions`, the flags, `tts`, embeds,
+   polls, stickers, replies, components and files) and live to the harness's own
+   reads: the degradation readback of the created message (`Outcome.ts`) and the
+   rule probes that read the message back through the harness.
 6. **(c) Raw call** through `SubjectRaw`, with no check. Classify it with
    `Outcome.ts`: `success`, `degraded` (with the list), `50013`, `50001`,
    `other-error` (status, code, sorted inner codes with paths), `ignored`,
@@ -2762,6 +2785,20 @@ setup alone made 216.)
 
 A timeout of the (c) or (d) call is an **infrastructure abort**, never a row
 outcome: the request may have been applied (§4.10).
+
+**Lab-step retries** (after the M6 verifier). A harness lab step (reset,
+provision, Converge, the fixtures, the wait's reads, the oracle's, cleanup)
+Discord answers with a 5xx is sent again, up to three times, 1, 2 and 4 s apart,
+when every request it sent is a read or one of the harness's PUT, PATCH or DELETE
+requests, which set absolute values and leave the same state when repeated
+(`Lab.withLabRetries`; the shared client records the methods a step sends,
+`Lab.CurrentLabStep`). A POST (a message, thread, channel, role, sticker or bulk
+delete) is never sent again, nor a step answered 4xx or with no response. Steps
+(c) and (d), and the subject's fixtures, are never retried: their outcome is the
+measurement, and they do not go through the retry (the subject's fixtures are
+POSTs). Each retry is printed on stderr as it happens and counted per step in the
+run's summary. (Three of the M6 verifier's five live attempts died on one 500,
+502 or 503 in a lab step.)
 
 **Agreement** is pure and shared with the replay. It is `"agree"` unless:
 
@@ -2848,7 +2885,14 @@ channel_types, ...) and expects one write.
   channel per hour; a run makes 4.
 - Target duration is **at most 30 minutes**, at roughly 2 to 3.5 s per
   scenario for about 500 scenarios. The runner prints a running ETA and aborts
-  at 60 minutes as an infrastructure failure.
+  at 60 minutes as an infrastructure failure. (After the M6 verifier: M6's full
+  runs took 52 to 54 minutes, about 6.5 s per scenario: some 23 requests a
+  scenario, each taking at least the bucket's 200 ms, and 0.55 s of fixed waits.
+  The narrowed read-back and the kept roles and members of §5.10 steps 1 and 3,
+  and the shorter oracle gap and settle, cut both; the run log records each step's
+  milliseconds and requests, and LOG.md the timings before and after.)
+- A lab step answered with a 5xx is retried as §5.10's "Lab-step retries"
+  describes; the summary prints the retries per step.
 
 ### 5.12 Truth table (G9, compiled: `[sd:src/verify.ts]`, `[sd:truth-runtime.txt]`)
 

@@ -140,6 +140,21 @@ describe("the pipeline", () => {
     })
   )
 
+  it.effect("reports a custom emoji Discord rewrote to text as UseExternalEmojis, and nothing when the token was kept (H-104)", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(now)
+      const token = "<:party:123456789012345678>"
+      const animated = "<a:wave:123456789012345679>"
+      const rewritten = yield* runtimeWith({ before: sendable("ViewChannel", "SendMessages"), answer: () => ok(messageWire({ content: `look :party: ${animated}` })) })
+      expect((yield* textOf(rewritten.runtime).send({ content: `look ${token} ${animated}` })).degraded).toEqual(["UseExternalEmojis"])
+      const kept = yield* runtimeWith({ before: sendable("ViewChannel", "SendMessages"), answer: () => ok(messageWire({ content: `look ${token} ${animated}` })) })
+      expect((yield* textOf(kept.runtime).send({ content: `look ${token} ${animated}` })).degraded).toEqual([])
+      // content with no custom emoji cannot degrade, whatever Discord answers
+      const plain = yield* runtimeWith({ before: sendable("ViewChannel", "SendMessages"), answer: () => ok(messageWire({ content: "other" })) })
+      expect((yield* textOf(plain.runtime).send({ content: "look" })).degraded).toEqual([])
+    })
+  )
+
   it.effect("ranks the local limits after preflight: a missing flag first, the limit only when preflight passes, nothing sent either way", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(now)

@@ -52,7 +52,7 @@ import { type ChannelId, type EmojiId, ForumTagId, type MessageId, type RoleId, 
 import { isThreadKind } from "../src/state/Snapshot.ts"
 import { escalatedRules } from "../scripts/lib/rules.ts"
 import { rules } from "../test/rules.ts"
-import { agreement, flipAgreement, ruleAgreement } from "./Agreement.ts"
+import { agreement, flipAgreement, matrixRowAgreement, ruleAgreement } from "./Agreement.ts"
 import * as Converge from "./Converge.ts"
 import * as Drivers from "./Drivers.ts"
 import * as DryRun from "./DryRun.ts"
@@ -239,6 +239,11 @@ interface Context {
   readonly dirty: Set<LabIds.ChannelName>
   /** The dry-run stub's canned bodies (step (b)). */
   readonly canned: ReadonlyMap<string, unknown>
+  /**
+   * The roles and members the previous scenario's settled read-back saw, where nothing has written them since
+   * (`Converge.KnownView`): Converge reads only what is not here.
+   */
+  known: Converge.KnownView
 }
 
 /** Whether step (b)'s record is the one `Preflight.decide` gives (tag and categories). */
@@ -285,17 +290,28 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
     const subjectRaw = yield* SubjectRaw
     const guard = yield* LabGuard
 
-    const times: Array<readonly [string, number]> = []
+    // each step's milliseconds and requests (every identity's), for the run log's profile of a scenario's time (§5.11)
+    const pacing = yield* Pacing
+    const times: Array<readonly [string, number, number]> = []
     let mark = yield* Clock.currentTimeMillis
+    let requestMark = (yield* pacing.stats).requests
     const lap = (step: string) =>
-      Effect.map(Clock.currentTimeMillis, (at) => {
-        times.push([step, at - mark])
+      Effect.gen(function* () {
+        const at = yield* Clock.currentTimeMillis
+        const requests = (yield* pacing.stats).requests
+        times.push([step, at - mark, requests - requestMark])
         mark = at
+        requestMark = requests
       })
+    const profile = () => `ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}; requests ${times.map(([step, , requests]) => `${step} ${requests}`).join(", ")}`
     const channels: ReadonlySet<LabIds.ChannelName> = new Set([...context.dirty, overwriteChannel])
     // whatever happens next, the scenario's channel may be off baseline afterwards
     context.dirty.clear()
     context.dirty.add(overwriteChannel)
+    // what the previous scenario's read-back saw, minus what this scenario's own fixtures may change (they lift a
+    // leftover timeout); nothing is kept if the scenario stops before its wait
+    const known: Converge.KnownView = Fixtures.needsSubject(setup) ? { ...context.known, subject: undefined } : context.known
+    context.known = Converge.unknownView
 
     // 1. the subject's own fixtures (with temporary access), then Converge
     const spec = Materialize.scenarioThreadSpec(name)
@@ -316,7 +332,7 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
         if (!isForumName(state.channel)) yield* Converge.cleanMessages({ id: channelId, name: state.channel }, botAuthors(ids, harnessUserId))
       }
     })
-    const converged = yield* Converge.converge(state, ids, channels)
+    const converged = yield* Converge.converge(state, ids, channels, known)
     yield* lap("converge")
     if (converged._tag === "TimeoutRefused") {
       yield* cleanup
@@ -338,8 +354,12 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
       yield* cleanup
       return unsupportedRow(Outcome.unsupported("rejected-by-discord", prior.status, prior.code))
     }
-    yield* Converge.applyThreadState(state, ids)
+    const threadStateWritten = yield* Converge.applyThreadState(state, ids)
     yield* lap("fixtures")
+    // the wait re-reads what was written since Converge's read: the thread too when the fixtures posted in it
+    // (a post can unarchive a thread or add its author as a member) or its state was set
+    const postedInThread = state.thread !== undefined && state.channel === state.thread.name && (posted.harnessMessage !== undefined || posted.secondHarnessMessage !== undefined || prior._tag === "Sent")
+    const written = threadStateWritten || postedInThread ? Converge.withThreadWritten(converged.written) : converged.written
 
     // 3. wait (the oracle reads the scenario channel; member operations have no channel)
     const readOracle: Effect.Effect<Wait.OracleValue, LabRequestFailed> =
@@ -349,8 +369,16 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
           Effect.mapError(toLabFailure),
           Effect.map((read): Wait.OracleValue => (read._tag === "Permissions" ? { _tag: "Permissions", permissions: read.permissions } : { _tag: "Unavailable" }))
         )
-    const settled = yield* Wait.settle({ scenario: scenario.id, state, ids, guildState: runtime.guildState, guildId: ids.guildId, channel: channelId, readOracle, channels })
+    const settled = yield* Wait.settle({ scenario: scenario.id, state, ids, guildState: runtime.guildState, guildId: ids.guildId, channel: channelId, readOracle, channels, converged: { view: converged.view, written } })
     yield* lap("wait")
+    // the next Converge may start from this read-back: role permissions and the subject change only through Converge
+    // and the subject's fixtures; the target also through a member operation or a probe, so not after one
+    const touchesTarget = operation._tag === "member" || operation._tag === "rule"
+    context.known = {
+      roles: operation._tag === "rule" ? undefined : settled.view.roles,
+      subject: operation._tag === "rule" ? undefined : settled.view.subject,
+      target: touchesTarget ? undefined : settled.view.target
+    }
 
     // the fixtures' messages as the harness reads them (author, reactions), for the library's handles, and the
     // target member as the subject reads it (as the library's `Members.get` does)
@@ -385,7 +413,7 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
       }
       yield* cleanup
       yield* lap("cleanup")
-      yield* context.log(`${scenario.id}: probe ${JSON.stringify(probed.observation)}; ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}`)
+      yield* context.log(`${scenario.id}: probe ${JSON.stringify(probed.observation)}; ${profile()}`)
       const row: Omit<TruthTable.Row, "agreement"> = {
         ...base,
         resolver: { required: [], missing: [], missingBeforeMasks: [], masks: [], level: "none" },
@@ -522,12 +550,10 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
     // method, path with its IDs and query, and body: step (d)'s as sent, and step (b)'s when it reached the stub; a row
     // with neither has the operation recorded in bypass mode over the stub instead. Nothing extra is sent: a dry
     // request still counts in dfx's own limiter, which delayed live requests past the deadline (§5.10)
-    const rawRequest = DryRun.operationRequest(yield* capturedC.recorded)
-    const libraryRequests: Array<readonly [string, ReadonlyArray<DryRun.Recorded>]> = []
-    if (stepB.step === "pass") libraryRequests.push(["step (b)", stepB.requests])
-    if (recompute !== "n/a") libraryRequests.push(["step (d)", DryRun.operationRequest(yield* capturedD.recorded)])
-    if (libraryRequests.length === 0) libraryRequests.push(["the library, preflight bypassed", yield* Library.bypassedRequests(operation, library, yield* DryRun.makeRecorder(context.canned))])
-    const requestProblems = libraryRequests.flatMap(([label, requests]) => DryRun.requestDifferences(label, requests, rawRequest))
+    const sides = DryRun.librarySides({ reachedStub: stepB.step === "pass", requests: stepB.requests }, recompute === "n/a" ? undefined : yield* capturedD.recorded)
+    const checked: ReadonlyArray<DryRun.RequestSide> =
+      sides.length > 0 ? sides : [["the library, preflight bypassed", yield* Library.bypassedRequests(operation, library, yield* DryRun.makeRecorder(context.canned))]]
+    const requestProblems = DryRun.requestCheck(checked, yield* capturedC.recorded)
     if (requestProblems.length > 0) yield* context.log(`${scenario.id}: request-wiring: ${requestProblems.join("; ")}`)
     yield* lap("steps")
 
@@ -537,10 +563,10 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
     const message = operation._tag === "send" || operation._tag === "createPost" || operation._tag === "createThread" ? Drivers.createdMessageOf(called) : undefined
     const stepText = (step: "n/a" | "pass" | TruthTable.RecordedError) => (typeof step === "string" ? step : `${step.tag}[${step.categories.join(",")}]`)
     yield* context.log(
-      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${prior._tag === "Sent" ? ` after prior send ${prior.messageId}` : ""}${message === undefined ? "" : ` created ${message}`}; preflight ${records.preflightSet.join(",") || "pass"}; (b) ${stepText(stepB.step)}; request ${requestProblems.length === 0 ? "same" : "DIFFERS"}; (d) ${stepText(recompute)}; masks ${records.resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ms ${times.map(([step, ms]) => `${step} ${ms}`).join(", ")}`
+      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${prior._tag === "Sent" ? ` after prior send ${prior.messageId}` : ""}${message === undefined ? "" : ` created ${message}`}; preflight ${records.preflightSet.join(",") || "pass"}; (b) ${stepText(stepB.step)}; request ${requestProblems.length === 0 ? "same" : "DIFFERS"}; (d) ${stepText(recompute)}; masks ${records.resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ${profile()}`
     )
     const row: Omit<TruthTable.Row, "agreement"> = { ...base, resolver: records.resolver, preflight: stepB.step, preflightSet: records.preflightSet, raw, recompute, oracle }
-    return { ...row, agreement: !wired ? "preflight-wiring" : requestProblems.length > 0 ? "request-wiring" : agreement(row, facts) }
+    return { ...row, agreement: matrixRowAgreement(wired, requestProblems, agreement(row, facts)) }
   })
 
 const lookupId = (ids: Materialize.Ids, name: Materialize.LabName): Effect.Effect<ChannelId> => {
@@ -593,7 +619,7 @@ export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenari
     const everyoneBaseline = everyone === undefined ? [] : Flags.toSortedNames(Flags.fromBits(BigInt(everyone.permissions)))
 
     const canned = yield* DryRun.loadCanned.pipe(Effect.provide(BunFileSystem.layer))
-    const runContext: Context = { ids, stickerId: state.sticker, emojiId: state.emoji, log, oracleSeen: { unavailable: false }, dirty: new Set(), canned }
+    const runContext: Context = { ids, stickerId: state.sticker, emojiId: state.emoji, log, oracleSeen: { unavailable: false }, dirty: new Set(), canned, known: Converge.unknownView }
     const ordered = order(scenarios)
     const rows: Record<string, TruthTable.Row> = {}
     const pacing = yield* Pacing
@@ -649,6 +675,13 @@ export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenari
     return { table, scenarios: ordered.length, mismatches, durationMs: (yield* Clock.currentTimeMillis) - started } satisfies RunResult
   })
 
+/** The lab-step retries between two stats readings, as `step xN` items, or `none`. */
+export const retriedSince = (before: ReadonlyArray<readonly [string, number]>, after: ReadonlyArray<readonly [string, number]>): string => {
+  const earlier = new Map(before)
+  const added = after.map(([step, count]) => [step, count - (earlier.get(step) ?? 0)] as const).filter(([, count]) => count > 0)
+  return added.map(([step, count]) => `${step} x${count}`).join(", ") || "none"
+}
+
 /** The run log's path for a run started at `startedAt`. */
 export const logPath = (startedAt: number): string => `/tmp/effect-discord-perms-live-${startedAt}.log`
 
@@ -685,6 +718,7 @@ export const run = (report: IdentityReport, options: Options) =>
       `duration: ${Math.round(result.durationMs / 1000)} s`,
       `requests: ${stats.requests - statsBefore.requests}, writes: ${stats.writes - statsBefore.writes}, invalid (401/403/429): ${stats.invalid - statsBefore.invalid}`,
       `rate limited (429, retried by dfx): ${stats.rateLimitedByRoute.map(([route, count]) => `${route} x${count}`).join(", ") || "none"}`,
+      `lab steps retried after a 5xx: ${retriedSince(statsBefore.labRetries, stats.labRetries)}`,
       `oracle: ${result.table.env.oracle}`,
       `mismatches: ${result.mismatches.length}`,
       ...result.mismatches.map(([id, kind]) => `  ${kind}: ${id}`),

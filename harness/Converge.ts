@@ -52,19 +52,38 @@ const lookup = <K, V>(map: ReadonlyMap<K, V>, key: K, what: string): Effect.Effe
 }
 
 /**
+ * Parts of the harness's view the runner already holds current: a previous scenario's settled read-back, which
+ * nothing has written since (§5.11, after the M6 verifier). Role permissions change only through Converge and reset,
+ * the subject's roles and timeout only through Converge and the subject's fixtures, and the target's member state
+ * through Converge and the member operations and probes, so the runner forgets each part when one of those may have
+ * written it. A stale part would make Converge skip a write; the wait's comparison of the subject's own gateway state
+ * with the projection (role permissions, the subject's roles and timeout) would then time out rather than let the row
+ * run on the wrong setup.
+ */
+export interface KnownView {
+  readonly roles: ReadonlyArray<Wire.Role> | undefined
+  readonly subject: Wire.Member | undefined
+  readonly target: Wire.Member | undefined
+}
+
+/** Nothing known: Converge reads everything. */
+export const unknownView: KnownView = { roles: undefined, subject: undefined, target: undefined }
+
+/**
  * Reads the lab objects the desired state covers: the roles, the subject, the scenario thread and its members,
  * and the lab channels in `channels`, each with `getChannel`. The runner passes the channels whose overwrites
  * may differ from baseline (the scenario's, and those an earlier scenario or cleanup wrote); every other lab
  * channel is at baseline since the run's opening reset, because only Converge and cleanup write overwrites.
  * Reading single channels instead of the guild's channel list keeps clear of that route's rate limit (M3 live:
- * `GET /guilds/{id}/channels` answered 429 several times a run). Reads only.
+ * `GET /guilds/{id}/channels` answered 429 several times a run). The roles, the subject and the target are read
+ * unless `known` holds them current. Reads only.
  */
-export const readView = (state: Desired, ids: Ids, channelNames: ReadonlySet<LabIds.ChannelName>): Effect.Effect<LabView, LabRequestFailed, HarnessRest> =>
+export const readView = (state: Desired, ids: Ids, channelNames: ReadonlySet<LabIds.ChannelName>, known: KnownView = unknownView): Effect.Effect<LabView, LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {
     const rest = yield* HarnessRest
-    const roles = yield* rest.listGuildRoles(ids.guildId).pipe(labStep("converge: list roles"), Effect.flatMap(decodeArray(Wire.Role, "listGuildRoles")))
-    const subject = yield* rest.getGuildMember(ids.guildId, ids.subjectUserId).pipe(labStep("converge: get the subject"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
-    const target = yield* rest.getGuildMember(ids.guildId, ids.targetUserId).pipe(labStep("converge: get the target"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
+    const roles = known.roles ?? (yield* rest.listGuildRoles(ids.guildId).pipe(labStep("converge: list roles"), Effect.flatMap(decodeArray(Wire.Role, "listGuildRoles"))))
+    const subject = known.subject ?? (yield* rest.getGuildMember(ids.guildId, ids.subjectUserId).pipe(labStep("converge: get the subject"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember"))))
+    const target = known.target ?? (yield* rest.getGuildMember(ids.guildId, ids.targetUserId).pipe(labStep("converge: get the target"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember"))))
     const channels: Array<Wire.Channel> = []
     for (const name of [...channelNames].sort()) {
       const id = yield* lookup(ids.channels, name, name)
@@ -74,6 +93,53 @@ export const readView = (state: Desired, ids: Ids, channelNames: ReadonlySet<Lab
     const threadId = yield* lookup(ids.channels, state.thread.name, state.thread.name)
     const thread = yield* rest.getChannel(threadId).pipe(labStep(`converge: get ${state.thread.name}`), Effect.flatMap(Wire.decode(Wire.Channel, "getChannel")))
     const members = yield* rest.listThreadMembers(threadId).pipe(labStep(`converge: members of ${state.thread.name}`), Effect.flatMap(decodeArray(Wire.ThreadMember, "listThreadMembers")))
+    return { roles, subject, target, channels, thread, threadMembers: members.map((member) => member.user_id) }
+  })
+
+/**
+ * What Converge (or the fixtures and the thread's state after it) wrote since its read, so the wait's read-back
+ * re-reads only that (§5.10 step 3, after the M6 verifier): every other part of the harness's view is what Converge
+ * read, which nothing has changed since, because only the harness writes during a scenario's setup.
+ */
+export interface Written {
+  /** A role's permissions (`@everyone` included): the role list is read again. */
+  readonly roles: boolean
+  readonly subject: boolean
+  readonly target: boolean
+  /** The lab channels (by ID) whose overwrites or settings were written. */
+  readonly channels: ReadonlySet<string>
+  /** The scenario thread's state, its subject membership, or a message posted in it. */
+  readonly thread: boolean
+}
+
+/** Nothing written. */
+export const nothingWritten: Written = { roles: false, subject: false, target: false, channels: new Set(), thread: false }
+
+/** `written` with the scenario thread marked as written too. */
+export const withThreadWritten = (written: Written): Written => ({ ...written, thread: true })
+
+/**
+ * The harness's view after `written`: `view` with exactly the written parts read again (none when nothing was
+ * written, so the read-back of a setup Converge found already in place makes no request). Reads only.
+ */
+export const rereadWritten = (state: Desired, ids: Ids, view: LabView, written: Written): Effect.Effect<LabView, LabRequestFailed, HarnessRest> =>
+  Effect.gen(function* () {
+    const rest = yield* HarnessRest
+    const roles = written.roles ? yield* rest.listGuildRoles(ids.guildId).pipe(labStep("read-back: list roles"), Effect.flatMap(decodeArray(Wire.Role, "listGuildRoles"))) : view.roles
+    const subject = written.subject
+      ? yield* rest.getGuildMember(ids.guildId, ids.subjectUserId).pipe(labStep("read-back: get the subject"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
+      : view.subject
+    const target = written.target
+      ? yield* rest.getGuildMember(ids.guildId, ids.targetUserId).pipe(labStep("read-back: get the target"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
+      : view.target
+    const channels: Array<Wire.Channel> = []
+    for (const channel of view.channels) {
+      channels.push(written.channels.has(channel.id) ? yield* rest.getChannel(channel.id).pipe(labStep("read-back: get a lab channel"), Effect.flatMap(Wire.decode(Wire.Channel, "getChannel"))) : channel)
+    }
+    if (state.thread === undefined || !written.thread) return { roles, subject, target, channels, thread: view.thread, threadMembers: view.threadMembers }
+    const threadId = yield* lookup(ids.channels, state.thread.name, state.thread.name)
+    const thread = yield* rest.getChannel(threadId).pipe(labStep(`read-back: get ${state.thread.name}`), Effect.flatMap(Wire.decode(Wire.Channel, "getChannel")))
+    const members = yield* rest.listThreadMembers(threadId).pipe(labStep(`read-back: members of ${state.thread.name}`), Effect.flatMap(decodeArray(Wire.ThreadMember, "listThreadMembers")))
     return { roles, subject, target, channels, thread, threadMembers: members.map((member) => member.user_id) }
   })
 
@@ -180,39 +246,53 @@ const withSubjectView = <A, R>(parent: Wire.Channel, subject: UserId, change: Ef
 
 /** What Converge did. */
 export type Converged =
-  | { readonly _tag: "Converged" }
+  /** The lab is at the desired state, as far as the writes go: `view` is what Converge read, `written` what it wrote since. */
+  | { readonly _tag: "Converged"; readonly view: LabView; readonly written: Written }
   /** Discord refused the subject's timeout. */
   | { readonly _tag: "TimeoutRefused"; readonly status: number; readonly code: number }
   /** The subject was to be a timed-out administrator, and the timeout did not survive the role (H-021). */
   | { readonly _tag: "AdminExempt" }
 
 /** Brings the lab to `state` (see the module comment), except the scenario thread's archived and locked state. */
-export const converge = (state: Desired, ids: Ids, channels: ReadonlySet<LabIds.ChannelName>): Effect.Effect<Converged, LabRequestFailed, HarnessRest> =>
+export const converge = (state: Desired, ids: Ids, channels: ReadonlySet<LabIds.ChannelName>, known: KnownView = unknownView): Effect.Effect<Converged, LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {
     const rest = yield* HarnessRest
     const now = yield* Clock.currentTimeMillis
-    const view = yield* readView(state, ids, channels)
+    const view = yield* readView(state, ids, channels, known)
     const subject: UserId = ids.subjectUserId
     const admin = yield* lookup(ids.roles, "lab-admin", "lab-admin")
     const wantsAdmin = state.subjectRoles.includes("lab-admin")
     const timedOut = isTimedOut(view.subject.communication_disabled_until, now)
+    let roles = false
+    let subjectWritten = false
+    let targetWritten = false
+    const channelsWritten = new Set<string>()
+    let threadWritten = false
 
     // 1. no administrator and no timeout unless wanted; an administrator cannot be timed out (403, H-021), so
     // lab-admin also goes while a timeout is still to be applied, and step 4 gives it back
     const applyingTimeout = state.subjectTimedOut && !timedOut
-    if (view.subject.roles.includes(admin) && (!wantsAdmin || applyingTimeout)) yield* rest.deleteGuildMemberRole(ids.guildId, subject, admin).pipe(labStep("converge: take lab-admin"))
-    if (timedOut && !state.subjectTimedOut) yield* rest.updateGuildMember(ids.guildId, subject, { communication_disabled_until: null }).pipe(labStep("converge: lift the timeout"))
+    if (view.subject.roles.includes(admin) && (!wantsAdmin || applyingTimeout)) {
+      yield* rest.deleteGuildMemberRole(ids.guildId, subject, admin).pipe(labStep("converge: take lab-admin"))
+      subjectWritten = true
+    }
+    if (timedOut && !state.subjectTimedOut) {
+      yield* rest.updateGuildMember(ids.guildId, subject, { communication_disabled_until: null }).pipe(labStep("converge: lift the timeout"))
+      subjectWritten = true
+    }
 
     // 2. permissions, roles, overwrites, thread membership
     const everyone = view.roles.find((role) => role.id === everyoneRoleId(ids.guildId))
     if (everyone === undefined || BigInt(everyone.permissions) !== state.everyone) {
       yield* rest.updateGuildRole(ids.guildId, ids.guildId, { permissions: yield* wireNumber(state.everyone) }).pipe(labStep("converge: @everyone permissions"))
+      roles = true
     }
     for (const [name, permissions] of state.rolePermissions) {
       const id = yield* lookup(ids.roles, name, name)
       const role = view.roles.find((candidate) => candidate.id === id)
       if (role !== undefined && BigInt(role.permissions) !== permissions) {
         yield* rest.updateGuildRole(ids.guildId, id, { permissions: yield* wireNumber(permissions) }).pipe(labStep(`converge: ${name} permissions`))
+        roles = true
       }
     }
     const wanted = new Set<RoleId>()
@@ -221,19 +301,29 @@ export const converge = (state: Desired, ids: Ids, channels: ReadonlySet<LabIds.
       const name = view.roles.find((candidate) => candidate.id === role)?.name
       if (role !== admin && name !== undefined && isLabRoleName(name) && !wanted.has(role)) {
         yield* rest.deleteGuildMemberRole(ids.guildId, subject, role).pipe(labStep(`converge: take ${name}`))
+        subjectWritten = true
       }
     }
     for (const role of wanted) {
-      if (role !== admin && !view.subject.roles.includes(role)) yield* rest.addGuildMemberRole(ids.guildId, subject, role).pipe(labStep("converge: give a lab role"))
+      if (role !== admin && !view.subject.roles.includes(role)) {
+        yield* rest.addGuildMemberRole(ids.guildId, subject, role).pipe(labStep("converge: give a lab role"))
+        subjectWritten = true
+      }
     }
     // the target: its baseline and a members row's ranks, and no nickname or timeout left by an earlier row
     const targetWanted = new Set<RoleId>(wantedTargetRoles(state, ids))
     const labRoleIds = new Set<string>(ids.roles.values())
     for (const role of view.target.roles) {
-      if (labRoleIds.has(role) && !targetWanted.has(role)) yield* rest.deleteGuildMemberRole(ids.guildId, ids.targetUserId, role).pipe(labStep("converge: take a lab role from the target"))
+      if (labRoleIds.has(role) && !targetWanted.has(role)) {
+        yield* rest.deleteGuildMemberRole(ids.guildId, ids.targetUserId, role).pipe(labStep("converge: take a lab role from the target"))
+        targetWritten = true
+      }
     }
     for (const role of targetWanted) {
-      if (!view.target.roles.includes(role)) yield* rest.addGuildMemberRole(ids.guildId, ids.targetUserId, role).pipe(labStep("converge: give the target a lab role"))
+      if (!view.target.roles.includes(role)) {
+        yield* rest.addGuildMemberRole(ids.guildId, ids.targetUserId, role).pipe(labStep("converge: give the target a lab role"))
+        targetWritten = true
+      }
     }
     const targetNicked = view.target.nick !== undefined && view.target.nick !== null
     const targetTimedOut = isTimedOut(view.target.communication_disabled_until, now)
@@ -241,6 +331,7 @@ export const converge = (state: Desired, ids: Ids, channels: ReadonlySet<LabIds.
       yield* rest
         .updateGuildMember(ids.guildId, ids.targetUserId, { ...(targetNicked ? { nick: null } : {}), ...(targetTimedOut ? { communication_disabled_until: null } : {}) })
         .pipe(labStep("converge: clear the target's nickname and timeout"))
+      targetWritten = true
     }
     // the thread membership first: Discord refuses to add a member who cannot view the parent (403 50001, M3
     // live), so the change is made with View granted through a temporary member overwrite on the parent, which
@@ -254,6 +345,8 @@ export const converge = (state: Desired, ids: Ids, channels: ReadonlySet<LabIds.
         if (parent === undefined) return yield* Effect.die(new Error(`converge: ${state.overwriteChannel} missing`))
         yield* withSubjectView(parent, subject, state.thread.subjectMember ? rest.addThreadMember(view.thread.id, subject) : rest.deleteThreadMember(view.thread.id, subject), `converge: subject membership of ${state.thread.name}`)
         parentTouched = parent.id
+        channelsWritten.add(parent.id)
+        threadWritten = true
       }
     }
     for (const [name, overwrites] of state.overwrites) {
@@ -267,11 +360,13 @@ export const converge = (state: Desired, ids: Ids, channels: ReadonlySet<LabIds.
       yield* rest
         .updateChannel(id, { ...(sameOverwrites ? {} : { permission_overwrites: yield* wireOverwrites(overwrites) }), ...settings })
         .pipe(labStep(`converge: overwrites and settings of ${name}`))
+      channelsWritten.add(id)
     }
 
     // 3. the timeout, never on an administrator (H-021)
     if (applyingTimeout) {
       const until = new Date(now + Duration.toMillis(timeoutLength)).toISOString()
+      subjectWritten = true
       const applied = yield* rest.updateGuildMember(ids.guildId, subject, { communication_disabled_until: until }).pipe(labStep("converge: time the subject out"), Effect.result)
       if (applied._tag === "Failure") {
         if (applied.failure.status === 0) return yield* Effect.fail(applied.failure)
@@ -280,25 +375,29 @@ export const converge = (state: Desired, ids: Ids, channels: ReadonlySet<LabIds.
     }
 
     // 4. the administrator role last
-    if (wantsAdmin && (applyingTimeout || !view.subject.roles.includes(admin))) yield* rest.addGuildMemberRole(ids.guildId, subject, admin).pipe(labStep("converge: give lab-admin"))
+    if (wantsAdmin && (applyingTimeout || !view.subject.roles.includes(admin))) {
+      yield* rest.addGuildMemberRole(ids.guildId, subject, admin).pipe(labStep("converge: give lab-admin"))
+      subjectWritten = true
+    }
     if (wantsAdmin && applyingTimeout) {
       // M3 live: giving a timed-out member Administrator ends its timeout, so the setup cannot exist (H-021)
       const after = yield* rest.getGuildMember(ids.guildId, subject).pipe(labStep("converge: read the timed-out administrator"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
       if (!isTimedOut(after.communication_disabled_until, yield* Clock.currentTimeMillis)) return { _tag: "AdminExempt" }
     }
-    return { _tag: "Converged" }
+    return { _tag: "Converged", view, written: { roles, subject: subjectWritten, target: targetWritten, channels: channelsWritten, thread: threadWritten } }
   })
 
-/** Sets the scenario thread's archived and locked state (after the fixtures are posted). */
-export const applyThreadState = (state: Desired, ids: Ids): Effect.Effect<void, LabRequestFailed, HarnessRest> =>
+/** Sets the scenario thread's archived and locked state (after the fixtures are posted); whether it wrote anything. */
+export const applyThreadState = (state: Desired, ids: Ids): Effect.Effect<boolean, LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {
     const thread = state.thread
-    if (thread === undefined || (!thread.archived && !thread.locked)) return
+    if (thread === undefined || (!thread.archived && !thread.locked)) return false
     const rest = yield* HarnessRest
     const id = yield* lookup(ids.channels, thread.name, thread.name)
     // lock first, then archive: an archived thread accepts only an unarchiving edit
     if (thread.locked) yield* rest.updateChannel(id, { locked: true }).pipe(labStep(`converge: lock ${thread.name}`))
     if (thread.archived) yield* rest.updateChannel(id, { archived: true }).pipe(labStep(`converge: archive ${thread.name}`))
+    return true
   })
 
 /** The subject's thread membership is removed and the thread restored to baseline (cleanup, §5.10 step 9). */

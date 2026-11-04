@@ -1025,6 +1025,53 @@ the same commit.
 - **After the M6 verifier: smaller corrections.** The public barrel exports `CustomId` as a type only, so a
   `custom_id` comes only from a `ComponentRoute` (`Components.ts`'s comment holds); §5.9 counted 23 coverage rows,
   the catalog and the table have 24.
+- **Before M7 (the M6 verifier's six minor findings).**
+  - **Run time** (§5.10 steps 1 and 3, §5.11 updated). M6's full runs took 3,243 s and 3,177 s (W and B), the
+    verifier's 3,135 s and 3,164 s, against §5.11's target of at most 30 minutes, about 6.5 s per scenario. Profile of
+    the verifier's last run log (`/tmp/effect-discord-perms-live-1793756262499.log`, 484 rows with step timings):
+    the wait averaged 2,245 ms a row, Converge 1,823 ms, steps (a) to (d) 1,448 ms (420 matrix rows), cleanup 802 ms,
+    the harness's fixtures 175 ms, a rule probe 577 ms (64 rows). The run made 11,077 requests, about 23 a scenario,
+    and the shared bucket starts at most 5 a second, so requests alone cost at least 2,215 s (37 minutes): at
+    Discord's observed 180 to 200 ms a request the bucket, not the latency, sets the pace, and running reads in
+    parallel would gain nothing under it. The fixed sleeps added 0.55 s a matrix row. So the cuts are in requests and
+    sleeps, never in rows: the wait's first read-back re-reads only what Converge, the fixtures and the thread's state
+    wrote since Converge's read (`Converge.Written`, `Converge.rereadWritten`; before, it repeated all of Converge's
+    5 to 7 reads); Converge reads the roles and both members only when the previous scenario's settled read-back does
+    not hold them current (`Converge.KnownView`; the subject is forgotten when its own fixtures run, the target after a
+    member operation or a probe, everything after a probe; a stale part would make the wait's projection check time
+    out, never a wrong row); the oracle's gap is 100 ms (was 300 ms) and the settle 100 ms (was 250 ms). The pacing
+    bucket stays at 5 a second and the 30-minute target and 60-minute abort are unchanged. The run log now records
+    each step's requests next to its milliseconds (`requests converge 3, ...`). The timings after are in the M7
+    milestone below.
+  - **Lab-step retries after a 5xx** (§5.10 "Lab-step retries" and §5.11 added). Three of the verifier's five live
+    attempts died on one 5xx in a lab step (`converge: give the target a lab role` 500, `converge: get the target`
+    503, `fixtures: the harness's pin` 502). `labStep` and `Wire.raw` now send a step again after a 500-599 answer, up
+    to 3 times, 1, 2 and 4 s apart, when every request it sent is a GET, HEAD, PUT, PATCH or DELETE (the harness's
+    writes set absolute values); the shared client records the methods through `Lab.CurrentLabStep` and counts each
+    retry per step (`Pacing` stats `labRetries`), every retry is printed on stderr as it happens
+    (`lab step retried: "<step>" (<methods>) answered <status>; retry n of 3 in <wait>`), and the run summary and the
+    smoke and self-test counts print them. POSTs, 4xx answers and missing answers are never retried; steps (c) and
+    (d) never go through it. `test/unit/lab-retry.test.ts`: retried to success, given up after three, never a POST, a
+    4xx, a 429 or no answer, the 1/2/4 s backoff under `TestClock`, and a harness GET answered 503 once through the
+    real shared client, counted.
+  - **The UseExternalEmojis readback had no test**: `operations-runtime.test.ts` sends content with a static and an
+    animated custom emoji; a create response with them rewritten to text reports `["UseExternalEmojis"]`, one that
+    kept them `[]`, and content without custom emoji `[]` whatever Discord answers. The verifier's mutation
+    (`message.content.includes(token + "x")`) makes it fail.
+  - **Offline gaps**: `payload.test.ts` asserts `tts` (`true`, `false` and absent) on the wire, and an edit's content
+    and embed limits (exactly at them, one over each in tier 7's order, the length and limit); `state.test.ts` holds
+    `kindOfType` and `channelTypes` to Discord's documented type numbers, written out in the test, both ways, and
+    nothing else modelled; the request check's assembly is pure (`DryRun.librarySides`, `DryRun.requestCheck`,
+    `Agreement.matrixRowAgreement`), the runner uses it, and `request-check.test.ts` tests which sides are compared, a
+    step (d) difference behind the recompute's reads, and the row's agreement order. Each of the verifier's six
+    mutations (dropping `tts` in ToDfx, `checkEdit` at twice the limit, `case 13: return "voice"`, `case 10: return
+    "public-thread"`, `false ? "request-wiring"`, never comparing step (d)) fails one of these.
+  - **The request check compares the library's message bodies with ToDfx's**: stated in §5.10 next to the request
+    check, with what holds ToDfx's mapping instead (the hand-written wire bodies of `payload.test.ts`, the harness's
+    own readback and the probes that read messages back).
+  - **`R-mention-everyone-degrades` observed the library's own readback**: the role-mention probes now read the
+    created message back through the harness and observe `mention_roles` (Applied or Ignored), as
+    `typed-mention-user` does, and the library's `degraded` must say the same, or the probe stops the run as a defect.
 
 ## Escalated rules
 
