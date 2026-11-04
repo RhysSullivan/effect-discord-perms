@@ -1181,7 +1181,9 @@ the same commit.
 
 ## Escalated rules
 
-Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria. None yet.
+Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria.
+
+- `R-message-content` (remainder, Q-17, M7): the DM content exception needs a human DM ("Waiting for Rhys").
 
 ## Notes for every milestone
 
@@ -1213,7 +1215,10 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   rows) takes about 33 minutes, some 7,300 requests and 1,800 writes, about 220 of them invalid (the raw 403s).
 - **Role edits are rate-limited per guild: 1,000 a day, refilled about one per 86 s.** A full run needs about 75
   (67 for its setups, plus resets); `run` checks the bucket at start and says how long to wait. Two full runs
-  need about 1.8 hours between them. The reset self-test and smoke make a few each.
+  need about 1.8 hours between them. The reset self-test and smoke make a few each. (M7: the 512-scenario catalog
+  needs 88, 80 for its role states plus the margin; a full run takes 42 to 48 minutes, so the bucket is the pace:
+  about 1.2 hours between full runs. Never wrap a wait for the bucket and a run in one shell command with a time
+  limit: M7 lost a run at row 472 that way.)
 - **Crossposts are rate-limited per announcement channel** (about 10 publishes per hour). A full run publishes 4
   messages in `lab-announcement` in its first few minutes, so never start more than two full runs (or runs of
   `message/**` and `flip/**`) within one hour.
