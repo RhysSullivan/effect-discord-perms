@@ -2691,9 +2691,10 @@ M7.) (M7: 510: the codec's obfuscation blinds the timed-out rows that hide View,
 11 flip controls are replaced (9 by the flips of 9 new coverage rows, §4.15), and the
 catalog is 304 family rows, 33 coverage rows, 94 flip controls, 64 rule rows and 15
 intent sessions; a full run makes 80 role edits. After the first full codec run,
-`message/targeted/crosspost-foreign-timed-out` joins the targeted rows, 511 in all: it
-witnesses `Observed.viewCodeFailures`' crosspost under a timeout, which a flip control
-witnessed before the codec blinded its original.) (M4 has 229 pairwise rows, 72 targeted rows and 62 flip controls, 363
+`message/targeted/crosspost-foreign-timed-out` and `createThread/targeted/private-timed-out`
+join the targeted rows, 512 in all: they witness `Observed.viewCodeFailures`' foreign
+crosspost and private thread under a timeout, which flip controls witnessed before the
+codec blinded their originals.) (M4 has 229 pairwise rows, 72 targeted rows and 62 flip controls, 363
 scenarios in all; the rule rows and intent sessions come in M6-M8.)
 
 ### 5.10 Executing one scenario

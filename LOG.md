@@ -1162,11 +1162,14 @@ the same commit.
   setup, no write) retired the mark. With the codec the obfuscated copy is already the gateway's evidence of no View,
   and Discord sends the real data when View returns (H-161), so the refresh now leaves an obfuscated guild channel
   unmarked (a real copy is still marked, as is a thread). `test/unit/state.test.ts` pins it (removing the rule fails it).
-- **M7: `message/targeted/crosspost-foreign-timed-out`** (§5.9 updated). The same table left
-  `Observed.viewCodeFailures["message.crosspostForeign"]`' `CommunicationDisabled` without a witness: the M6 witness was
-  `flip/message/announcement/crosspost-foreign/view/timed-out`, which the codec removed (its original is blind). The new
-  targeted row is that flip's setup (View, Send, ReadMessageHistory and ManageMessages through a role, timed out), 511
-  scenarios in all, still 80 role edits.
+- **M7: `message/targeted/crosspost-foreign-timed-out` and `createThread/targeted/private-timed-out`** (§5.9 updated).
+  The same table left `Observed.viewCodeFailures["message.crosspostForeign"]`' `CommunicationDisabled` without a
+  witness: the M6 witness was `flip/message/announcement/crosspost-foreign/view/timed-out`, which the codec removed (its
+  original is blind). The first targeted row is that flip's setup (View, Send, ReadMessageHistory and ManageMessages
+  through a role, timed out). The replay's witness check stops at its first missing entry, so the next complete run's
+  table showed the second, `channel.createThread.private`'s `CommunicationDisabled` (the M6 witness was
+  `flip/createThread/text/private/view/timed-out`); a script over every entry then found no other, and the second
+  targeted row is that flip's setup. 512 scenarios in all, still 80 role edits.
 - **M7: the replay models the codec** (§4.15, §5.12 updated): the table is `obfuscation: "codec"`, and
   `Predict.snapshotOf` rebuilds a channel the subject cannot view obfuscated, with no overwrites. Its consequence for
   the catalog: a timed-out row that hides View resolves `obfuscated`, which hides the timeout from preflight, so its

@@ -107,6 +107,15 @@ const threadTargeted = (name: string, hypotheses: ReadonlyArray<`H-${number}`>, 
 
 /** Hypotheses the pairwise dimensions cannot express. */
 export const targetedRows: ReadonlyArray<Scenario> = [
+  // M7: a private thread created under a timeout answers 50001 (`Observed.viewCodeFailures`); the flip control that
+  // witnessed it (`flip/createThread/text/private/view/timed-out`) is gone, since with the codec its original is blind
+  // (obfuscated), so this row, that flip's setup, witnesses it
+  threadTargeted("private-timed-out", ["H-020", "H-041", "H-080"], { _tag: "createThread", visibility: "private", fromMessage: false }, {
+    channel: "text",
+    grants: [{ flags: ["CreatePrivateThreads", "ViewChannel"], via: "role" }],
+    removals: [],
+    memberState: "timed-out"
+  }),
   // H-032: does a member of a thread need View on its parent to leave it? (M4 live: no, it leaves without View)
   threadTargeted("member-without-parent-view", ["H-032", "H-048"], { _tag: "thread", action: "leave" }, {
     channel: "public-thread",
