@@ -13,8 +13,8 @@ import { type Answer, fakeCredentials, fakeSubjectGateway, fakeSubjectUserId, ma
  * HttpClient swapped for a recording fake, the WebSocket for a fake gateway, and fake tokens. Each identity sends
  * its own token, and all three share one base client (one pacing bucket and one set of counters). Without
  * `Layer.fresh` every identity would send the first token. The subject is the library's real bot build: its
- * startup requests go through the same shared client, and `SubjectRaw` is that build's client. M7 re-runs this
- * with the codec.
+ * startup requests go through the same shared client, and `SubjectRaw` is that build's client. M7 re-ran it with
+ * the subject's build on the capabilities codec: its Identify carries `capabilities: 32768`.
  */
 const pacing = { requestsPerSecond: 5, invalidCap: 1500 } as const
 const withStartup = (respond: (request: Parameters<typeof subjectStartupAnswer>[0]) => Answer) => (request: Parameters<typeof subjectStartupAnswer>[0]): Answer =>
