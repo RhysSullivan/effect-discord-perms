@@ -429,7 +429,7 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
       }
       yield* cleanup
       yield* lap("cleanup")
-      yield* context.log(`${scenario.id}: probe ${JSON.stringify(probed.observation)}; ${profile()}`)
+      yield* context.log(`${scenario.id}: ${settled.resent.length > 0 ? `resent ${settled.resent.join(",")} for obfuscation; ` : ""}probe ${JSON.stringify(probed.observation)}; ${profile()}`)
       const row: Omit<TruthTable.Row, "agreement"> = {
         ...base,
         resolver: { required: [], missing: [], missingBeforeMasks: [], masks: [], level: "none" },
@@ -579,7 +579,7 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
     const message = operation._tag === "send" || operation._tag === "createPost" || operation._tag === "createThread" ? Drivers.createdMessageOf(called) : undefined
     const stepText = (step: "n/a" | "pass" | TruthTable.RecordedError) => (typeof step === "string" ? step : `${step.tag}[${step.categories.join(",")}]`)
     yield* context.log(
-      `${scenario.id}: raw ${raw.class} ${raw.status} ${raw.code}${prior._tag === "Sent" ? ` after prior send ${prior.messageId}` : ""}${message === undefined ? "" : ` created ${message}`}; preflight ${records.preflightSet.join(",") || "pass"}; (b) ${stepText(stepB.step)}; request ${requestProblems.length === 0 ? "same" : "DIFFERS"}; (d) ${stepText(recompute)}; masks ${records.resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ${profile()}`
+      `${scenario.id}: ${settled.resent.length > 0 ? `resent ${settled.resent.join(",")} for obfuscation; ` : ""}raw ${raw.class} ${raw.status} ${raw.code}${prior._tag === "Sent" ? ` after prior send ${prior.messageId}` : ""}${message === undefined ? "" : ` created ${message}`}; preflight ${records.preflightSet.join(",") || "pass"}; (b) ${stepText(stepB.step)}; request ${requestProblems.length === 0 ? "same" : "DIFFERS"}; (d) ${stepText(recompute)}; masks ${records.resolver.masks.join(",") || "none"}; oracle ${typeof oracle === "string" ? oracle : oracle.missing.join(",") || "none missing"}; ${profile()}`
     )
     const row: Omit<TruthTable.Row, "agreement"> = { ...base, resolver: records.resolver, preflight: stepB.step, preflightSet: records.preflightSet, raw, recompute, oracle }
     return { ...row, agreement: matrixRowAgreement(wired, requestProblems, agreement(row, facts)) }

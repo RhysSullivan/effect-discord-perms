@@ -344,8 +344,17 @@ export const channelInputOf = (state: Desired, ids: Ids, name: LabName, who: "su
 export type ChannelView =
   /** It can view the channel: the overwrites, exactly, and (forum and media) whether posts need a tag. */
   | { readonly _tag: "Visible"; readonly id: ChannelId; readonly overwrites: ReadonlyArray<DesiredOverwrite>; readonly requireTag: boolean }
-  /** It cannot: obfuscated, or (before Discord's switch) these real overwrites. */
+  /**
+   * It cannot: obfuscated, or (before Discord's switch, without the codec) these real overwrites. With the codec
+   * (`Projection.obfuscation`), a hidden channel other than the category must be obfuscated (M7).
+   */
   | { readonly _tag: "Hidden"; readonly id: ChannelId; readonly overwrites: ReadonlyArray<DesiredOverwrite> }
+
+/**
+ * How the subject's gateway shows a channel it cannot view: `codec`, obfuscated (M7, the subject's Identify carries
+ * ChannelObfuscation); `either`, obfuscated or with its real overwrites (before Discord's switch, without the codec).
+ */
+export type ObfuscationMode = "codec" | "either"
 
 /** The subject-observable projection of a desired state (see the module comment). */
 export interface Projection {
@@ -354,6 +363,7 @@ export interface Projection {
   readonly subjectRoles: ReadonlySet<RoleId>
   readonly subjectTimedOut: boolean
   readonly channels: ReadonlyMap<LabIds.ChannelName, ChannelView>
+  readonly obfuscation: ObfuscationMode
   /** The scenario thread, if it is observable; `undefined` when there is none or it is not observable. */
   readonly thread: { readonly id: ChannelId; readonly archived: boolean; readonly locked: boolean; readonly subjectMember: boolean } | undefined
 }
@@ -370,7 +380,7 @@ export const subjectSees = (state: Desired, ids: Ids, name: LabName, now: number
 }
 
 /** The projection of `state` (see the module comment). `now` places the desired timeout in the future. */
-export const project = (state: Desired, ids: Ids, now: number): Projection => {
+export const project = (state: Desired, ids: Ids, now: number, obfuscation: ObfuscationMode = "either"): Projection => {
   const roles = new Map<RoleId, bigint>([[everyoneRoleId(ids.guildId), state.everyone]])
   for (const spec of LabIds.roleSpecs) roles.set(lookup(ids.roles, spec.name, spec.name), rolePermissionsOf(state, spec.name))
   const channels = new Map<LabIds.ChannelName, ChannelView>()
@@ -384,6 +394,7 @@ export const project = (state: Desired, ids: Ids, now: number): Projection => {
     subjectRoles: new Set(state.subjectRoles.map((name) => lookup(ids.roles, name, name))),
     subjectTimedOut: state.subjectTimedOut,
     channels,
+    obfuscation,
     thread:
       thread !== undefined && subjectSees(state, ids, thread.name, now)
         ? { id: lookup(ids.channels, thread.name, thread.name), archived: thread.archived, locked: thread.locked, subjectMember: thread.subjectMember }
@@ -396,6 +407,19 @@ const sameOverwrites = (actual: ReadonlyArray<Overwrite>, expected: ReadonlyArra
   expected.every((want) =>
     actual.some((have) => have.id === want.id && have.type === (want.type === 0 ? "role" : "member") && have.allow === Flags.fromBits(want.allow) && have.deny === Flags.fromBits(want.deny))
   )
+
+/**
+ * The channels the projection hides from the subject (the category aside) that its snapshot still shows with their
+ * real overwrites, which with the codec must be obfuscated (M7; the wait resends them).
+ */
+export const staleUnobfuscated = (projection: Projection, snapshot: Snapshot, guildId: GuildId): ReadonlyArray<LabIds.ChannelName> => {
+  const guild = snapshot.guilds.get(guildId)
+  if (guild === undefined || projection.obfuscation !== "codec") return []
+  return [...projection.channels].flatMap(([name, view]) => {
+    const channel = guild.channels.get(view.id)
+    return view._tag === "Hidden" && channel !== undefined && !channel.obfuscated && channel.kind !== "category" ? [name] : []
+  })
+}
 
 /**
  * How the subject's snapshot differs from the projection, at `now`. Empty when the subject's state shows the
@@ -427,6 +451,9 @@ export const projectionProblems = (projection: Projection, snapshot: Snapshot, g
     }
     if (view._tag === "Hidden" && channel.obfuscated) continue
     if (channel.obfuscated) problems.push(`${name} obfuscated, but the subject can view it`)
+    // M7 live: after the subject lost View, its state showed the real overwrites until Discord's obfuscated update
+    // arrived, so with the codec the wait waits for it (the category, which Discord may show for a visible child, H-018, is not held to it)
+    else if (view._tag === "Hidden" && projection.obfuscation === "codec" && channel.kind !== "category") problems.push(`${name} shows its real overwrites, not obfuscated, though the subject cannot view it`)
     else if (!sameOverwrites(channel.overwrites, view.overwrites)) problems.push(`${name} overwrites differ`)
     else if (view._tag === "Visible" && channel.requireTag !== view.requireTag) problems.push(`${name} requireTag ${channel.requireTag}, not ${view.requireTag}`)
   }

@@ -360,6 +360,19 @@ M6, the whole matrix:
   the runner's obfuscation check passed on every row that hides `lab-text`, also where a role change hid it
   (`run --only 'rule/**'`: the `members` rows follow the `thread` rows, which grant View through a role). So Discord
   sends the obfuscated channel when View goes away by an overwrite or by a role change.
+- **M7: when the subject loses Administrator, Discord sends no obfuscated update for the channels it stops seeing.**
+  The first full run (`run --write`, 510 scenarios) stopped at row 53: `send/targeted/order-view-send: the gateway
+  ignored capabilities: the subject cannot view lab-text, but its state shows it with real overwrites, not
+  obfuscated`. The three rows before it gave the subject `lab-admin`; this one takes it away and grants nothing. With
+  the wait made strict (a hidden channel must be obfuscated), `run --only 'send/targeted/**'` timed out on the same row
+  after 15 s with every hidden lab channel (`lab-text`, `lab-announcement`, `lab-voice`, `lab-stage`, `lab-forum`,
+  `lab-bots-only`) still shown with its real overwrites: no update came at all. Losing View by an overwrite or by a
+  role's permissions sends one (above). Since the subject's view of a hidden channel would then depend on which way
+  an earlier row hid it, which the replay cannot rebuild from the setup, the wait resends a hidden channel still shown
+  with real overwrites after 2 s (its own overwrites written again, unchanged), and Discord then sends it obfuscated:
+  the next run of `send/targeted/**` passed (0 mismatches), resending the six channels on `order-view-send` and on
+  `voice-connect-without-view`. A bot that loses Administrator keeps the real overwrites of channels it can no longer
+  see; its preflight still finds ViewChannel missing from its roles, which is what matters to it.
 - **M7, H-161 confirmed: when View returns, Discord sends the channel's real data.** No row in the codec runs timed
   out waiting for the subject's state to show a channel it can view again with its real overwrites, by an
   overwrite or a role. (Without the codec, M6 live: no channel event at all when a role granted View.)

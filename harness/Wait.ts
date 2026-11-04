@@ -8,7 +8,11 @@
  *   nothing, when Converge found the setup in place): the rest of the view is Converge's read, which nothing changed
  *   since. A read-back that still differs is retried with every read Converge makes (`Converge.readView`);
  * - the subject's guild state equals the desired state's subject-observable projection
- *   (`Materialize.projectionProblems`), watched through `GuildState.changes`, so no request is made;
+ *   (`Materialize.projectionProblems`), watched through `GuildState.changes`, so no request is made. With the codec a
+ *   channel the subject cannot view must be obfuscated there; when one still shows its real overwrites after
+ *   {@link resendAfter}, the harness resends that channel's own overwrites (`Converge.resendOverwrites`), which makes
+ *   Discord send it again, obfuscated for the subject (M7 live: no update arrives on its own when the subject loses
+ *   Administrator);
  * - two oracle reads {@link oracleGap} apart are identical (when the oracle is available and the operation has a
  *   channel);
  * - a further {@link settleGap} has passed.
@@ -24,6 +28,7 @@ import type { HarnessRest } from "./Identities.ts"
 import type { LabRequestFailed } from "./Lab.ts"
 import type * as LabIds from "./LabIds.ts"
 import * as Materialize from "./Materialize.ts"
+import * as Predict from "./Predict.ts"
 
 /** The cap on one scenario's wait. */
 export const cap = Duration.seconds(15)
@@ -33,6 +38,12 @@ export const oracleGap = Duration.millis(100)
 
 /** The settle after everything agrees. */
 export const settleGap = Duration.millis(100)
+
+/**
+ * How long the wait gives Discord to obfuscate, on its own, the channels the subject stopped seeing before it resends
+ * those still shown with their real overwrites (see `settle`).
+ */
+export const resendAfter = Duration.seconds(2)
 
 /** The setup did not settle within the cap: an infrastructure abort, never a row. */
 export class SetupTimeout extends Schema.TaggedError<SetupTimeout>()("SetupTimeout", { scenario: Schema.String, detail: Schema.String }) {}
@@ -51,6 +62,8 @@ export interface Settled {
   readonly oracle: OracleValue
   /** The harness's view of the lab at the desired state (the runner keeps its roles and members for the next Converge). */
   readonly view: Converge.LabView
+  /** The lab channels the wait resent so the subject's gateway would obfuscate them (for the run log). */
+  readonly resent: ReadonlyArray<LabIds.ChannelName>
 }
 
 /** Waits until the lab, the subject's state and the oracle agree with `state` (see the module comment). */
@@ -88,19 +101,33 @@ export const settle = (input: {
 
     // the subject's state, against the projection
     const now = yield* Clock.currentTimeMillis
-    const projection = Materialize.project(input.state, input.ids, now)
+    const projection = Materialize.project(input.state, input.ids, now, Predict.obfuscation)
     let last: ReadonlyArray<string> = []
-    const matched = yield* input.guildState.changes.pipe(
-      Stream.mapEffect((snapshot) =>
-        Effect.map(Clock.currentTimeMillis, (at) => {
-          last = Materialize.projectionProblems(projection, snapshot, input.guildId, at)
-          return last.length === 0
-        })
-      ),
-      Stream.filter((ok) => ok),
-      Stream.runHead,
-      Effect.timeoutOrElse({ duration: Duration.millis(yield* remaining), orElse: () => Effect.succeedNone })
-    )
+    const matchedWithin = (ms: number) =>
+      input.guildState.changes.pipe(
+        Stream.mapEffect((snapshot) =>
+          Effect.map(Clock.currentTimeMillis, (at) => {
+            last = Materialize.projectionProblems(projection, snapshot, input.guildId, at)
+            return last.length === 0
+          })
+        ),
+        Stream.filter((ok) => ok),
+        Stream.runHead,
+        Effect.timeoutOrElse({ duration: Duration.millis(ms), orElse: () => Effect.succeedNone })
+      )
+    let resent: ReadonlyArray<LabIds.ChannelName> = []
+    let matched = yield* matchedWithin(Math.min(Duration.toMillis(resendAfter), yield* remaining))
+    if (Option.isNone(matched)) {
+      // M7 live: Discord sends no obfuscated update for the channels a bot stops seeing when it loses Administrator,
+      // so its state keeps their real overwrites; resending a channel's own overwrites makes Discord send it again,
+      // obfuscated for the subject
+      const stale = Materialize.staleUnobfuscated(projection, yield* input.guildState.snapshot, input.guildId)
+      if (stale.length > 0) {
+        yield* Converge.resendOverwrites(input.state, input.ids, stale)
+        resent = stale
+      }
+      matched = yield* matchedWithin(yield* remaining)
+    }
     if (Option.isNone(matched)) return yield* timeout(`subject state: ${last.join("; ")}`)
 
     // the oracle, stable across two reads
@@ -113,5 +140,5 @@ export const settle = (input: {
       previous = next
     }
     yield* Effect.sleep(settleGap)
-    return { oracle: previous, view }
+    return { oracle: previous, view, resent }
   })

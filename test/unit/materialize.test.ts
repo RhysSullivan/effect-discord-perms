@@ -119,6 +119,18 @@ describe("the projection", () => {
     expect(Materialize.projectionProblems(Materialize.project(timedOut, fakeIds, now), stateFor(hiddenText), labGuildId, now)).toEqual(["subject timed out: false, not true"])
   })
 
+  it("with the codec, requires a hidden channel obfuscated, and only the category may show its real overwrites (M7)", () => {
+    const projection = Materialize.project(hiddenText, fakeIds, now, "codec")
+    expect(Materialize.projectionProblems(projection, stateFor(hiddenText), labGuildId, now)).toContain("lab-text shows its real overwrites, not obfuscated, though the subject cannot view it")
+    const hiddenNames = [...projection.channels].filter(([, view]) => view._tag === "Hidden").map(([name]) => name)
+    const obfuscated = stateFor(hiddenText, { obfuscate: new Set(hiddenNames.filter((name) => name !== "lab")) })
+    expect(Materialize.projectionProblems(projection, obfuscated, labGuildId, now)).toEqual([])
+    // what the wait resends: the hidden channels still shown with real overwrites, never the category
+    expect(Materialize.staleUnobfuscated(projection, stateFor(hiddenText), labGuildId)).toEqual(hiddenNames.filter((name) => name !== "lab"))
+    expect(Materialize.staleUnobfuscated(projection, obfuscated, labGuildId)).toEqual([])
+    expect(Materialize.staleUnobfuscated(Materialize.project(hiddenText, fakeIds, now), stateFor(hiddenText), labGuildId)).toEqual([])
+  })
+
   it("compares a hidden channel's real overwrites when the gateway delivers them unobfuscated", () => {
     const projection = Materialize.project(hiddenText, fakeIds, now)
     const stale: Materialize.Desired = { ...hiddenText, overwrites: new Map([...hiddenText.overwrites].map(([name, overwrites]) => [name, name === "lab-text" ? overwrites.slice(1) : overwrites])) }

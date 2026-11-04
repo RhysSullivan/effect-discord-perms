@@ -387,6 +387,20 @@ export const converge = (state: Desired, ids: Ids, channels: ReadonlySet<LabIds.
     return { _tag: "Converged", view, written: { roles, subject: subjectWritten, target: targetWritten, channels: channelsWritten, thread: threadWritten } }
   })
 
+/**
+ * Writes each of `names`' overwrites again, unchanged (they are the desired state's, which the read-back confirmed),
+ * so Discord sends the channel to the subject again: obfuscated, when the subject cannot view it (the wait, M7).
+ */
+export const resendOverwrites = (state: Desired, ids: Ids, names: ReadonlyArray<LabIds.ChannelName>): Effect.Effect<void, LabRequestFailed, HarnessRest> =>
+  Effect.gen(function* () {
+    const rest = yield* HarnessRest
+    for (const name of names) {
+      const id = yield* lookup(ids.channels, name, name)
+      const overwrites = yield* lookup(state.overwrites, name, `${name}'s overwrites`)
+      yield* rest.updateChannel(id, { permission_overwrites: yield* wireOverwrites(overwrites) }).pipe(labStep(`wait: resend ${name} for the subject's obfuscation`))
+    }
+  })
+
 /** Sets the scenario thread's archived and locked state (after the fixtures are posted); whether it wrote anything. */
 export const applyThreadState = (state: Desired, ids: Ids): Effect.Effect<boolean, LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {

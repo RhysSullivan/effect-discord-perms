@@ -2736,7 +2736,12 @@ setup alone made 216.)
      when Converge found the setup in place; one that differs is retried with all
      of step 1's reads.)
    - The subject's GuildState equals the **projection** of the desired state
-     (§5.8).
+     (§5.8). (M7, with the codec: a lab channel the subject cannot view, the
+     category aside, must be obfuscated there. M7 live: when the subject loses
+     Administrator, Discord sends no update for the channels it stops seeing, and
+     its state keeps their real overwrites; so a channel still shown that way after
+     2 s is resent, its own overwrites written again unchanged, and Discord then
+     sends it obfuscated. The run log names the channels resent.)
    - Two oracle reads 100 ms apart are identical (revision 2: 300 ms; with the
      pacing's 200 ms between request starts they start at least 300 ms apart).
    - A further 100 ms settle has passed (revision 2: 250 ms).
