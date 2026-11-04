@@ -1887,6 +1887,26 @@ Live, in order (each alone under the lock, on minisforum):
     reactions and one channel edit, no lab step retried, oracle available, **0 mismatches**, `compare: identical to the
     previous table` (W's, committed); it wrote the same bytes (`8476671c...8fbe30`). 23 rows again needed the
     obfuscation resend.
+  - `bun --no-env-file harness/main.ts run --compare` in a fresh process (on `426eb13`, only LOG.md changed since A)
+    stopped at row 232 of 512 as an infrastructure abort, nothing compared: `SetupTimeout
+    {"scenario":"message/announcement/crosspost-own/none/timed-out","detail":"subject state: lab-announcement overwrites
+    differ"}`. Converge had written `lab-announcement`'s overwrites back (removing the temporary member overwrite the
+    subject's own fixture needs) and the harness's read-back saw them, but the subject's gateway state did not show
+    them within the wait's 15 s; the three rows before it, with the same fixture pattern, settled in under a second,
+    and the same row settled in the runs before and after. Like M6's second full run (a thread membership the gateway
+    state had not caught up with), a late or lost CHANNEL_UPDATE; the cap stays 15 s and the next run passed it. A
+    start a few minutes earlier had stopped before any scenario on the role budget (87 left).
+  - **exit run B**, same code (`426eb13`): `bun --no-env-file harness/main.ts run --compare` in a fresh process exited 0:
+    role budget 105 left, 512 scenarios in 2,559 s, 8,976 requests, 2,713 writes, 597 invalid, 429s retried by dfx on
+    10 reactions and one channel edit, no lab step retried, oracle available, **0 mismatches**, `compare: identical to
+    the previous table`, `run ok`. The lock was gone afterwards. Then `bun run verify:offline` exited 0 (gen:errors up
+    to date; typecheck; 1,442 tests in 47 files, among them `bot-events.test.ts`: finalizers run per event, and a
+    handler failing with a transient error or dying does not stop later events; test:types 9 pass and 10 fail
+    fixtures, 63 diagnostics, largest gated 498 characters; hover 4 files, 16 markers; rules; budget nothing to
+    measure yet), and `bun run rules` gave `rules ok 51 rule(s) (44 live pair, 0 escalated, 5 pure-typing, 2 other
+    not-live), 10 fail fixture(s), 91 live sides checked against the table, 5 event(s) with a live intent pair, flag
+    coverage over 433 matrix row(s)`; `verify:live` lists `R-message-content (remainder, Q-17)` as the one unmet Done
+    criterion.
 - **Run time (the M6 verifier's first finding), before and after.** M6's full runs: 3,131 to 3,243 s for 486
   scenarios (6.4 to 6.7 s each), some 11,077 requests (23 a scenario). M7's complete run above: 2,479 s for 510
   scenarios (4.9 s each, the 15 sessions included), 8,928 requests (17.5 a scenario). Per row, from the run logs
