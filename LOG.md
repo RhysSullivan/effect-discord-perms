@@ -55,6 +55,13 @@ milestone appends its entries.
   lines must show `MESSAGE_CREATE`, `MESSAGE_REACTION_ADD` and `TYPING_START` with the intents, and none without them
   before the canary). Typed and unit-tested through the fake gateway meanwhile.
 
+- **A second guild (decision, not blocking; after the final audit's live pairs).** `R-payload-external-emoji` and
+  `R-payload-external-sticker` stay `needs-second-guild`: their invalid side needs an emoji or sticker of a guild the
+  subject is in and Perms Lab is not. On the subject's own setup Discord rewrites a made-up emoji ID to `:name:` with and
+  without UseExternalEmojis, and keeps an application emoji and Perms Lab's own emoji with and without it ("Live
+  findings"), so neither shows the flag's effect. If Rhys wants both rules live, a second guild with the subject (and an
+  emoji and a sticker in it) would do; otherwise they stay typed, unit-tested and, for the emoji, the six recorded rows.
+
 - **GuildMedia channels (decision, not blocking).** Perms Lab cannot have a media channel: creating one
   (`POST /guilds/{guild.id}/channels`, type 16) answers 400 50024 "Cannot execute action on this channel type",
   even with a minimal body `{name, type}` (M2). Provisioning records `lab-media` as unavailable in
@@ -474,6 +481,37 @@ M6, the whole matrix:
   to 18 s after about a dozen writes in half a minute; the bulk overwrite PUT has its own bucket, which sustained about
   one PUT every 30 s and answered 429 with `retry-after` 52 to 58 s when pressed. dfx waits them out; the registration
   rows take about five minutes of a full run for it ("Design deviations", M8).
+- **After the final audit, H-128: a message's action rows.** Six rows of one link button are refused with 400 50035
+  `BASE_TYPE_MAX_LENGTH` on `components`, on a create and on an edit of the subject's own message alike; five are
+  accepted on both. An empty row is refused with `BASE_TYPE_BAD_LENGTH` on `components.0.components`, the code a row of
+  six buttons gets, so a row's 1 to 5 is one length check (`R-row-5-buttons`).
+- **After the final audit, H-129: a premium button's `custom_id` and an interactive button's `url`.** A premium button
+  with a `custom_id` gets `BUTTON_COMPONENT_CUSTOM_ID_SKU_MUTUALLY_EXCLUSIVE` on its `custom_id`, beside the
+  `BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE` on `sku_id` that the unowned SKU alone gets (`R-premium-no-label`). A
+  primary button with both a `custom_id` and a `url` gets `BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE` on both
+  paths, as a link button with a `custom_id` does; without the url it is accepted (`R-link-no-custom-id`).
+- **After the final audit: an option key on a type that does not take it is accepted and dropped.** Discord's docs list
+  each key under the types that take it and say nothing of the others. Live, a POST of the probe command with
+  `choices` or `autocomplete` on a boolean, user, role and channel option, `min_length` or `max_length` on an integer,
+  number, boolean, user, role and channel option, `min_value` or `max_value` on a string, boolean, user, role and
+  channel option, or `channel_types` on a string, integer, number, boolean, user and role option, is answered 200, and
+  the command read back has none of those keys on any of those options; every key on a type that takes it is stored as
+  defined. So the library's refusal of such a key (`R-option-keys`, after the final audit) matches what Discord does
+  with it: nothing.
+- **After the final audit: a fractional slowmode is accepted and truncated.** `rate_limit_per_user: -1` is refused with
+  `NUMBER_TYPE_MIN`, as 21,601 is with `NUMBER_TYPE_MAX`; `rate_limit_per_user: 1.5` is answered 200 and the channel
+  answered back has `rate_limit_per_user: 1`. The library refuses a fraction locally (`SlowmodeOutOfRange`, and its type
+  keeps the tag for a fractional literal), so for a fraction it is stricter than Discord: kept on purpose, because
+  Discord would store a different value from the one asked for. The rule's statement says so (`R-slowmode-range`).
+- **After the final audit, H-104 on the subject's own setup: a made-up emoji is rewritten whatever the flag; an
+  application emoji is exempt.** Through the library's `send`, `lab rule <:lab_made_up:100000000000000000>` reads back
+  as `lab rule :lab_made_up:`, in a channel where the subject lacks UseExternalEmojis and in one where it holds it. The
+  subject application's own emoji (`<:lab_app_emoji:…>`) and Perms Lab's guild emoji (`<:lab_emoji:…>`) read back
+  unchanged in both. So application emojis are exempt as the docs say (EMO), and an emoji the bot cannot use at all is
+  rewritten for a reason other than the flag: neither shows the flag's own effect, which needs an emoji of a guild the
+  subject is in and the lab is not. `R-payload-external-emoji` stays `needs-second-guild`, with these six rows as its
+  recorded evidence. The library's readback reports the made-up emoji's rewrite as `UseExternalEmojis` in `degraded`
+  with the flag held too: the entry names the dropped feature's rule, not always a missing flag (DESIGN §4.12, README).
 
 ## dfx deviations
 
@@ -3021,3 +3059,114 @@ compiles.
   one `--write` run, and the `@everyone` valid side and successful kicks and bans stay resolver only. This round's new
   restrictions (intent lists, `catchCategory`'s lists, the widened transient marker) are library-side typing rules:
   the Discord behaviour under them is already live (the intent pairs) or there is none (pure typing).
+
+#### After the final audit: live pairs for the typed-only restrictions
+
+Rounds 1 and 2 of the final audit (`61af481` to `d8df48c`) added type restrictions with a fail fixture and a snapshotted
+diagnostic but no live side, so by PROMPT's rule they did not count. This round lists every restriction those commits
+added or changed, gives each one that rests on Discord behaviour Perms Lab's bots can show a live pair in the rule-row
+style (a typed or raw valid side, the raw invalid side through `SubjectRaw`, each with its full observation), and records
+what Discord did. Code on `1afd0ba`, DESIGN on `059dce6`, the table on `b6a617d`.
+
+- **The restrictions, and whether Discord behaviour is involved** (from `git log -p 61af481^..d8df48c` and
+  `test/rules.ts`):
+  - `61af481`, a finite literal over its limit carries the limit's tag: content over 2,000 code points, a name over
+    100, a topic over 1,024 and a nickname over 32 rest on Discord's limits, whose boundaries were already live
+    (`R-content-length`, `R-name-length`, `R-topic-length`, `R-nickname-length`: at the limit accepted, one over refused).
+    **An empty name** (`NameTooLong`, Discord's minimum of 1) is involved but **not live**: the lab guard admits a new or
+    renamed channel or thread only with a `lab`/`lab-*` name, and an empty name is none; the guard is not loosened for
+    it, so the side stays typed and unit-tested (`checkName`). **A slowmode literal that is not a natural of at most four
+    digits** keeps `SlowmodeOutOfRange`: involved; new live sides below the range and for a fraction (below). Naturals
+    from 10,000 to 21,600 keep the tag as a sound over-approximation (21,600 is accepted live).
+  - `66f35cc`, `03a5a80`, `d8df48c`: the widened handler error types, `MustReturnEffect`, `catchCategory`'s literal
+    categories and lists and its dead catch, the widened transient marker: pure typing, no Discord behaviour. The intent
+    lists written as literals (and their union elements and spreads): library-side typing over intent delivery that the
+    intent pairs already show live.
+  - `92faad1`: **the option keys an option type does not take**: involved (what Discord does with such a key); a new rule
+    `R-option-keys` with a live pair, below. A non-literal `required` treated as possibly required: typing over
+    `R-option-order`'s Discord behaviour, already live.
+  - `d9f29bb`: **an empty row, a premium button's `customId`, an interactive button's `url`, more than 5 rows on a create
+    or an edit**: involved; new live sides, below. More than 5 rows on an interaction reply: the same Discord limit on an
+    interaction response, which needs a human (phase 3), so typed only. A row written as a computed list, and a malformed
+    element naming only its own problem: pure typing and readability.
+  - `0b6e67b`: a second registration of a command or route dies (run time only, a runner test); route names written as
+    literals (pure typing). `9c153af` and `5c97ae8`: run-time interaction behaviour (phase 3), no new type restriction.
+    `61b63cb`: one Effect for a union of message handles, a widening, no restriction. The other commits are docs,
+    scripts and tests.
+  - Not from those commits but named for this round: **`R-payload-external-emoji` on the subject's own setup** (H-104).
+- **New rule rows (24), all in `test/rules.ts` with full expectations, so `bun run rules` checks each against the table.**
+  - `R-row-5-buttons`, `also` on `text-send`: `typed-five-rows` (5 rows of one link button, `Succeeded`), `raw-six-rows`
+    (`components` `BASE_TYPE_MAX_LENGTH`), `raw-empty-row` (`components.0.components` `BASE_TYPE_BAD_LENGTH`),
+    `typed-edit-five-rows` (the subject's own message edited to 5 rows, `Succeeded`), `raw-edit-six-rows` (`components`
+    `BASE_TYPE_MAX_LENGTH`).
+  - `R-link-no-custom-id`, `also`: `typed-interactive-button` (`Succeeded`), `raw-interactive-url` (`custom_id` and `url`
+    `BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE`).
+  - `R-premium-no-label`, `also`: `raw-premium-custom-id` (`custom_id` `BUTTON_COMPONENT_CUSTOM_ID_SKU_MUTUALLY_EXCLUSIVE`
+    and `sku_id` `BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE`, against the valid side's SKU error alone).
+  - `R-slowmode-range`, `also` on `text-manage-channels`: `raw-slowmode-negative` (`rate_limit_per_user`
+    `NUMBER_TYPE_MIN`), `raw-slowmode-fraction` (`Applied rate_limit_per_user 1`: accepted and truncated, a live finding).
+  - **`R-option-keys`** (new; its seven claims moved from `R-options-typed`, plus fail fixtures for the three keys that
+    had none, `autocomplete`, `maxLength` and `maxValue`), on `commands`: valid `typed-register-option-keys` (every key on
+    a type that takes it, registered through the library and read back key by key, `Applied option-keys`); invalid
+    `raw-option-key-choices` and, as `also`, the other six keys (`Ignored <key>` each). Each raw side POSTs the one probe
+    command name, `lab-command-name-at-the-32-limit`, as M8's raw sides do, so it is an update, never a create (the
+    command-create ledger counted none for them), with one option of every type the library refuses the key on; when
+    Discord accepts, the probe GETs the command back, observes whether any option kept the key, and POSTs the base
+    definition again (cheaper than the next row's bulk overwrite). `misplacedKeys` is held to the library's types at
+    compile time (`catalog/commands.ts`: each key's types are exactly those whose interface types it as a message; a
+    mutation dropping one type fails `tsc`).
+  - **`R-payload-external-emoji` evidence** (still `needs-second-guild`): `typed-emoji-made-up`, `typed-emoji-app` and
+    `typed-emoji-guild` on `text-send` (no UseExternalEmojis) and on the new setup `text-external-emoji` (`text-send`'s
+    flags and UseExternalEmojis). Each sends through the library and observes, from the harness's own read of the
+    message, whether the token survived (`Applied`/`Ignored content`); the library's `degraded` must agree or the run
+    dies, as the mention probes'. The registry gained `evidence` for these (rows on any setup, checked against the table
+    like a pair's sides, never counted as a pair; DESIGN §5.5), since a pair's sides share one setup.
+  - Harness: the subject application's own emoji `lab_app_emoji` is provisioned through the subject's client (it belongs
+    to the application, not a guild), and the lab guard admits exactly that write: `POST
+    /applications/{subject's application}/emojis` with a `lab_` name, nothing else on application emojis (a unit test).
+    The emoji probes' log lines carry the content sent and read back.
+- **Exploration before the write run.** The new rows' expectations were first guesses, so five `--only` runs (each
+  writes only a subset table under `/tmp`) showed what Discord does: `rule/text-send/*` (40 scenarios, 379 s, 3
+  mismatches against the guesses: six rows are `BASE_TYPE_MAX_LENGTH`, not `BAD_LENGTH`, and the premium button's code
+  is `..._CUSTOM_ID_SKU_...`; its provisioning created `lab_app_emoji`), `rule/text-*/typed-emoji-*` (6, 151 s, 1: the
+  made-up emoji is rewritten with the flag too), `rule/text-manage-channels/raw-slowmode-*` (3, 131 s, 1: the fraction is
+  accepted), `rule/commands/*option-key*` (8, 176 s, 0; two POST 429s of 17 and 18 s waited out), and
+  `rule/text-manage-channels/raw-slowmode-fraction` again once the probe read the stored value back (1, 128 s). The
+  expectations in `test/rules.ts` are what these showed, and the write run below confirmed every one.
+- **Live findings** ("Live findings", after the final audit): six rows and an empty row are refused on their own paths;
+  a premium button's `custom_id` and an interactive button's `url` get their own mutual-exclusion codes; every option key
+  on a type that does not take it is accepted and dropped, matching the type's refusal in effect; **a fractional
+  slowmode is accepted and truncated** (1.5 stored as 1), so the library, which refuses a fraction before sending, is
+  stricter than Discord there, on purpose, and `R-slowmode-range`'s statement, `SlowmodeOutOfRange`'s doc, DESIGN §2.3
+  and the error table now say so; **a made-up emoji is rewritten to `:name:` with and without UseExternalEmojis, an
+  application emoji and the guild's own emoji are kept with and without it**, so the subject's own setup cannot show the
+  flag's effect, and the library reports the made-up emoji's rewrite as `UseExternalEmojis` with the flag held too
+  (`R-payload-external-emoji`'s statement, DESIGN §2.3 and §4.12, `degradedOf`'s doc and README now say the entry names
+  the dropped feature, not always a missing flag). No type changed: the evidence matches each restriction, or, for the
+  fraction, the restriction is kept and stated as the library's own.
+- **Statements brought up to date.** `R-name-length`, `R-topic-length`, `R-nickname-length` and `R-slowmode-range` now
+  say what `61af481` made true (a literal over its limit carries the tag; an empty name too; a slowmode literal other than
+  a small natural), with what is live; the row, button and option-key rules drop "typed only".
+- **Run W** (`bun --no-env-file harness/main.ts run --write --compare`, fresh process, on `059dce6`, started 13:04):
+  role budget 97 left (89 needed: one more role state, `text-external-emoji`), **566 scenarios in 2,533 s**, 9,625
+  requests, 2,829 writes, 598 invalid (401/403/429); dfx waited out 429s on one channel PATCH, four command POSTs, three
+  command PUTs and four reaction PUTs; no lab step was retried after a 5xx; the oracle was available; **0 mismatches**;
+  the closing reset wrote 3; it printed the six unmet Done criteria (Q-17, Q-18, Q-22). `compare: differs from the
+  previous table` in exactly the 24 new rows, so the command exited 1 by design: a JSON comparison of the committed and
+  the new table found every one of the 542 earlier rows and the `env` block identical. The table was written and
+  committed (`b6a617d`).
+- **Counts.** `bun run rules`: `rules ok 71 rule(s) (56 live pair, 0 escalated, 5 pure-typing, 10 other not-live; 6
+  escalated remainder(s), waiting for Rhys (Q-17, Q-18, Q-22)), 13 fail fixture(s), 152 live sides and 6 evidence row(s)
+  checked against the table, 5 event(s) with a live intent pair, flag coverage over 433 matrix row(s)` (was 70 rules,
+  55 live pairs and 134 sides). Counted from `test/rules.ts`: valid sides 42 `Succeeded`, 6 `Applied`, 1 `Ignored`, 5
+  `EventDelivered`, 1 `Rejected`, 1 `Writes`; invalid sides 43 `Rejected`, 6 `Ignored`, 1 `Applied`, 5 `EventAbsent`, 1
+  `Writes`; 40 `also` sides; 6 evidence rows.
+- **Budget.** Unchanged: every `src/` change of this round is a comment (the reference bot at 59,508 types and 178,394
+  instantiations; the per-command probe at 382.4 types and 2,202.3 instantiations a command).
+- **Exit checks.** `bun run verify:offline` exits 0: gen:errors up to date; typecheck; 1,605 tests in 60 files;
+  test:types 13 pass and 13 fail fixtures, 143 diagnostics, largest gated 739 characters; hover 7 files, 27 markers;
+  rules ok (above); budget ok.
+- **Still not live.** An empty name (the lab guard), more than 5 rows on an interaction reply (phase 3),
+  `R-payload-external-emoji`'s pair and `R-payload-external-sticker` (a second guild: Rhys's decision; the emoji rule now
+  has its subject-only evidence), the 8 phase-3 rules and the 6 escalated remainders (Q-17, Q-18, Q-22: Rhys's checklist
+  sitting), the `@everyone` valid side and successful kicks and bans (resolver only).

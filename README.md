@@ -119,7 +119,9 @@ In brief:
   recomputes, and fails with the specific tag, or with `PermissionDeniedUnattributed` when the recompute finds nothing
   missing. It never guesses. Some missing permissions degrade instead of failing (`@everyone` without MentionEveryone
   pings nobody; TTS without SendTTSMessages sends a plain message); those are a typed `degraded` field on the result,
-  read back from Discord's own answer.
+  read back from Discord's own answer. A custom emoji Discord rewrote to text is reported as `UseExternalEmojis`
+  whatever the cause: Discord also rewrites one the bot cannot use at all with the flag held (live: a made-up emoji
+  ID).
 - **Channels are a union by kind**, and operations exist only where Discord allows them: no `send` on categories or
   forums (forums have `createPost`), `crosspost` only in announcement channels, thread operations only on threads.
   Messages carry their author: `edit` exists only on the bot's own, and deleting another's adds
@@ -134,7 +136,8 @@ In brief:
   later events.
 - **Commands and components.** Command definitions are checked as written (lowercase names of 1 to 32 characters,
   required options first, at most 25, the subcommand nesting rules, at every level, and only the keys each option type
-  takes: `choices` on a boolean option is an error), handler options are typed from the
+  takes: `choices` on a boolean option is an error, and Discord, live, accepts such a key and drops it), handler
+  options are typed from the
   definition (choices as literal unions, channel options narrowed to the allowed kinds), and commands are registered
   in a guild only when their stored definitions differ. A `custom_id` is built by a schema-typed `ComponentRoute`
   (checked against the 100-character limit when built), and a handler receives its decoded data; an old control whose
@@ -168,29 +171,33 @@ budget. `bun run verify:live` runs the live matrix against a test guild and rewr
 - **The live matrix** sets up a state through an administrator bot (channels, roles, overwrites, threads, timeouts),
   then the bot under test computes its permissions with the resolver, runs the library's preflight, makes the raw
   call with no check, and runs the library's own operation. Its outcome class is recorded (`success`, `50013`,
-  `50001`, another code, or a degradation read back from Discord). 542 scenarios cover channel kinds (text,
+  `50001`, another code, or a degradation read back from Discord). 566 scenarios cover channel kinds (text,
   announcement, voice and stage chat, forum posts, public, private, archived and locked threads), permission sources
   (`@everyone`, roles, role and member overwrites allowing and denying, Administrator), timeouts, the role hierarchy,
   every operation and every payload variant Perms Lab can exercise (external emoji and stickers excepted, which need a
-  second guild), the intents, command registration and `custom_id` routing. A run reports zero
+  second guild; the external-emoji rule has rows on the bot's own setup, which `LOG.md` records), the intents, command
+  registration and `custom_id` routing. A run reports zero
   mismatches, and two runs in separate processes write byte-identical tables (`fixtures/truth-table.json`). What
   Discord did where it differs from its documentation is in `LOG.md`, "Live findings".
-- **Every compile-time rule** (`test/rules.ts`, 70 rules) has a valid case that compiles and an invalid case that
+- **Every compile-time rule** (`test/rules.ts`, 71 rules) has a valid case that compiles and an invalid case that
   fails with a snapshotted diagnostic. A diagnostic must have the expected TS code, mention the rule, fit in 4 lines and
   800 characters, contain neither `parameter of type 'never'` nor `type 'never'.`, and truncate no message type. Every
-  rule that can be checked live, 55 of the 70, also has a live pair: both sides run on one identical setup, and each
+  rule that can be checked live, 56 of the 71, also has a live pair: both sides run on one identical setup, and each
   side's outcome matches its recorded expectation. The valid side is accepted, delivered or applied (for
   `R-registration-diff`, no registration write), with one exception:
   `R-premium-no-label`'s valid side is a raw unlabelled premium button, which Discord refuses only because Perms Lab's
   application owns no SKU, with no label error. The raw invalid side shows the different outcome the rule predicts: for
-  43 pairs a refusal with the expected status, code and field; for 6 a degradation (a field Discord ignored or applied:
-  TTS, the two mention rules, the two create-only flags and message content); for the 5 intent rules an event that does
+  43 pairs a refusal with the expected status, code and field; for 7 a field Discord ignored or applied (TTS, the two
+  mention rules, the two create-only flags, message content, and an option key on a type that does not take it, which
+  Discord accepts and drops); for the 5 intent rules an event that does
   not arrive before a canary that does; and for `R-registration-diff` a registration write. The other 15 rules have no
   live pair: 5 are pure typing (such as `catchTag` removing exactly its tag), 8 are the phase-3 interaction rules,
   which need a human to click, and 2 (external emoji and stickers) need a second guild. Seven of the live pairs have a
   part that is not live: six wait for Rhys (a DM, a real command invocation, a click: Q-17, Q-18 and Q-22), and one
-  would ping `@everyone`. Some checks added after the final audit are typed only, inside existing rules (`LOG.md`
-  lists them).
+  would ping `@everyone`. Two checks inside live pairs are typed only: an interaction reply's at most 5 action rows (an
+  interaction needs a human) and an empty name (the lab guard sends only lab-named channels and threads). For a
+  fraction of a second of slowmode the library is stricter than Discord on purpose: Discord accepts 1.5 and stores 1, so
+  the library refuses it before sending (`LOG.md` records each).
 - **Hover snapshots** check that the editor shows named types (`CommandInteraction<{ readonly options: {...} },
   "ephemeral">`, `Effect<Sent, MissingViewChannel | ...>`), never the internal machinery.
 - **The compile budget** (`bun run budget`) compiles the reference bot as a consumer of this package compiles it: by
@@ -204,8 +211,11 @@ budget. `bun run verify:live` runs the live matrix against a test guild and rewr
   2,200 instantiations; 44,047 for the probe's 20, 62 under its +2% gate), so superlinear growth cannot hide.
 
 What is not verified live, and why, is in `LOG.md`: the phase-3 interaction checklist needs a human to click through
-it, the DM content and DM delivery exceptions need a human's DM, the external emoji and sticker rules need a second
-guild, and successful kicks and bans are verified by the resolver alone (a kicked bot would need re-inviting).
+it (an interaction reply's row limit with it), the DM content and DM delivery exceptions need a human's DM, the external
+emoji and sticker rules need a second guild (on the bot's own setup Discord rewrites a made-up emoji with or without
+UseExternalEmojis and keeps an application emoji, so neither shows the flag), an empty name is never sent because the
+lab guard admits only lab names, and successful kicks and bans are verified by the resolver alone (a kicked bot would
+need re-inviting).
 
 ## Running it
 

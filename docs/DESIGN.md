@@ -2615,6 +2615,11 @@ own full expectation, checked like the two (catalog, table row, observation, one
 rule, valid or invalid: the command rules' nested registrations and nested raw sides, and the registration diff's
 further mutations.)
 
+(After the final audit) A rule may list `evidence`: rule rows on any setup (the setup is the one the scenario ID names)
+that its statement rests on but that are no pair, each with its full expectation, checked like a pair's side (catalog,
+table row, observation) but without the one-setup check, and never counted as a live pair. `R-payload-external-emoji`,
+still `needs-second-guild`, uses it for its rows on the subject's own setup without and with UseExternalEmojis.
+
 Staging: M0's rules-check implements every check whose inputs exist. A `pair`
 rule fails closed ("cannot verify yet") until the catalog and truth-table
 checks are added (M6 adds them, with the flag-coverage check); M7 adds the
