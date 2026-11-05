@@ -117,10 +117,16 @@ export const rules: ReadonlyArray<Rule> = [
   {
     id: "R-catch-category-exact",
     statement:
-      "catchCategory removes exactly the members of the categories it names; catching a category the effect cannot fail with does not compile",
+      "catchCategory removes exactly the members of the categories it names, written as literals (a category typed as a union, or a list typed wider than a tuple of literals, does not compile); catching a category the effect cannot fail with does not compile",
     pass: "test/types/pass/catch-category-exact.ts",
     fail: "test/types/fail/catch-category-exact.ts",
-    claims: ["payload", "transient"],
+    claims: [
+      "payload",
+      "transient",
+      "catchCategory needs each category as a literal, not a union",
+      "catchCategory needs the categories as a literal list",
+      "this effect cannot fail with any category"
+    ],
     live: { kind: "not-live", reason: "pure-typing" }
   },
   {

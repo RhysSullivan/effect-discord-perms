@@ -1,11 +1,30 @@
 L12:62 TS2345
-Argument of type '"payload"' is not assignable to parameter of type '"access" | "permission" | "state" | readonly ["access" | "permission" | "state", ...("access" | "permission" | "state")[]]'.
+Argument of type '"payload"' is not assignable to parameter of type 'CategoryArg<"access" | "permission" | "state">'.
 
 L15:65 TS2345
-Argument of type '["state", "transient"]' is not assignable to parameter of type '"access" | "permission" | "state" | readonly ["access" | "permission" | "state", ...("access" | "permission" | "state")[]]'.
+Argument of type '["state", "transient"]' is not assignable to parameter of type 'CategoryArg<"access" | "permission" | "state">'.
   Type '["state", "transient"]' is not assignable to type 'readonly ["access" | "permission" | "state", ...("access" | "permission" | "state")[]]'.
     Type at position 1 in source is not compatible with type at position 1 in target.
       Type '"transient"' is not assignable to type '"access" | "permission" | "state"'.
 
 L18:61 TS2345
-Argument of type '"payload"' is not assignable to parameter of type '"access" | "permission" | "state" | readonly ["access" | "permission" | "state", ...("access" | "permission" | "state")[]]'.
+Argument of type '"payload"' is not assignable to parameter of type 'CategoryArg<"access" | "permission" | "state">'.
+
+L31:60 TS2345
+Argument of type 'Cat' is not assignable to parameter of type 'Cat & Invalid<"catchCategory needs each category as a literal, not a union">'.
+  Type '"access"' is not assignable to type 'Cat & Invalid<"catchCategory needs each category as a literal, not a union">'.
+
+L34:61 TS2345
+Argument of type 'readonly [Cat, ...Cat[]]' is not assignable to parameter of type 'readonly [Cat, ...Cat[]] & Invalid<"catchCategory needs the categories as a literal list">'.
+  Property '[InvalidId]' is missing in type 'readonly [Cat, ...Cat[]]' but required in type 'Invalid<"catchCategory needs the categories as a literal list">'.
+
+L37:62 TS2345
+Argument of type '["permission", Cat]' is not assignable to parameter of type 'readonly ["permission", Cat] & Invalid<"catchCategory needs each category as a literal, not a union">'.
+  Property '[InvalidId]' is missing in type '["permission", Cat]' but required in type 'Invalid<"catchCategory needs each category as a literal, not a union">'.
+
+L40:60 TS2345
+Argument of type 'Cat' is not assignable to parameter of type 'Cat & Invalid<"catchCategory needs each category as a literal, not a union">'.
+  Type '"access"' is not assignable to type 'Cat & Invalid<"catchCategory needs each category as a literal, not a union">'.
+
+L43:50 TS2345
+Argument of type 'string' is not assignable to parameter of type 'Invalid<"this effect cannot fail with any category: remove the catch">'.

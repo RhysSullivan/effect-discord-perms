@@ -14,6 +14,7 @@
  * `transient` has no other category.
  */
 import { type Cause, Effect, Function, Predicate, Schema } from "effect"
+import type { Invalid } from "../payload/Components.ts"
 
 /** The prototype key that holds an error class's category marker. */
 export const CategoryTypeId: unique symbol = Symbol.for("effect-discord-perms/ErrorCategory")
@@ -122,49 +123,87 @@ export function CategorizedError(): (tag: string, fields: Schema.Struct.Fields, 
   return (tag, fields, categories) => mixCategories(Schema.TaggedError<unknown>()(tag, fields), categories)
 }
 
+type IsUnion<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never
+
+/** One category or a non-empty list of them (any-of), as `catchCategory` and `hasCategory` take them. */
+export type CategoryArg<K extends string> = K | Readonly<[K, ...Array<K>]>
+
 /**
- * A refinement that is true for errors in at least one of `categories`. Accepts one category or a non-empty
- * array (any-of).
+ * What `catchCategory` accepts for an effect failing with `E`: one of its categories or a list of them, or, when `E`
+ * has no categorised member at all, a message saying the catch is dead.
  */
-export const hasCategory = <E, const K extends string>(categories: K | Readonly<[K, ...Array<K>]>) => {
-  const list: ReadonlyArray<string> = typeof categories === "string" ? [categories] : categories
-  return (error: E): error is ExtractCategory<E, K> => {
-    if (!Predicate.hasProperty(error, CategoryTypeId)) return false
-    const marker = error[CategoryTypeId]
-    return Predicate.isObject(marker) && list.some((category) => marker[category] === true)
-  }
+export type CategoryChoice<E> = [Categories<E>] extends [never] ? Invalid<"this effect cannot fail with any category: remove the catch"> : CategoryArg<Categories<E>>
+
+/** The categories an argument names. */
+export type Listed<C> = C extends ReadonlyArray<infer K extends string> ? K : C extends string ? C : never
+
+/**
+ * The categories must be written as literals (after the final audit). The type removes every category the argument's
+ * type names, while the run time catches only those its value holds, so an argument typed as a union (`category: Cat`)
+ * or as a non-tuple list would remove categories that still fail. A single category typed as a union, a list whose type
+ * is not a tuple, and a list element typed as a union are each an error that says so. (`Effect.catchTag` has the same
+ * property for a tag typed as a union; DESIGN §2.2.)
+ */
+export type LiteralCategories<C> = [C] extends [string]
+  ? true extends IsUnion<C>
+    ? Invalid<"catchCategory needs each category as a literal, not a union">
+    : unknown
+  : [C] extends [ReadonlyArray<string>]
+    ? number extends C["length"]
+      ? Invalid<"catchCategory needs the categories as a literal list">
+      : true extends { readonly [I in keyof C]: IsUnion<C[I]> }[number]
+        ? Invalid<"catchCategory needs each category as a literal, not a union">
+        : unknown
+    : unknown
+
+/** The category names a `catchCategory` or `hasCategory` argument holds at run time. */
+const namesOf = (categories: unknown): ReadonlyArray<string> =>
+  typeof categories === "string" ? [categories] : Array.isArray(categories) ? categories.filter((name): name is string => typeof name === "string") : []
+
+/** The refinement both share: an error whose marker has a `true` key for one of `names`. */
+const inAny = <E, K extends string>(names: ReadonlyArray<string>) => (error: E): error is ExtractCategory<E, K> => {
+  if (!Predicate.hasProperty(error, CategoryTypeId)) return false
+  const marker = error[CategoryTypeId]
+  return Predicate.isObject(marker) && names.some((category) => marker[category] === true)
 }
 
 /**
- * Like `Effect.catchTag`, but by category: one category or a non-empty array (any-of). Dual: data-first and
- * data-last.
+ * A refinement that is true for errors in at least one of `categories`. Accepts one category or a non-empty
+ * array (any-of), written as literals ({@link LiteralCategories}).
+ */
+export const hasCategory = <E, const C extends CategoryArg<string>>(categories: C & LiteralCategories<C>): ((error: E) => error is ExtractCategory<E, Listed<C>>) =>
+  inAny<E, Listed<C>>(namesOf(categories))
+
+/**
+ * Like `Effect.catchTag`, but by category: one category or a non-empty array (any-of), written as literals
+ * ({@link LiteralCategories}). Dual: data-first and data-last.
  *
  * Every listed category must be present in `E`, as with `catchTag` and an absent tag: catching a category the
  * effect cannot fail with is a compile error (a dead handler). The remaining error type is exactly the members
  * of `E` in none of the categories, plus the handler's own errors.
  */
 export const catchCategory: {
-  <const K extends Categories<E>, E, A2, E2, R2>(
-    categories: K | Readonly<[K, ...Array<K>]>,
+  <const C extends CategoryChoice<E>, E, A2, E2, R2>(
+    categories: C & LiteralCategories<C>,
     // No NoInfer<E> here: with `Extract<NoInfer<E>, ...>` the handler parameter collapses to `never` in
     // data-last (pipe) position (effect-v4 gotcha 1; rule 6 of DESIGN §2.12).
-    f: (error: ExtractCategory<E, K>) => Effect.Effect<A2, E2, R2>
-  ): <A, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A | A2, E2 | ExcludeCategory<E, K>, R | R2>
-  <A, E, R, const K extends Categories<E>, A2, E2, R2>(
+    f: (error: ExtractCategory<E, Listed<C>>) => Effect.Effect<A2, E2, R2>
+  ): <A, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A | A2, E2 | ExcludeCategory<E, Listed<C>>, R | R2>
+  <A, E, R, const C extends CategoryChoice<E>, A2, E2, R2>(
     self: Effect.Effect<A, E, R>,
-    categories: K | Readonly<[K, ...Array<K>]>,
-    f: (error: ExtractCategory<E, K>) => Effect.Effect<A2, E2, R2>
-  ): Effect.Effect<A | A2, E2 | ExcludeCategory<E, K>, R | R2>
+    categories: C & LiteralCategories<C>,
+    f: (error: ExtractCategory<E, Listed<C>>) => Effect.Effect<A2, E2, R2>
+  ): Effect.Effect<A | A2, E2 | ExcludeCategory<E, Listed<C>>, R | R2>
 } = Function.dual(
   3,
-  <A, E, R, const K extends Categories<E>, A2, E2, R2>(
+  <A, E, R, const C extends CategoryChoice<E>, A2, E2, R2>(
     self: Effect.Effect<A, E, R>,
-    categories: K | Readonly<[K, ...Array<K>]>,
-    f: (error: ExtractCategory<E, K>) => Effect.Effect<A2, E2, R2>
-  ): Effect.Effect<A | A2, E2 | ExcludeCategory<E, K>, R | R2> => {
+    categories: C & LiteralCategories<C>,
+    f: (error: ExtractCategory<E, Listed<C>>) => Effect.Effect<A2, E2, R2>
+  ): Effect.Effect<A | A2, E2 | ExcludeCategory<E, Listed<C>>, R | R2> => {
     // Bound to a const first: as the arrow's expression body, contextually typed by the declared return type,
     // `catchIf` infers a wider success type and tsc rejects the body (TS2375).
-    const caught = Effect.catchIf(self, hasCategory<E, K>(categories), f)
+    const caught = Effect.catchIf(self, inAny<E, Listed<C>>(namesOf(categories)), f)
     return caught
   }
 )
