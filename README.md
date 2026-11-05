@@ -2,8 +2,9 @@
 
 A typed layer over [dfx](https://github.com/tim-smart/dfx) (Effect v4) in which the compiler catches the mistakes
 Discord bots usually find at runtime: missing permissions, payload rules, intents, mixed-up IDs, and command and
-component definitions. Every compile-time rule is checked against live Discord in both directions (a valid case
-Discord accepts and an invalid case it refuses) before it counts.
+component definitions. Every compile-time rule that live Discord can show is checked against it in both directions (a
+valid case Discord accepts and an invalid case where it refuses, or drops, ignores or does not deliver something) before
+it counts; "How it is verified" says which rules cannot be, and why.
 
 ## The guarantee
 
@@ -88,8 +89,9 @@ The full design is [`docs/DESIGN.md`](docs/DESIGN.md); the research behind it is
 In brief:
 
 - **On top of dfx, never a fork.** dfx is the REST and gateway client. The library wraps it at a few seams: the base
-  `HttpClient` (a per-call deadline, coded 429s), a JSON codec that adds the gateway's channel-obfuscation capability,
-  the permission endpoint, and its own interaction runner and command registration. Each deviation is in `LOG.md`.
+  `HttpClient` (coded 429s), a per-call deadline around each dfx call (`src/rest/Request.ts`, so it bounds dfx's retries
+  too), a JSON codec that adds the gateway's channel-obfuscation capability, the permission endpoint, and its own
+  interaction runner and command registration. Each deviation is in `LOG.md`.
 - **Errors are values with categories.** Each Discord failure has its own `Schema.TaggedError` class: one generated
   `Missing<Flag>` per permission flag, and `ThreadLocked`, `ThreadArchived`, `CommunicationDisabled`,
   `TargetAboveInHierarchy`, `ContentTooLong`, `MessagesTooOld`, `InteractionExpired` and the others the live matrix
@@ -97,11 +99,14 @@ In brief:
   belong to one or more categories (`permission`, `payload`, `access`, `state`, `transient`), applied by a mixin
   (`withCategory`, or `CategorizedError`, which is `Schema.TaggedError` with the mixin applied) and caught with
   `catchCategory`, which removes exactly that category's members from the type, as `catchTag` removes exactly its
-  tag. There are no string checks in the public API.
+  tag. Its categories are written as literals: a category typed as a union, or a list typed wider than a tuple, is a
+  compile error, because the type would remove categories the run time does not catch (`catchTag` has the same
+  property for a tag typed as a union). There are no string checks in the public API.
 - **The permissions come from the types.** An operation's error union is computed from one operation table and from
   the payload's type: embeds add `MissingEmbedLinks`, files `MissingAttachFiles`, a reply
   `MissingReadMessageHistory`, a poll `MissingSendPolls`; in a thread, `SendMessagesInThreads` replaces
-  `SendMessages`. A literal reply cannot be too long, so its `ContentTooLong` is absent; a dynamic one carries it. When
+  `SendMessages`. A literal reply within the limit cannot be too long, so its `ContentTooLong` is absent; a dynamic one,
+  or a literal over the limit (tsc counts its code points), carries it, and so for names, topics and nicknames. When
   several flags are missing the call fails with the most fundamental one: ViewChannel, then Connect in voice, then the
   timeout, then SendMessages (or SendMessagesInThreads), then the payload's flags.
 - **Preflight, then the request, then the recompute.** Before a request the library resolves the bot's permissions
@@ -116,23 +121,30 @@ In brief:
   Messages carry their author: `edit` exists only on the bot's own, and deleting another's adds
   `MissingManageMessages`. IDs are distinct branded snowflakes. `Permissions.require(channel, flags)` is optional: it
   narrows the calls that follow, where a checked flag lost before the request is `PermissionRevokedSinceCheck`.
-- **Intents type the events.** `bot.on` accepts only events the declared intents deliver, and `message.content` is a
+- **Intents type the events.** The intents are written as a literal list (`Bot.make({ intents: [...] })`; a list typed
+  `ReadonlyArray<Intent>` is a compile error, because the types read the intents off the list's type). `bot.on`
+  accepts only events the declared intents deliver, and `message.content` is a
   `string` only where Discord delivers it (with MessageContent, and without it for the bot's own messages, mentions of
   the bot and DMs); elsewhere it is the frozen `ContentUnavailable` value until `contentDelivered` narrows it. Each
   event runs in its own fiber, scope and span, and a failing handler never stops later events.
 - **Commands and components.** Command definitions are checked as written (lowercase names of 1 to 32 characters,
-  required options first, at most 25, the subcommand nesting rules, at every level), handler options are typed from the
+  required options first, at most 25, the subcommand nesting rules, at every level, and only the keys each option type
+  takes: `choices` on a boolean option is an error), handler options are typed from the
   definition (choices as literal unions, channel options narrowed to the allowed kinds), and commands are registered
   in a guild only when their stored definitions differ. A `custom_id` is built by a schema-typed `ComponentRoute`
   (checked against the 100-character limit when built), and a handler receives its decoded data; an old control whose
-  ID no longer decodes is answered "This control has expired."
-- **Interactions are a value-level state machine.** A handler returns exactly one initial response; follow-ups exist
-  only inside the continuation that receives `Answered`; `showModal` exists only before answering and never after a
-  modal submit; autocomplete can only answer with choices. The defer mode is fixed at registration, and the runner
-  defers before Discord's 3-second limit without interrupting a slow handler.
+  ID no longer decodes is answered "This control has expired." A command or route registered twice on one bot is a
+  defect at registration, since both handlers would answer.
+- **Interactions are a value-level state machine.** Discord is answered once, with the response the handler returns; a
+  second response the handler made (`yield* ix.reply(a)` before `return yield* ix.reply(b)`) is never posted, and the
+  runner logs it at Error. Follow-ups exist only inside the continuation that receives `Answered`; `showModal` exists
+  only before answering and never after a modal submit; autocomplete can only answer with choices. The defer mode is
+  fixed at registration, a reply's ephemeral state follows it (a reply that omits `ephemeral` is private in
+  "ephemeral" mode), and the runner defers before Discord's 3-second limit without interrupting a slow handler.
 - **The handler boundary.** Handlers registered with `bot.on` and `Interactions.*` may leave only `transient` errors
-  unhandled. The compile error names the categories that remain (`UnhandledErrors<"access" | "permission">`), not a
-  wall of tags.
+  unhandled; an error type widened to a categorised supertype (`Categorized<never>`) counts as unhandled. The compile
+  error names the categories that remain (`UnhandledErrors<"access" | "permission">`), not a wall of tags, and a
+  handler that returns no Effect says so.
 
 ### `RequestTimedOut`: the outcome is unknown
 
@@ -154,17 +166,25 @@ budget. `bun run verify:live` runs the live matrix against a test guild and rewr
   `50001`, another code, or a degradation read back from Discord). 542 scenarios cover channel kinds (text,
   announcement, voice and stage chat, forum posts, public, private, archived and locked threads), permission sources
   (`@everyone`, roles, role and member overwrites allowing and denying, Administrator), timeouts, the role hierarchy,
-  every operation and payload variant, the intents, command registration and `custom_id` routing. A run reports zero
+  every operation and every payload variant Perms Lab can exercise (external emoji and stickers excepted, which need a
+  second guild), the intents, command registration and `custom_id` routing. A run reports zero
   mismatches, and two runs in separate processes write byte-identical tables (`fixtures/truth-table.json`). What
   Discord did where it differs from its documentation is in `LOG.md`, "Live findings".
 - **Every compile-time rule** (`test/rules.ts`, 70 rules) has a valid case that compiles and an invalid case that
-  fails with a snapshotted diagnostic. A diagnostic must have the expected TS code, mention the rule, and fit in 4
-  lines and 800 characters; no `never`, no truncated message types. Every rule that can be checked live, 55 of the 70,
-  also has a live pair on one identical setup: Discord accepts the valid side and refuses the raw invalid side with the
-  expected status, code and field. The other 15 have none: 5 are pure typing (such as `catchTag` removing exactly its
-  tag), 8 are the phase-3 interaction rules, which need a human to click, and 2 (external emoji and stickers) need a
-  second guild. Seven of the live pairs have a part that is not live: six need a human (a DM, a real command
-  invocation, a click), and one would ping `@everyone`.
+  fails with a snapshotted diagnostic. A diagnostic must have the expected TS code, mention the rule, fit in 4 lines and
+  800 characters, contain neither `parameter of type 'never'` nor `type 'never'.`, and truncate no message type. Every
+  rule that can be checked live, 55 of the 70, also has a live pair: both sides run on one identical setup, and each
+  side's outcome matches its recorded expectation. The valid side is accepted, delivered or applied, with one exception:
+  `R-premium-no-label`'s valid side is a raw unlabelled premium button, which Discord refuses only because Perms Lab's
+  application owns no SKU, with no label error. The raw invalid side shows the different outcome the rule predicts: for
+  43 pairs a refusal with the expected status, code and field; for 6 a degradation (a field Discord ignored or applied:
+  TTS, the two mention rules, the two create-only flags and message content); for the 5 intent rules an event that does
+  not arrive before a canary that does; and for `R-registration-diff` a registration write. The other 15 rules have no
+  live pair: 5 are pure typing (such as `catchTag` removing exactly its tag), 8 are the phase-3 interaction rules,
+  which need a human to click, and 2 (external emoji and stickers) need a second guild. Seven of the live pairs have a
+  part that is not live: six wait for Rhys (a DM, a real command invocation, a click: Q-17, Q-18 and Q-22), and one
+  would ping `@everyone`. Some checks added after the final audit are typed only, inside existing rules (`LOG.md`
+  lists them).
 - **Hover snapshots** check that the editor shows named types (`CommandInteraction<{ readonly options: {...} },
   "ephemeral">`, `Effect<Sent, MissingViewChannel | ...>`), never the internal machinery.
 - **The compile budget** (`bun run budget`) compiles the reference bot as a consumer of this package compiles it: by

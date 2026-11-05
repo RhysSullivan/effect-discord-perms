@@ -457,8 +457,23 @@ model (effect-v4 §4). Exactness of the narrowing (`[sd:src/errors-types.ts]` §
 
 Every listed category must be present in `E`, like `catchTag` with an absent
 tag. Catching a category the effect cannot fail with is a compile error (a dead
-handler), and M1 has a fail fixture for it. The handler-boundary message lists
-exactly the categories present (§2.7), so a list copied from it is always valid.
+handler), and M1 has a fail fixture for it; when `E` has no categorised member at
+all, the argument's type is `Invalid<"this effect cannot fail with any category:
+remove the catch">`. The handler-boundary message lists exactly the categories
+present (§2.7), so a list copied from it is always valid.
+
+**The categories are literals (after the final audit).** The type removes every
+category the argument's type names, while the run time catches only those its
+value holds, so an argument typed as a union (`category: "permission" | "state"`)
+or as a list wider than a tuple (`readonly [Cat, ...Cat[]]`) would remove
+categories that can still fail, and the error would escape a handler whose type
+said nothing could. `catchCategory` therefore infers the whole argument (`const C
+extends CategoryArg<Categories<E>>`) and intersects it with
+`LiteralCategories<C>`: a single category typed as a union, a list whose type is
+not a tuple, and a list element typed as a union are each a located error that
+says so. `hasCategory` takes the same check. `Effect.catchTag` has the same
+property for a tag typed as a union (`catchTag(tag as "A" | "B", ...)` removes
+both); the library does not wrap it, so that remains the caller's to avoid.
 
 Categories are `permission | payload | access | state | transient`. Invariant
 D6: an error in `transient` has no other category. A runtime test over
@@ -541,23 +556,25 @@ The runtime mirror is `requiredFlags(payload)`, computed from the same table
 
 **Content length and emptiness without branding strings:**
 
-- `ContentTooLong` is in the union only when `content` is not a finite literal.
-  The test is `` `{} extends Record<S, 1>` ``: true for `string` and
-  template patterns, false for literals. `send({ content: "pong" })` carries
-  no `ContentTooLong`, while `content: dynamic` and `` content: `hello ${x}` ``
-  do. A finite literal over the limit is a bug in the calling code. (After
-  the M6 verifier; revision 2 said that at run time it would be a defect.) The
-  run time cannot tell such a literal from a computed string of the same value,
-  and the overloads give the implementation nothing else to go on, so the local
-  check (§4.8 step 1) fails with `ContentTooLong` all the same; the literal's
-  type does not declare it, so the tag reaches the handler undeclared, and
-  `catchTag("ContentTooLong")` cannot even be written for it. The same holds for
-  every limit tag `MayExceed` omits for a literal (`NameTooLong`, `TopicTooLong`,
-  `SlowmodeOutOfRange`, `NicknameTooLong`, `TimeoutTooLong`), and for a 50035
-  Discord answers for such a field, which the request still declares in its
-  `LimitFacts` (§4.9). Nothing in the library catches the bug before the first
-  run; LOG.md ("M6: a request declares every limit field it carries") records
-  the limitation.
+- `ContentTooLong` is in the union unless `content` is a finite literal within
+  the limit. The literal test is `` `{} extends Record<S, 1>` ``: true for
+  `string` and template patterns, false for literals. A finite literal is then
+  measured: `LongerThan<S, Max>` peels ten characters at a time from the literal
+  and from a string of the limit's length, so a short literal costs one step and
+  2000 characters 200; tsc splits a literal by code point, as Discord counts
+  (`Limits.unit`). `send({ content: "pong" })` carries no `ContentTooLong`, while
+  `content: dynamic`, `` content: `hello ${x}` `` and a 2001-character literal
+  do. (After the final audit. Before it, every finite literal omitted the tag; the
+  run time cannot tell a literal from a computed string of the same value, so the
+  local check failed with `ContentTooLong` for an over-limit literal whose type did
+  not declare it, and the tag reached the handler undeclared.) The same rule,
+  `MayExceed<V, Max, Min>`, decides `NameTooLong` (1 to 100: an empty literal
+  carries it), `TopicTooLong` (1024, the smaller limit, a sound
+  over-approximation for forum topics), `NicknameTooLong` (32) and
+  `SlowmodeOutOfRange` (a number literal keeps the tag unless it is a natural of
+  at most four digits); `TimeoutTooLong` is always present for a date. The
+  limits are strings, not tuple counters, because every tuple length tsc builds
+  costs a type per element (§5.4).
 - `MessageEmpty` (50006) is in the union unless every member of the payload has
   a body field that is *definitely* non-empty: a required key whose type
   excludes the empty value (`"" extends string` may be empty, `"" extends "pong"`
@@ -602,6 +619,17 @@ size.
     is `"string-select" extends C[number]["kind"]`, rule 4 of §2.12);
   - `Type 'CustomId' is not assignable to type '... & Invalid<"link buttons have no customId">'.`
   - `Type '"Buy"' is not assignable to type '"Buy" & Invalid<"premium buttons have no label">'.`
+- (After the final audit) also: a premium button's `customId` (`premium buttons
+  have no customId`) and an interactive button's `url` (`only link buttons have a
+  url`), which compiled and were dropped from the request; an empty row (`row([])`:
+  `an action row holds 1 to 5 buttons, or one select menu`); and a list whose type
+  is not a tuple (`row takes its elements as a literal list`). That last check
+  also means a malformed element of a literal, for which tsc falls back to the
+  constraint, reports only its own missing property, not a select message on
+  every element. A message's `components` (create, edit, reply) hold at most 5
+  rows when written as a literal list (`MessageRows`); a computed list of more
+  is refused by Discord with a 50035 on `components`, an unmapped defect. These
+  checks are typed only: no live probe sends them yet (LOG.md).
 - The largest of these diagnostics is 534 characters (an inline select with
   options) and all are 2-3 lines.
 - `linkButton(input)` and `premiumButton(input)` still give excess-property
@@ -725,7 +753,19 @@ failed `catchCategory` with a 2,612-character diagnostic carrying the
 `exactOptionalPropertyTypes` header (`[rt:bot/friction-probe.ts]` F2). The same
 method accepts what `Permissions.require` returns for a union
 (`[sd:src/channels-use.ts]` §8b), which revision 1 rejected with 2,864
-characters (`[rt:bot/friction-probe.ts]` F4).
+characters (`[rt:bot/friction-probe.ts]` F4). **Until the final audit only `send`
+had this shape:** a message handle's `delete`, `edit`, `react`, `pin`, `unpin`,
+`createThread` and `crosspost` were each kind's own function type, so a call on a
+received message of a union kind returned a union of Effects and piping
+`catchCategory` (or `Effect.catch`) onto it failed in the same way. They are now
+shared method types with a generic `this` too (§2.5).
+
+`this` is trusted, not checked: the implementations close over their handle and
+ignore `this`, so a value deliberately re-typed around a handle's method (an
+object literal claiming `kind: "dm"` holding a guild channel's `send`) gets the
+error type of the kind it claims. No cast is needed to write one, but nothing in
+the library or an ordinary bot does; branding the receivers was not done, as it
+would cost every handle a property and the compile budget a type per kind.
 
 **Other channel operations** (signatures in `[sd:src/channels.ts]`; every union
 is `OpErrors<G>[op]` plus argument-derived limit tags):
@@ -791,22 +831,32 @@ Property 'edit' does not exist on type 'ForeignMessage<"text">'.
 ### 2.5 Messages carry their author (`[sd:src/channels.ts]`)
 
 ```ts
-export type OwnMessage<K extends MessageKind> = MessageBase<K> & GuildOps<K> & Crosspost<K, "message.crosspostOwn"> & {
-  readonly author: "self"
-  readonly edit: <const P extends EditMessage>(patch: P & CheckEdit<P>) => Effect.Effect<OwnMessage<K>,
-    | OpErrors<never>[MsgOp<K, "message.edit.channel", "message.edit.thread">]
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (P extends { readonly embeds: infer E } ? (E extends readonly [] ? never : EmbedTooLarge) : never)
-    | (EditMayEmpty<P> extends true ? MessageEmpty : never)>
-  readonly delete: () => Effect.Effect<void, OpErrors<never>["message.deleteOwn"]>
+export interface DeleteMethod {
+  <M extends MessageReceiver>(this: M): Effect.Effect<void, OpErrors<never>[DeleteOp<M>]>   // DeleteOp distributes over M
 }
-export type ForeignMessage<K extends MessageKind> = MessageBase<K> & GuildOps<K> & Crosspost<K, "message.crosspostForeign"> & {
-  readonly author: "other"; readonly authorId: UserId; readonly authorIsBot: boolean
-  readonly delete: () => Effect.Effect<void, OpErrors<never>["message.deleteForeign"]>
+export interface EditOwnMethod {
+  <M extends OwnReceiver, const P extends EditMessage>(this: M, patch: EditArg<P>): Effect.Effect<OwnMessages<KindOf<M>>,
+    OpErrors<never>[EditOp<KindOf<M>>] | ContentTooLongIn<P> | EditEmbedTooLargeIn<P> | EditMessageEmptyIn<P>>
+}
+export type OwnMessage<K extends MessageKind> = MessageBase<K> & GuildOps<K> & Crosspost<K> & {
+  readonly author: "self"; readonly edit: EditOwnMethod; readonly delete: DeleteMethod
+}
+export type ForeignMessage<K extends MessageKind> = MessageBase<K> & GuildOps<K> & Crosspost<K> & {
+  readonly author: "other"; readonly authorId: UserId; readonly authorIsBot: boolean; readonly delete: DeleteMethod
 }
 export type OwnMessages<K extends MessageKind> = K extends MessageKind ? OwnMessage<K> : never      // distributive
 export type ForeignMessages<K extends MessageKind> = K extends MessageKind ? ForeignMessage<K> : never
 ```
+
+(After the final audit.) Every message method is one shared method type with a
+generic `this` that carries the kind and the author (`MessageReceiver`), as
+`send` is (§2.4): every handle of every kind has the same property type, so a
+call on a union of handles (an event's message, a send's result on a union of
+channels) has one signature and gives one Effect, whose error union is the
+kinds' rows, distributed over the handles. The per-kind function types before it
+gave a union of Effects, and `.pipe(catchCategory(...))` on one failed with a
+2,400-character diagnostic. The change also cut the reference bot's compile by
+about 1,200 types.
 
 - `OwnMessage<K>` is one kind. `OwnMessages<K>` and `ForeignMessages<K>` turn a
   union of kinds into a union of handles. Received messages and `Sent<K>` use
@@ -897,12 +947,14 @@ export interface ReactionAdd { readonly guildId: GuildId | undefined; readonly c
   readonly messageId: MessageId; readonly userId: UserId; readonly emoji: Emoji }
 
 type NonTransient = "permission" | "payload" | "access" | "state"
-type Unhandled<E> = Extract<E, CategoryMarker<NonTransient>> | Exclude<E, CategoryMarker<string>>   // D6 as researched
-type TagOf<E> = unknown extends E ? "unknown (fix the errors above first)" : E extends { readonly _tag: infer T extends string } ? T : "<untagged>"
+type Unhandled<E> = Exclude<E, CategoryMarker<"transient">> | Extract<E, CategoryMarker<NonTransient>>   // D6 (final audit)
+type TagOf<E> = unknown extends E ? "unknown (fix the errors above first)" : E extends { readonly _tag: infer T extends string } ? T
+  : E extends { readonly [CategoryTypeId]: unknown } ? "a widened categorised type (keep each error's own class)" : "<untagged>"
 export interface UnhandledErrors<What extends string> {
   readonly "unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie": What }
 export type Handled<A, E, R> = [Unhandled<E>] extends [never] ? Effect.Effect<A, E, R>
-  : UnhandledErrors<Extract<Categories<Unhandled<E>>, NonTransient> | TagOf<Exclude<E, CategoryMarker<string>>>>
+  : unknown extends E ? (unknown extends A ? (unknown extends R ? MustReturnEffect : UnhandledErrors<"unknown (fix the errors above first)">) : UnhandledErrors<"unknown (fix the errors above first)">)
+  : UnhandledErrors<Extract<Categories<Unhandled<E>>, NonTransient> | TagOf<Exclude<Unhandled<E>, CategoryMarker<NonTransient>>>>
 
 export interface Bot<I extends Intent> {
   readonly intents: ReadonlyArray<I>
@@ -910,7 +962,7 @@ export interface Bot<I extends Intent> {
     handler: (event: EventPayloads<I>[K]) => Handled<A, E, R>) => Effect.Effect<void, never, Exclude<R, Scope.Scope> | BotRuntime | Scope.Scope>
 }
 export declare const Bot: {
-  readonly make: <const I extends ReadonlyArray<Intent>>(config: { readonly intents: I }) => Bot<I[number]>
+  readonly make: <const I extends ReadonlyArray<Intent>>(config: { readonly intents: I & LiteralIntents<I> }) => Bot<I[number]>   // a tuple (final audit)
   readonly layerWith: <I extends Intent>(bot: Bot<I>, config: BotConfig) =>
     Layer.Layer<BotRuntime, StartupFailed | Config.ConfigError, HttpClient.HttpClient | Socket.WebSocketConstructor>
   readonly layer: <I extends Intent>(bot: Bot<I>, config: BotConfig) => Layer.Layer<BotRuntime, StartupFailed | Config.ConfigError>
@@ -939,6 +991,16 @@ and event delivery follow the build in `BotRuntime`, which is not parameterised 
 intent its `Bot` declares, naming them (a wiring defect, `test/unit/bot-events.test.ts`); a build with more intents
 than the `Bot` only makes the types conservative.
 
+(After the final audit) That registration check compares the `Bot`'s run-time list with the build's, so it never
+fires when both come from one list whose *type* is wider than its value: `Bot.make({ intents: fromConfig })` with
+`fromConfig: ReadonlyArray<Intent>` typed every event as delivered and `content` as `string`, while the bot identified
+with fewer intents. `Bot.make` therefore requires the list's type to be a tuple (`LiteralIntents<I>`: otherwise
+`Invalid<"intents must be written as a literal list ...">`). An element typed as a union (`[cond ? "GuildMessages" :
+"GuildMembers"]`) still passes, and the types then assume every member is declared: checking each element cost the
+reference bot about 90 types, for a form nobody writes by accident. The harness's intent sessions, whose intents are
+a run-time value, use the internal `botWithRuntimeIntents` (not in the barrel), whose types follow every intent and
+which the sessions read as the widest payload.
+
 **The handler boundary names categories, not tags (D1 with a change).** The
 message lists the non-transient categories that remain (at most four names) and
 the tags of uncategorised errors. Revision 1 listed every tag, so with default
@@ -947,7 +1009,13 @@ common first draft (forwarding a built payload) never named six of its leaked
 tags (`[rt:diag/d6-truncated-tags.ts]`). The handler's own hover still lists every
 tag. `Unhandled` follows D6 as researched: an error that is transient **and**
 state is unhandled. Revision 1 used `ExcludeCategory<E, "transient">`, which let
-such a user error escape (`[re:src/d6-escape.ts]`, `[rt:holes/h8-transient-plus.ts]`).
+such a user error escape (`[re:src/d6-escape.ts]`, `[rt:holes/h8-transient-plus.ts]`). (After the final audit)
+`Unhandled` is defined from `transient`, not by subtracting "some category": subtracting `CategoryMarker<string>` let
+an error type widened to `Categorized<never>` or `Categorized<string>` through, because `{}` and an index-signature
+marker are assignable to it, so a handler whose send can fail with `MissingSendMessages` compiled once its error type
+was annotated that way. Such a type is now unhandled, and its message names it as a widened categorised type. A
+handler that returns no Effect at all (a number, a Promise: tsc infers `unknown` for all three of `A`, `E` and `R`)
+is `MustReturnEffect`, not the "fix the errors above" message.
 
 **DMs.** `"dm"` is a message kind. `MESSAGE_CREATE` is a union of a guild
 branch and a DM branch, and each branch exists only when its intent is
@@ -1035,6 +1103,20 @@ export declare const Command: {
 - **Names** are checked only on finite literals, reusing `IsFiniteLiteral`.
   A template-pattern name such as `` `slot${number}` `` passes; revision 1
   rejected it as "not lowercase" (`[rt:diag/d0-pattern-name.ts]`).
+- **Each option type takes only its own keys** (after the final audit): every
+  option interface declares the keys it does not take as optional message
+  types (`choices?: Invalid<"only string, integer and number options take
+  choices">`, likewise `autocomplete`, `minLength`, `maxLength`, `minValue`,
+  `maxValue`, `channelTypes`), so such a key is an error at that property. Before
+  it, `choices` on a boolean option compiled and typed the handler's value as the
+  choices' union, registration dropped the choices, and every invocation was
+  dropped as malformed. One shared message per key keeps the cost at about 130
+  types for the reference bot and nothing measurable per command.
+- **A non-literal `required` may be true** (after the final audit), so an
+  option with `required: someBoolean` after an optional one is the order error too.
+  Duplicate option names are not checked by the types (it would cost about 25
+  conditionals per option); Discord refuses them at registration, which is
+  `StartupFailed("command-rejected")` naming the field.
 - **The command type is opaque.** `ChatInputCommand<N, Invocation>` carries
   the computed invocation, not the option tuple, so the command and `ix` hover
   as the invocation object (§5.3).
@@ -1094,7 +1176,14 @@ export declare const ComponentRoute: {
 }
 ```
 
-- A route name containing `:` fails with `Invalid<"route names cannot contain ':'">`.
+- A route name containing `:` fails with `Invalid<"route names cannot contain ':'">`,
+  and (after the final audit) a name that is not a finite literal with
+  `Invalid<"route names must be literals">`: a `string` could hold a `:` the type
+  cannot see, and its IDs would then never route.
+- A route, or a command, registered twice on one bot is a defect at the second
+  registration (after the final audit): both handlers would answer one
+  interaction, and Discord refuses the second answer (40060). The build's
+  `BotRuntime` keeps the registered names for each registration's scope.
 - **The wire format always goes through the canonical JSON codec:**
   `name + ":" + encode(Schema.fromJsonString(Schema.toCodecJson(schema)))(data)`,
   decoded with the same codec. Revision 1 used `JSON.stringify(encode(schema)(data))`:
@@ -1114,9 +1203,17 @@ export declare const ComponentRoute: {
 
 The state machine is **value-level**:
 
-- A handler returns exactly one initial `Response<R>` descriptor.
-- Follow-ups exist only inside the continuation that receives `Answered`.
-- So answering twice, or following up before answering, cannot be written.
+- A handler returns one initial `Response<R>` descriptor, and Discord is answered
+  exactly once, with that one.
+- Follow-ups exist only inside the continuation that receives `Answered`, so
+  following up before answering cannot be written.
+- Making a second response can be written (`yield* ix.reply(a); return yield*
+  ix.reply(b)`, or a reply inside a reply's continuation). (After the final audit;
+  revision 3 said it could not, and the first was dropped with no log.) Each
+  interaction's session records every response its methods made (when the
+  method's Effect runs, so a response built and never run does not count); the
+  runner posts the returned one and logs, at Error, every other response the
+  handler made and every response a continuation made, which are never posted.
 
 **Responses are validated locally.** `ix.reply(...)`, `ix.update(...)`,
 `ix.defer(...)` and `ix.showModal(...)` return `Effect<Response<R>, E>`, where
@@ -1185,6 +1282,12 @@ Notes:
 - `ix` is typed under `Effect.fn` for every entry, and `x1` in
   `src/fail/interactions.ts` proves it:
   `Property 'thisDoesNotExist' does not exist on type 'CommandInteraction<..., "public">'.`
+- **A reply that omits `ephemeral` follows the mode** (after the final audit: the
+  runner took the flag from the payload only, so a fast reply in "ephemeral" mode
+  without the key was posted publicly, while a slow one went out after the mode's
+  ephemeral deferral). The runner sets EPHEMERAL from the registration mode on
+  the fast path too: always in "ephemeral", never in "public", and as the payload
+  says in "manual". `test/unit/interactions-runner.test.ts` holds it.
 - **Ephemeral must match the mode** (H-227: the ephemeral state cannot change
   after a deferral): `Type 'true' is not assignable to type 'true & Invalid<"ephemeral must match the registration mode public">'.`
 - **Context.** `ix.guildId`, `ix.user` and `ix.channel` (built from the

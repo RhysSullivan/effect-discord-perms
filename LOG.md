@@ -214,7 +214,9 @@ finding changed a constant, and the replay holds the constant to the table (§5.
 - **M4: pinning and unpinning need ReadMessageHistory, checked as access to the message**: without it, every
   other flag granted, both answer 403 50001 (`pins/text/pin/read-history/absent/normal`,
   `pins/targeted/unpin-without-history`), and so does a timed-out subject without it
-  (`pins/public-thread/pin/read-history/absent/timed-out`), so it ranks with View (`viewLevel`, §3.2 tier 1).
+  (`pins/archived-thread/pin/read-history/absent/timed-out`; the final audit found that an earlier citation here,
+  `pins/public-thread/...`, named a development-run row the committed table does not hold), so it ranks with View
+  (`viewLevel`, §3.2 tier 1).
   H-050 confirmed: ManageMessages without PinMessages answers 50013 (`pins/targeted/manage-messages-without-pin`).
   H-107 confirmed: listing pins without ReadMessageHistory answers 200 with an empty list
   (`pins/announcement/list/read-history/role-overwrite-deny/normal`, recorded as degraded).
@@ -228,8 +230,10 @@ finding changed a constant, and the replay holds the constant to the table (§5.
   (`message/announcement/crosspost-foreign/none/normal`). Without SendMessages, or under a timeout, a crosspost
   answers 50001 (`message/announcement/crosspost-own/op-flag/normal`, `.../crosspost-own/none/timed-out`); without
   ManageMessages on another's message 50013 (`.../crosspost-foreign/op-flag/normal`). Discord limits publishing to
-  about 10 per hour per announcement channel; a run makes 4, so no two full runs may start within the same
-  20 minutes or so.
+  about 10 per hour per announcement channel. (Corrected after the final audit: M4's runs made 4; the current matrix
+  makes 8, starting about half way through a full run (7 crosspost rows succeed, plus `rule/announcement/typed-crosspost`),
+  so at most one full run, or one run of `message/**` and `flip/**`, per hour. The role bucket's spacing, about 1.2
+  hours between full runs, already enforces it.)
 - **M4, H-152 generalised: everything in voice text chat needs Connect.** Editing one's own message and deleting
   another's without it answer 403 50001 (`message/targeted/voice-edit-own-without-connect`,
   `message/targeted/voice-delete-foreign-without-connect`); deleting one's own and bulk delete are targeted rows
@@ -1588,12 +1592,12 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   `--compare` use `/tmp/effect-discord-perms-truth-table.only-<glob slug>.json`. The send catalog (103 rows) takes
   about 10 minutes and some 2,200 requests; it exits 1 while any mismatch remains. The whole M4 catalog (354
   rows) takes about 33 minutes, some 7,300 requests and 1,800 writes, about 220 of them invalid (the raw 403s).
-- **Role edits are rate-limited per guild: 1,000 a day, refilled about one per 86 s.** A full run needs about 75
-  (67 for its setups, plus resets); `run` checks the bucket at start and says how long to wait. Two full runs
-  need about 1.8 hours between them. The reset self-test and smoke make a few each. (M7: the 512-scenario catalog
-  needs 88, 80 for its role states plus the margin; a full run takes 42 to 48 minutes, so the bucket is the pace:
-  about 1.2 hours between full runs. Before M9, at 10 requests a second, a 542-scenario run takes about 43 minutes. Never wrap a wait for the bucket and a run in one shell command with a time
-  limit: M7 lost a run at row 472 that way.)
+- **Role edits are rate-limited per guild: 1,000 a day, refilled about one per 86 s.** A full run of the current
+  542-scenario catalog needs about 88 (80 for its role states plus the margin) and takes about 43 minutes at 10
+  requests a second, so the bucket is the pace: about 1.2 hours between full runs. `run` checks the bucket at start and
+  says how long to wait. The reset self-test and smoke make a few each. (Before M7 a full run needed about 75, and two
+  full runs about 1.8 hours.) Never wrap a wait for the bucket and a run in one shell command with a time limit: M7
+  lost a run at row 472 that way.
 - **Command creates are budgeted** (M8). Discord allows 200 application-command creates per guild a day (H-205); the
   shared client counts every name a POST or PUT to the guild commands may create, refused or not, in a rolling 24-hour
   ledger at `/tmp/effect-discord-perms-command-creates.json`, and aborts a command before a request that would take the
@@ -1605,9 +1609,10 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
 - **`bun --no-env-file harness/main.ts record-commands`** (M8) re-records `fixtures/commands-canonical.json` from a live
   GET; re-run it if Discord's command storage seems to have changed (a registration defect naming a field), review the
   diff, and update `Canonical.ts`'s default tables and `test/unit/canonical.test.ts` with it.
-- **Crossposts are rate-limited per announcement channel** (about 10 publishes per hour). A full run publishes 4
-  messages in `lab-announcement` in its first few minutes, so never start more than two full runs (or runs of
-  `message/**` and `flip/**`) within one hour.
+- **Crossposts are rate-limited per announcement channel** (about 10 publishes per hour). A full run publishes 8
+  messages in `lab-announcement`, the first about half way through (corrected after the final audit; M4's runs
+  published 4 in their first minutes), so start at most one full run, or one run of `message/**` and `flip/**`, per
+  hour. The role bucket's spacing between full runs already keeps to it.
 - **Reset self-test: re-run `bun run harness:selftest` whenever `Reset.ts` (or `LabIds.ts`'s baseline) changes,
   and record the run in that milestone's notes; it is part of the exit checks of any milestone that changes them.**
   The smoke and reset exit checks run on a clean lab, where a reset that wrote nothing would pass too. The
