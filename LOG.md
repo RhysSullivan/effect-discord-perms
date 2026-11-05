@@ -2667,3 +2667,67 @@ Two major findings and six minor ones, each fixed (commits `812d493`, `79bca42`,
     the eight phase-3 interaction rules the same checklist shows live; the external emoji and sticker rules
     (`needs-second-guild`); the `@everyone` valid side and successful kicks and bans (`forbidden-action`, resolver
     only); and the media channel kind, which Perms Lab cannot create.
+
+#### After the second M10 verifier
+
+- **Blocker: the budget failed on two hard ceilings** (commit `69989f0`; "Design deviations", the two entries after
+  the second M10 verifier; DESIGN §2.2, §2.12 rule 10, §5.4, §6 M10). Fixed by the verifier's option 2: the library's
+  compile cost was cut without changing a type a user sees. `bun run budget` now prints the reference bot at **59,620
+  types, 178,499 instantiations and about 245 ms**, within all three ceilings, which did not move, and so
+  `verify:offline` is green. How the cost was found, so the next cut can start from it: a module's own cost is what
+  its closure costs over the closure of its direct imports (each probe a one-line file in the git-ignored `.scratch/`
+  exporting the module, `--checkers 1`); `tsc --generateTrace` gives the slow checks and the types by declaring file;
+  and each candidate was measured on the reference bot itself, because a cost that one module shows alone is often
+  shared in the whole program (taking `AllErrors` out of the barrel saves 1,487 types in the error module alone and
+  143 in the bot). The biggest own costs before the cuts were `channels/Ops.ts` (14.6k types over its imports) and the
+  generated error classes (11.5k); after them, 7.9k and 7.8k. The hover snapshots (7 files, 27 markers) and the fail
+  fixtures' diagnostics (110, largest gated 617 characters) did not change.
+- **Mutation checks** (each applied, the check failed, reverted):
+  - `CategorizedError`'s return type with `Categorized<K[0]>` in place of `Categorized<K[number]>`: `tsc -p .` fails in
+    the pass fixtures (`bot.ts`, `catch-category-exact.ts`, ...), where a multi-category class lost its other
+    categories;
+  - its run time giving every class an empty marker (`mixCategories(..., [])`): 603 of the 1,568 tests fail (the
+    category tests, the replay of the truth table, whose rows record each error's categories, and the others that
+    read a marker);
+  - the budget guard against a `paths` mapping of `effect-discord-perms`, in the bot's project, to a file under
+    `.scratch/` that re-exports `src/index.ts` (so the program still contains the entry point, the case the verifier
+    named): `budget FAIL: the reference bot's import of effect-discord-perms resolves to .../.scratch/fake/index.ts,
+    not to the package's entry point .../src/index.ts ...`. The previous guard passed this case.
+- **Minor: the escalation gave Rhys no data on option 2.** Moot: option 2 was carried out, and the budget item is gone
+  from "Waiting for Rhys". The verifier's lever (the category marker typed once) is the first cut, written as
+  `CategorizedError` so the categories are given once rather than in a class-body declaration beside the mixin.
+- **Minor: the guard checked only that the program contained `src/index.ts`.** Fixed (commit `d2c35ce`):
+  `consumerResolutionProblem` reads `--traceResolution` and requires every import of `effect-discord-perms` to
+  resolve to `exports["."]`, with the check above and four unit tests.
+- **The baseline.** `bun run budget -- --update` wrote the reference bot's row (673 files, 59,620 types, 178,499
+  instantiations, 212,398 KB, 244 ms). As before, the per-command row keeps M9's 7,624 types and 43,245
+  instantiations, which this milestone did not set out to change; `--update` measured 7,636 and 43,302 (+0.16% and
+  +0.13%, within the gates).
+- **Exit checks after the second M10 verifier.** On `35e8ff7` (`69989f0` with one blank line removed); the commit
+  after it changes only `LOG.md` and `docs/DESIGN.md`, which the harness does not read.
+  - `grep -nE "Effect\.(die|dieMessage|orDie|orDieWith)" examples/reference-bot` prints nothing (exit 1; `command grep
+    -rnE` the same). **Met.**
+  - `bun run budget`: `examples/reference-bot/tsconfig.json: files 673, types 59620, instantiations 178499, check 244
+    ms`, the command probes 49,028 and 56,664 types, `per command (25 options, with handler): 381.8 types, 2165.1
+    instantiations`, `budget ok`. **Met.**
+  - `bun run verify:offline` exits 0: gen:errors up to date; typecheck; 1,568 tests in 60 files; test:types 13 pass
+    and 13 fail fixtures, 110 diagnostics, largest gated 617 characters; hover 7 files, 27 markers; `rules ok 70
+    rule(s) (55 live pair, 0 escalated, 5 pure-typing, 10 other not-live)`; budget ok. **Met.**
+  - `bun run verify:live` in a fresh process. **Met.** A first attempt at 06:05 stopped before any scenario on the
+    role budget (`70 role edits left in the guild's bucket, the run needs about 88 ... start again in about 26
+    minutes`; reset and provision wrote 0; the lock was released). The second, started at 06:36 on the same clean
+    commit, **exited 0**: role budget 91 left (88 needed), 542 scenarios in 2,705 s, 9,281 requests, 2,739 writes,
+    599 invalid (401/403/429). dfx waited out 429s on one channel PATCH, one command POST, two command PUTs and nine
+    reaction PUTs. No lab step was retried after a 5xx, the oracle was available, and there were **0 mismatches**.
+    `compare: identical to the previous table`: the same bytes, `6199bf0d...b164b6`, 669,042, so `fixtures/` did not
+    change. The closing reset wrote 3 (one channel PATCH, one role PATCH, one guild-commands PUT), the run printed the
+    six unmet Done criteria (Q-17, Q-18, Q-22), and the lock was released.
+- **Done criteria (PROMPT.md) after the second M10 verifier.**
+  - Met: `verify:offline` green; `verify:live` with zero mismatches across the matrix, and consecutive fresh processes
+    writing identical tables (M8's runs W, A and B, M9's validation run, M10's two runs and this one); the reference
+    bot in `examples/` with no `orDie`, compiling within budget (59,620 of 60,000 types; 178,499 of 250,000
+    instantiations); README.md with the guarantee; this file's live findings and the phase-3 checklist.
+  - Not met by an agent, by design or by decision, as before: the six escalated remainders (Q-17, Q-18, Q-22), with
+    the eight phase-3 interaction rules the same checklist shows live; the external emoji and sticker rules
+    (`needs-second-guild`); the `@everyone` valid side and successful kicks and bans (`forbidden-action`, resolver
+    only); and the media channel kind, which Perms Lab cannot create.

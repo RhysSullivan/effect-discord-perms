@@ -1320,9 +1320,10 @@ Each rule below came from a failure seen while compiling.
 9. **Every positive type claim has an `Equals` assertion**, and every negative
    claim has a fail fixture with a code, a mention, a snapshot and a `@valid` twin.
 10. (M10, compile budget, §5.4) **Write a signature so that tsc can relate it
-    to its twin by identity.** Each rule below cut the reference bot's types
-    measurably (in parentheses, what undoing it alone adds back to the final
-    76,573 to 59,620; LOG.md); none changes a type a user sees:
+    to its twin by identity.** Together with §2.2's `CategorizedError`, these
+    cut the reference bot from 76,573 types to 59,620 (LOG.md). In parentheses,
+    the types that undoing each alone adds back to 59,620. None changes a type
+    a user sees:
     - an overload that restates an interface's method (the handles in
       `channels/Ops.ts`, `Direct.ts`, `members/Member.ts`, the runner's
       answers) uses the same named aliases as the interface for its
