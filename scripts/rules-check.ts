@@ -19,7 +19,7 @@ import * as TruthTable from "../harness/TruthTable.ts"
 import { rules } from "../test/rules.ts"
 import { EventIntents } from "../src/gateway/Intents.ts"
 import { isSessionName, sessions } from "../harness/scenario/catalog/intents.ts"
-import { type CoverageRow, coverageProblems, eventProblems, openQuestionsOf, type PairRowView, pendingChecks, registryProblems } from "./lib/rules.ts"
+import { type CoverageRow, coverageProblems, escalatedRules, eventProblems, openQuestionsOf, type PairRowView, pendingChecks, registryProblems } from "./lib/rules.ts"
 import { listTypeScriptFiles, repoRoot } from "./lib/tsc.ts"
 import { snapshotPathOf } from "./lib/typeTests.ts"
 
@@ -107,9 +107,13 @@ else {
 const byKind = (kind: string): number =>
   rules.filter((rule) => (rule.live.kind === "not-live" ? `not-live:${rule.live.reason}` : rule.live.kind) === kind).length
 const pairs = rules.filter((rule) => rule.live.kind === "pair")
+// escalated remainders sit next to a live half; each is an unmet Done criterion `verify:live` prints (the final audit)
+const remainders = escalatedRules(rules).filter((escalation) => escalation.part === "remainder")
+const remainderQuestions = [...new Set(remainders.map((escalation) => escalation.question))].sort((a, b) => Number(a.slice(2)) - Number(b.slice(2))).join(", ")
 const summary =
   `${rules.length} rule(s) (${byKind("pair")} live pair, ${byKind("escalated")} escalated, ${byKind("not-live:pure-typing")} pure-typing, ` +
-  `${rules.length - byKind("pair") - byKind("escalated") - byKind("not-live:pure-typing")} other not-live), ${failFixtures.length} fail fixture(s), ` +
+  `${rules.length - byKind("pair") - byKind("escalated") - byKind("not-live:pure-typing")} other not-live; ` +
+  `${remainders.length} escalated remainder(s)${remainders.length === 0 ? "" : `, waiting for Rhys (${remainderQuestions})`}), ${failFixtures.length} fail fixture(s), ` +
   `${pairs.reduce((sum, rule) => sum + (rule.live.kind === "pair" ? 2 + (rule.live.also?.length ?? 0) : 0), 0)} live sides checked against the table, ` +
   `${eventsChecked} event(s) with a live intent pair, flag coverage over ${coverageRows.length} matrix row(s)`
 if (pendingChecks.length > 0) console.log(`rules: not checked yet, because their inputs do not exist:\n- ${pendingChecks.join("\n- ")}`)
