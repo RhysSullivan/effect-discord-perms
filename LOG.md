@@ -2353,3 +2353,86 @@ Live, in order (each alone under the lock, on minisforum):
   `rules ok 70 rule(s) (55 live pair, 0 escalated, 5 pure-typing, 10 other not-live), 13 fail fixture(s)`; budget: the
   per-command row 381.2 types and 2,162.3 instantiations, within its new baseline). The phase-3 checklist was not run
   ("Waiting for Rhys").
+
+#### After the M9 verifier
+
+Two major findings and six minor ones, each fixed (commits `812d493`, `79bca42`, `3e29297`, `a69ecb7`); the eighth minor
+(the pacing run not confirmed independently) needs nothing in M9, and M10's fresh-process `--compare` run confirms it.
+
+- **The interaction token reached trace spans** (major; §4.13 and §4.14 updated; the earlier note under "Design
+  deviations" corrected). §4.13 gave M9 the job of keeping interaction requests out of the HTTP client's span, and it
+  was not done: Effect's HTTP client opens its own span below `discord.rest` (`POST`, `PATCH`) with `url.full` and
+  `url.path`, and the verifier's recording tracer saw `/api/v10/interactions/{id}/<token>/callback` and
+  `/webhooks/{app}/<token>` there. Reading dfx found a second leak: on a 403 or a 429 it logs at Debug with the request's
+  URL as an annotation, and its "bad route" Debug line is annotated with a route key that keeps the token
+  (`routeFromConfig` collapses only numeric IDs of non-major resources). `DiscordApi.sendJson`, through which every
+  interaction call goes, now provides `HttpClient.TracerDisabledWhen` (`() => true`) for its requests, so the client
+  opens no span for them (`discord.rest` with the route template stays), and raises the minimum log level to Info for
+  them (kept higher if the caller's is). `interactions-runner.test.ts` runs a slow handler (the callback, then
+  `PATCH @original`) whose continuation's follow-up Discord refuses with 403 50013, under a recording tracer and Debug
+  logging with annotations, and asserts that the three `discord.rest` spans carry the three route templates and that no
+  span name, attribute or event and no log line holds the token. Mutation checks: without `TracerDisabledWhen`, and
+  without the log level, the test fails.
+- **The checklist could not be finished** (major; §4.14 and §5.6 updated, "Waiting for Rhys" rewritten). (a) Only ten
+  items had verdict buttons, so `done` never held and a sitting always waited the full 20 minutes: autocomplete's answer
+  is Discord's suggestion list and the expired control's is the runner's fixed reply, neither with buttons. Each now has
+  its verdict pair on its own prompt's message. (b) The Update and Slow update prompts shared the prompts' message, so the
+  first update replaced all ten buttons: `/checklist`'s reply now carries option-values' verdict, and its continuation
+  posts five messages in order (autocomplete's verdict; the seven prompts answered with a new message; Update alone;
+  Slow update alone; Expired with its verdict). (c) The absence check's canary could never reach the subject, which
+  holds no permission at baseline: `harness/main.ts checklist` now resets and provisions the lab, checks the role budget
+  (4 edits), Safety-checks and converges the rule rows' `text-messages` setup (`lab-grant` with View, SendMessages and
+  ReadMessageHistory), and ends with a closing reset in a finalizer, so a failed or interrupted sitting is reset too,
+  and the command fails if that reset fails. The canary is now a message in #lab-text only (`isCanary`), since the
+  subject sees more of the guild under `lab-grant`. `checklist.test.ts` drives one whole simulated sitting: it rebuilds
+  what a human sees from the requests the runner sent (a reply or deferral is a new message, an update or a deferred
+  update's `PATCH @original` edits the clicked one, a modal opens until submitted), clicks every button once (and "As
+  expected" of each pair), and ends with all twelve verdicts and `ChecklistRun.isDone` true, false before the last
+  verdict or without a DM event. Mutation checks: the two update prompts on one message, no autocomplete verdict, no
+  expired verdict, `isDone` counting eleven verdicts: each fails it. The checklist is still never run by an agent
+  (§6 M9), so the new `prepare` and closing-reset path, which reuses `Reset.run`, `Provision.run`, `Runner.idsOf`,
+  `Runner.checkRoleBudget` (now exported), `Safety.checkMaterialized` and `Converge.converge` as a run does, first runs
+  live when Rhys runs it.
+- **Interactions only from lab channels** (minor; §5.6 updated). The guard's admission of the callback and the
+  subject's interaction webhooks cannot check a channel (their URLs name none), and its comment said an interaction can
+  only come from the lab; a guild command can be invoked in any channel, `#rules` included. The guard gained
+  `isLabChannel` (an admitted lab channel, never a protected one, false before arming), and the checklist registers its
+  handlers on `ChecklistRun.labInteractionsOnly(session.runtime, guard.isLabChannel)`: one subscription to the session's
+  INTERACTION_CREATE forwards each interaction from a lab channel to a dispatch stream of its own, and drops any other
+  with one warning, so nothing answers it. Building that stream showed an Effect 4 detail: `Layer.build` inside a
+  provided context forks the context's memo map, which reuses a layer it already built, so `Dispatches.layer` returned
+  the bot's own stream and nothing was filtered; it is `Layer.fresh(Dispatches.layer)`. Tests: the guard's
+  `isLabChannel` (`lab-guard.test.ts`), and an interaction from `#rules` dropped with one warning while one from
+  #lab-text is answered (`checklist.test.ts`; a mutant that admits every channel fails it).
+- **The routing test passed for the wrong reason** (minor). It is two tests now. A command handler is sent another
+  command whose options fit its definition, an autocomplete of its own command with a valid choice, and a component
+  click, and must post nothing and log no Error, then answer its own command; an autocomplete handler is sent an
+  invocation of its command and another command's autocomplete, with the same assertions. The verifier's four
+  mutants (dropping the command's name check, its type check, the autocomplete's type check, its name check) each fail
+  one of them.
+- **`defer`'s ephemeral diagnostic named neither the rule nor the mode** (minor; §2.10 updated). `defer`'s options are
+  now `{ ephemeral: X & EphemeralMatches<X, M> }`, as a reply's are, so `e5` prints `Type 'true' is not assignable to
+  type 'true & Invalid<"ephemeral must match the registration mode public">'` (it printed `Type 'true' is not assignable
+  to type 'false'`), and a new `e6` holds the "ephemeral" mode (`... mode ephemeral">'`). R-ephemeral-matches-mode
+  claims both mentions instead of the raw one. The per-command budget row moved from 381.2 to 381.8 types and from
+  2,162.3 to 2,164.8 instantiations, within its baseline.
+- **Untested claims** (minor): a continuation still running at 14 minutes is interrupted and logged at Warn ("the
+  continuation passed 14m"), and not at 13 minutes; a handler that returns a copy of its response (`{ ...response }`,
+  which has the response's type, symbol key included, without a cast) gets nothing posted and an Error log ("returned no
+  response"). Removing the deadline fails the first; a structural `planOf` (any object tagged `Response` posted as a
+  reply) and dropping the Error log each fail the second.
+- **`followUp` guessed SendMessages when `app_permissions` was absent** (minor; §2.10 updated). A 50013 is
+  `MissingSendMessages` only when `app_permissions` is present and lacks the flag; held or absent, it is
+  `PermissionDeniedUnattributed`. A test covers all three (the old rule fails its absent case).
+- **The options readback reused the library's channel-type table** (minor, item 10 of the M7 and M8 minors; §5.5
+  updated). `CommandProbes.storedAsDefined` now reads `documentedChannelTypes`, built from discord-api-types'
+  `ChannelType` (checked against Discord's docs in the research's Appendix A.1), not `Snapshot.channelTypes`, which
+  `Canonical.toDiscord` writes with; `command-probes.test.ts` spells out the documented numbers and asserts that the two
+  tables agree offline. The expected numbers are unchanged, so no live row can change.
+- No live process ran in this round, and no truth table was rewritten. Exit checks (after `a69ecb7`): `bun run test --
+  test/unit/interactions-runner.test.ts --reporter=verbose` passed 20 tests (the M9 exit criteria's eight, the token
+  test, two routing tests, the follow-up attribution, the continuation deadline and the copied response among them);
+  `bun run verify:offline` exited 0 (gen:errors up to date; typecheck; 1,555 tests in 59 files; test:types 12 pass and
+  13 fail fixtures, 110 diagnostics, largest gated 617 characters; hover 6 files, 22 markers; `rules ok 70 rule(s) (55
+  live pair, 0 escalated, 5 pure-typing, 10 other not-live), 13 fail fixture(s)`; budget: per command 381.8 types and
+  2,164.8 instantiations).
