@@ -1,0 +1,19 @@
+export const command = poll
+const command: ChatInputCommand<"poll", {
+    readonly options: {
+        readonly question: string;
+        readonly where?: AnnouncementChannel<never> | TextChannel<never>;
+    };
+}>
+
+export const registration = onPoll
+const registration: Effect<void, never, BotRuntime | Polls | Scope>
+
+export const click = onVote
+const click: Effect<void, never, BotRuntime | Polls | Scope>
+
+export const running = layer
+const running: (target: Target) => Layer<never, StartupFailed | ConfigError>
+
+export const entry = Main
+const entry: Layer<never, ConfigError | LockHeld | PlatformError | StartupFailed, never>
