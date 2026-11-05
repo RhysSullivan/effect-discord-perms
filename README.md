@@ -15,7 +15,10 @@ either by tag or category or by an explicit, greppable `Effect.orDie`.
 ## A small bot
 
 From the reference bot, [`examples/reference-bot/bot.ts`](examples/reference-bot/bot.ts), which turns no library
-error into a defect (no `orDie`, no `die`):
+error into a defect (no `orDie`, no `die`). The quote is abridged: the `export`s and doc comments are dropped, and so
+are the bot's in-memory poll store (`Polls`, a service), `pollEmbed`, and its READY and vote handlers. Every line shown
+is as it is in the file. The command's options are typed from its definition: `question` is a `string`, and `where` is
+an optional `TextChannel | AnnouncementChannel`.
 
 ```ts
 const bot = Bot.make({ intents: ["Guilds", "GuildMessages", "MessageContent"] })
@@ -25,7 +28,7 @@ const poll = Command.chatInput({
   description: "Ask a yes/no question",
   options: [
     { type: "string", name: "question", description: "What to ask", required: true },
-    { type: "channel", name: "where", description: "Channel to post in", channelTypes: ["text", "announcement"] }
+    { type: "channel", name: "where", description: "Channel to post in (this one if absent)", channelTypes: ["text", "announcement"] }
   ]
 })
 const vote = ComponentRoute.make("vote", Schema.Struct({ poll: Schema.Int, choice: Schema.Literals(["yes", "no"]) }))
@@ -36,11 +39,9 @@ const onMessage = bot.on("MESSAGE_CREATE", (event) =>
     : event.channel.send({ content: "pong" }).pipe(catchCategory(["permission", "state"], (error) => Effect.logWarning(`cannot answer !ping: ${error._tag}`)))
 )
 
-// `Polls` (the bot's in-memory poll store, a service) and `pollEmbed` are in bot.ts too
-
 const onPoll = Interactions.command(poll, "ephemeral", (ix) =>
   Effect.gen(function* () {
-    const { question, where } = ix.invocation.options // question: string; where?: TextChannel | AnnouncementChannel
+    const { question, where } = ix.invocation.options
     // optional: checked up front, so a poll the bot cannot post is never opened
     const channel = yield* Permissions.require(where ?? ix.channel, ["SendMessages", "EmbedLinks"])
     const polls = yield* Polls
@@ -155,16 +156,24 @@ budget. `bun run verify:live` runs the live matrix against a test guild and rewr
   every operation and payload variant, the intents, command registration and `custom_id` routing. A run reports zero
   mismatches, and two runs in separate processes write byte-identical tables (`fixtures/truth-table.json`). What
   Discord did where it differs from its documentation is in `LOG.md`, "Live findings".
-- **Every compile-time rule** (`test/rules.ts`) has a valid case that compiles, an invalid case that fails with a
-  snapshotted diagnostic, and a live pair on one identical setup: Discord accepts the valid side and refuses the raw
-  invalid side with the expected status, code and field. A diagnostic must have the expected TS code, mention the rule,
-  and fit in 4 lines and 800 characters; no `never`, no truncated message types.
+- **Every compile-time rule** (`test/rules.ts`, 70 rules) has a valid case that compiles and an invalid case that
+  fails with a snapshotted diagnostic. A diagnostic must have the expected TS code, mention the rule, and fit in 4
+  lines and 800 characters; no `never`, no truncated message types. Every rule that can be checked live, 55 of the 70,
+  also has a live pair on one identical setup: Discord accepts the valid side and refuses the raw invalid side with the
+  expected status, code and field. The other 15 have none: 5 are pure typing (such as `catchTag` removing exactly its
+  tag), 8 are the phase-3 interaction rules, which need a human to click, and 2 (external emoji and stickers) need a
+  second guild. Seven of the live pairs have a part that is not live: six need a human (a DM, a real command
+  invocation, a click), and one would ping `@everyone`.
 - **Hover snapshots** check that the editor shows named types (`CommandInteraction<{ readonly options: {...} },
   "ephemeral">`, `Effect<Sent, MissingViewChannel | ...>`), never the internal machinery.
-- **The compile budget** (`bun run budget`) compiles the reference bot as a user compiles it, against the library's
-  declarations: 12,541 types, 28,926 instantiations, about 35 ms (ceilings 60,000, 250,000 and 1,000 ms; +2%
-  regression gates). The library's own check is a second row with the same regression gates, and a third row holds the
-  cost of one 25-option command with its handler (about 2,200 instantiations) so superlinear growth cannot hide.
+- **The compile budget** (`bun run budget`) compiles the reference bot as a consumer of this package compiles it: by
+  name, through the package's `exports`, which point at the source, so the library is checked with it. The hard
+  ceilings are 60,000 types, 250,000 instantiations and 1,000 ms, with +2% regression gates. **The budget fails
+  today:** the bot costs 76,573 types and 275,255 instantiations (about 360 ms), over two ceilings. The bot's own code
+  is about 3,700 types; the rest is the library. Whether to ship declarations and measure through them, cut the
+  library's compile cost, or change the ceilings is waiting for a decision (`LOG.md`, "Waiting for Rhys"). A second
+  row holds the cost of one 25-option command with its handler (about 2,200 instantiations), so superlinear growth
+  cannot hide.
 
 What is not verified live, and why, is in `LOG.md`: the phase-3 interaction checklist needs a human to click through
 it, the DM content and DM delivery exceptions need a human's DM, the external emoji and sticker rules need a second

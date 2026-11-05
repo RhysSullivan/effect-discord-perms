@@ -1,6 +1,5 @@
 {
   "extends": "../../tsconfig.json",
-  "compilerOptions": { "paths": { "effect-discord-perms": ["../../.budget/declarations/src/index.d.ts"] } },
   "include": ["main.ts", "bot.ts"],
   "exclude": []
 }

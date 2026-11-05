@@ -1,6 +1,7 @@
 /**
  * The reference bot (DESIGN §2.11, §6 M10): a small poll bot written as a user of the library would write it, importing
- * only the package. It compiles within the compile budget (`examples/reference-bot/budget.json`, DESIGN §5.4) and
+ * only the package. Its compile cost, with the library it imports, is the compile budget's reference-bot row
+ * (`examples/reference-bot/budget.json`, DESIGN §5.4; today over the Types and Instantiations ceilings, LOG.md). It
  * never turns a library error into a defect: every non-transient failure the library can return is handled by tag or
  * by category, and the handler boundary would reject the bot otherwise.
  *

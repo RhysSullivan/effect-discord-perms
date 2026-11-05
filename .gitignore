@@ -5,4 +5,3 @@ node_modules/
 .scratch/
 .lab-state.json
 .lab-state.json.tmp
-.budget/

@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   ceilingProblems,
-  declarationsProblem,
-  libraryRegressions,
+  consumerEntryProblem,
   parseExtendedDiagnostics,
   perCommandCost,
   perCommandRegressions,
@@ -92,36 +91,16 @@ describe("referenceBotRegressions", () => {
   })
 })
 
-describe("libraryRegressions", () => {
-  const baseline = stats({ types: 70_000, instantiations: 260_000, checkMs: 350 })
+describe("consumerEntryProblem", () => {
+  const entry = "/repo/src/index.ts"
 
-  it("holds the library to the reference bot's gates, with its own name, and no ceiling", () => {
-    expect(libraryRegressions(stats({ types: 71_400, instantiations: 265_200, checkMs: 550 }), baseline)).toEqual([])
-    expect(libraryRegressions(stats({ types: 71_401, instantiations: 265_201, checkMs: 551 }), baseline)).toEqual([
-      "library instantiations 260000 -> 265201 (+2.0%, tolerance 2%)",
-      "library types 70000 -> 71401 (+2.0%, tolerance 2%)",
-      "library check time 350 -> 551 ms (limit 550 ms)"
-    ])
-  })
-})
-
-describe("declarationsProblem", () => {
-  const source = "/repo/src/index.ts"
-  const declared = "/repo/.budget/declarations/src/index.d.ts"
-
-  it("accepts a program that reads the library through its declarations, whatever else it lists", () => {
-    expect(declarationsProblem(["/repo/node_modules/effect/dist/index.d.ts", `${declared}`, "/repo/src/config/Credentials.ts", ""], source, declared)).toBeUndefined()
+  it("accepts a program that reaches the package's entry point, whatever else it lists", () => {
+    expect(consumerEntryProblem(["/repo/node_modules/effect/dist/index.d.ts", ` ${entry}`, "/repo/src/config/Credentials.ts", ""], entry)).toBeUndefined()
   })
 
-  it("rejects a program that checks the library's source (a paths mapping that fell back to the package's exports)", () => {
-    expect(declarationsProblem([declared, source], source, declared)).toBe(
-      "the reference bot's program includes the library's source barrel /repo/src/index.ts; it must import the declarations"
-    )
-  })
-
-  it("rejects a program without the emitted declarations", () => {
-    expect(declarationsProblem(["/repo/examples/reference-bot/bot.ts"], source, declared)).toBe(
-      "the reference bot's program does not include the emitted declarations /repo/.budget/declarations/src/index.d.ts"
+  it("rejects a program that reaches the library some other way (a paths mapping to declarations the package does not ship)", () => {
+    expect(consumerEntryProblem(["/repo/examples/reference-bot/bot.ts", "/repo/.budget/declarations/src/index.d.ts"], entry)).toBe(
+      "the reference bot's program does not include the package's entry point /repo/src/index.ts (package.json exports \".\"); it must import effect-discord-perms by name, with no paths mapping, as a consumer does"
     )
   })
 })

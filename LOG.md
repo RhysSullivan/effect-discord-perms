@@ -9,6 +9,31 @@ milestone appends its entries.
 
 ## Waiting for Rhys
 
+- **The compile budget: the reference bot is over two hard ceilings (M10, after the M10 verifier; a decision, and it
+  keeps `verify:offline` red).** Compiled as a consumer of this package compiles it (it imports `effect-discord-perms`
+  by name, and the package's `exports` point at `src/index.ts`, so the library's implementation is checked with it),
+  the reference bot costs **76,573 types and 275,255 instantiations** (about 360 ms), above the hard ceilings of 60,000
+  and 250,000 (DESIGN §5.4, "never raised"; check time is within its 1,000 ms). `bun run budget` fails on exactly those
+  two lines, so `bun run verify:offline` fails at its last step; every earlier step passes. The bot's own code is about
+  3.7k types and 11k instantiations; the rest is the library (its barrel alone about 72.9k and 264k; M9 found `Bot`
+  alone at 66.9k). The ceilings were set with a library in the program (the design's example bot, 34,652 types,
+  compiled the prototype's source), and the library grew past them as the runtime was built (M5 to M9). To pass, the
+  bot's program must lose about 16,600 types (22%) and 25,300 instantiations (9%). Three ways out, each Rhys's call:
+  1. **Ship declarations and measure through them** (what M10 first did without shipping them, now a proposal): a build
+     step that emits `.d.ts` files, a `types` condition in the package's `exports` pointing at them, the budget project
+     resolving the package through that condition as a consumer does (not a private `paths` mapping), and the library's
+     own check as a budget row with an absolute bound of its own. Measured at `656aa0d`: against emitted declarations
+     the bot costs 12,541 types and 28,926 instantiations (about 35 ms); the library's own check, 72,904 and 264,000.
+  2. **Cut the library's compile cost** without weakening its types. Where it goes (each module with what it imports,
+     types and instantiations, `--checkers 1`): the error classes 26.7k and 108k (the 57 generated `Missing*` classes
+     16.2k and 62k; each `Schema.TaggedError` class instantiates Effect's schema class types, and `effect`'s
+     `schema.d.ts` declares 16.2k of the barrel's 72.9k types), `channels/Ops.ts` 59.3k and 222k, `gateway/Events.ts`
+     62.5k and 234k, `bot/Bot.ts` 67.0k and 244k. Not started: a performance project across the error module and the
+     runtime with an uncertain outcome.
+  3. **Raise the ceilings**, which the design does not allow without this decision.
+
+  Until one is chosen, the Done criterion "a reference bot with no `orDie` that compiles within budget" is not met.
+
 - **The phase-3 checklist (M9; never run by an agent alone).** It shows the eight phase-3 rules' behaviour live and
   answers open question 8 (whether `app_permissions` agrees with the guild state, item `app-permissions`), and Q-17,
   Q-18 and Q-22 below, whose rule parts `verify:live` prints as unmet Done criteria until it is done or Rhys decides
@@ -1453,28 +1478,27 @@ the same commit.
   66,891, above the reference bot's hard ceiling of 60,000 types (§5.4), so M10's bot will meet that ceiling whatever
   its handlers cost; the ceiling is not raised here.
 
-- **M10: the reference bot is compiled against the library's declarations, and the library is a budget row of its
-  own** (§5.4 updated, §1.2 and §6 M10 too). The design measured `examples/reference-bot/tsconfig.json` without saying
-  how the bot reaches the library; through the source, the project checks the library's whole implementation, which
-  M9 found above the 60,000-type ceiling on its own. Measured on the final bot: against the source, 76,573 types,
-  275,255 instantiations and 376 ms, over two hard ceilings (the library's barrel alone: 72,904 types, 264,000
-  instantiations); the bot's own code adds about 3.7k types and 11k instantiations to that. A user never pays for that
-  check: a program that imports a library reads its declarations, which `skipLibCheck` (on in every project here, as
-  in nearly every TypeScript project) leaves unchecked except for the types the program reaches. So the bot now
-  imports the package by name (`effect-discord-perms`, through the package's new `exports`, `"."` to `src/index.ts`),
-  its budget project maps the name with `paths` to declarations that `examples/reference-bot/tsconfig.declarations.json`
-  emits afresh on each run into the git-ignored `.budget/declarations/`, and the budget fails if the bot's program
-  lists `src/index.ts` (a mapping that stopped resolving falls back to the package's `exports`, the source, and would
-  measure something else; checked by breaking the mapping: `the reference bot's program includes the library's source
-  barrel ...`). The bot against the declarations: 12,541 types, 28,926 instantiations, 35 ms, the committed baseline,
-  far below the unchanged ceilings. To keep the library's implementation gated, which the reference bot alone would
-  have done through the source, the emitting run (the library checked from its barrel) is a new row, `library`:
-  72,904 types, 264,000 instantiations, 351 ms, under the same +2% and 1.5 x + 25 ms regression gates and no ceiling,
-  since the ceilings bound what a user's program costs. Nothing that was gated before is ungated: before M10 only the
-  per-command row existed, a difference of two probes that both compile the library's source, so the library's cost
-  cancelled out of it. The per-command row's baseline is unchanged (7,624 types and 43,245 instantiations; `--update`
-  wrote the measured 7,636 and 43,296, the M9 verifier's `defer` change, and I put M9's values back rather than move a
-  baseline M10 did not change).
+- **M10: the reference bot was compiled against emitted declarations; reverted after the M10 verifier, so the budget
+  now fails** (§5.4 updated, §1.2 and §6 M10 too). M10 first mapped `effect-discord-perms` in the bot's budget project
+  with `paths` to declarations emitted afresh on each run into a git-ignored `.budget/` (12,541 types, 28,926
+  instantiations, 35 ms), and held the library's own check (72,904, 264,000, 351 ms) to +2% regression gates with no
+  ceiling, on the argument that a user's program reads a library's declarations. The M10 verifier showed this loosened
+  the budget: no consumer of this package gets those declarations (its `exports` point at `src/index.ts` and nothing
+  builds or ships `.d.ts` files; an outside project linking the package resolved it to 56 files under `src/` and cost
+  75,509 types and 272,295 instantiations), and the ceilings were set with a library in the program (the design's
+  example bot, 34,652 types, compiled the prototype's source; the error module alone was 25,994). So the result was
+  reported as a pass that it was not. Reverted: the budget project has no `paths`; the bot reaches the library through
+  the package's `exports`, as a consumer does, and `scripts/budget.ts` fails if the bot's program does not include
+  that entry point (checked by mapping the package to emitted declarations again: `the reference bot's program does
+  not include the package's entry point .../src/index.ts (package.json exports "."); it must import
+  effect-discord-perms by name, with no paths mapping, as a consumer does`). `tsconfig.declarations.json`, the
+  `library` row and the `.budget/` ignore entry are gone. Measured: 76,573 types, 275,255 instantiations, 362 ms, and
+  `bun run budget` fails on the Types and Instantiations ceilings, which stay where they are; the decision is under
+  "Waiting for Rhys", with the declarations measurement as one proposal. The baseline's reference-bot row records that
+  measurement, written by hand because `--update` never writes a baseline over a ceiling (the regression gates matter
+  again once the ceilings pass). The per-command row's baseline is unchanged (7,624 types and 43,245 instantiations;
+  `--update` wrote the measured 7,636 and 43,296, the M9 verifier's `defer` change, and I put M9's values back rather
+  than move a baseline M10 did not change).
 - **M10: the reference bot is two files** (§1.2 updated): `examples/reference-bot/bot.ts`, the bot as a user writes it
   (it imports only the package), and `main.ts`, the entry point, which reads the subject's token through
   `config/Credentials.ts` (the live lock first, §4.3, §5.6), a repository module that is not public API. The budget

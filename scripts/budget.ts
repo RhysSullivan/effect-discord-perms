@@ -4,14 +4,13 @@
  *   bun run budget               measure every budget project and compare with the committed baseline
  *   bun run budget -- --update   rewrite the baseline (review the diff; verify:offline never passes it)
  *
- * Three rows, each present once its projects exist:
+ * Two rows, each present once its projects exist:
  *
- * - the reference bot, `examples/reference-bot/tsconfig.json` (built in M10), compiled as a user compiles it: against
- *   the library's declarations, which `examples/reference-bot/tsconfig.declarations.json` emits afresh into
- *   `.budget/declarations/` (git-ignored) before it is measured, with `skipLibCheck` as in every
- *   project here. Hard ceilings, +2% on Types and Instantiations, check time at most 1.5 x baseline + 25 ms;
- * - the library: the emitting run itself, which checks the library from its barrel. The reference bot's gates
- *   without the ceilings, which are for a user's program, so the library's implementation cannot grow unnoticed;
+ * - the reference bot, `examples/reference-bot/tsconfig.json` (built in M10), compiled as a consumer of this package
+ *   compiles it: it imports `effect-discord-perms` by name, which resolves through the package's own `exports` (today
+ *   `"."` is `src/index.ts`, the source), so the library's implementation is checked with the bot. The script fails if
+ *   the bot's program does not include that entry point, so a private `paths` mapping cannot change what is measured.
+ *   Hard ceilings, +2% on Types and Instantiations, check time at most 1.5 x baseline + 25 ms;
  * - the per-command row: `examples/command-probe/tsconfig.none.json` (no commands) and
  *   `examples/command-probe/tsconfig.commands.json` (20 commands of 25 options with handlers, built with the
  *   command API in M8); their difference may grow by at most 2%.
@@ -26,8 +25,7 @@ import { Schema } from "effect"
 import {
   Baseline,
   ceilingProblems,
-  declarationsProblem,
-  libraryRegressions,
+  consumerEntryProblem,
   type PerCommandCost,
   parseExtendedDiagnostics,
   perCommandCost,
@@ -49,14 +47,11 @@ if (unknownArgs.length > 0) {
 
 const projects = {
   referenceBot: "examples/reference-bot/tsconfig.json",
-  declarations: "examples/reference-bot/tsconfig.declarations.json",
   probeNone: "examples/command-probe/tsconfig.none.json",
   probeCommands: "examples/command-probe/tsconfig.commands.json"
 } as const
-/** Where `projects.declarations` emits, and the barrel the reference bot's `paths` maps the package to. */
-const declarationsDir = path.join(repoRoot, ".budget/declarations")
-const declaredBarrel = path.join(declarationsDir, "src/index.d.ts")
-const sourceBarrel = path.join(repoRoot, "src/index.ts")
+/** The slice of `package.json` that says where a consumer importing the package by name lands. */
+const PackageExports = Schema.Struct({ exports: Schema.Struct({ ".": Schema.String }) })
 const baselinePath = path.join(repoRoot, "examples/reference-bot/budget.json")
 const exists = (relative: string): boolean => fs.existsSync(path.join(repoRoot, relative))
 
@@ -87,33 +82,22 @@ if (baseline !== undefined && baseline.typescript !== version && !update) {
   problems.push(`the baseline was recorded with TypeScript ${baseline.typescript}, the pinned compiler is ${version}; counts are not comparable, re-baseline deliberately`)
 }
 
-// The library row (the emit of its declarations) and the reference bot row (compiled against them).
+// The reference bot row.
 let referenceBot: ProjectStats | undefined
-let library: ProjectStats | undefined
 if (exists(projects.referenceBot)) {
-  if (!exists(projects.declarations)) {
-    problems.push(`the reference bot compiles against the library's declarations, but ${projects.declarations} does not exist`)
-  } else {
-    // a fresh emit: the declaration of a module since removed must not be measured
-    fs.rmSync(declarationsDir, { recursive: true, force: true })
-    library = measure(projects.declarations)
-    if (library !== undefined && !update) {
-      if (baseline?.library === undefined) problems.push("the library has no baseline row; run with -- --update and commit it")
-      else problems.push(...libraryRegressions(library, baseline.library))
-    }
-    const consumed = declarationsProblem(runTsc(["-p", projects.referenceBot, "--listFilesOnly", "--pretty", "false"]).stdout.split("\n"), sourceBarrel, declaredBarrel)
-    if (library !== undefined && consumed !== undefined) problems.push(consumed)
-    referenceBot = library === undefined || consumed !== undefined ? undefined : measure(projects.referenceBot)
-    if (referenceBot !== undefined) {
-      problems.push(...ceilingProblems(referenceBot))
-      if (!update) {
-        if (baseline?.referenceBot === undefined) problems.push("the reference bot has no baseline row; run with -- --update and commit it")
-        else problems.push(...referenceBotRegressions(referenceBot, baseline.referenceBot))
-      }
+  const entry = path.join(repoRoot, Schema.decodeUnknownSync(Schema.fromJsonString(PackageExports))(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).exports["."])
+  const reached = consumerEntryProblem(runTsc(["-p", projects.referenceBot, "--listFilesOnly", "--pretty", "false"]).stdout.split("\n"), entry)
+  if (reached !== undefined) problems.push(reached)
+  else referenceBot = measure(projects.referenceBot)
+  if (referenceBot !== undefined) {
+    problems.push(...ceilingProblems(referenceBot))
+    if (!update) {
+      if (baseline?.referenceBot === undefined) problems.push("the reference bot has no baseline row; run with -- --update and commit it")
+      else problems.push(...referenceBotRegressions(referenceBot, baseline.referenceBot))
     }
   }
-} else if (baseline?.referenceBot !== undefined || baseline?.library !== undefined) {
-  problems.push(`the baseline has a reference bot or library row, but ${projects.referenceBot} does not exist`)
+} else if (baseline?.referenceBot !== undefined) {
+  problems.push(`the baseline has a reference bot row, but ${projects.referenceBot} does not exist`)
 }
 
 // The per-command row.
@@ -155,7 +139,6 @@ if (update) {
   const next: Baseline = {
     typescript: version,
     ...(referenceBot === undefined ? {} : { referenceBot }),
-    ...(library === undefined ? {} : { library }),
     ...(perCommand === undefined ? {} : { perCommand })
   }
   fs.mkdirSync(path.dirname(baselinePath), { recursive: true })

@@ -295,9 +295,8 @@ examples/
   reference-bot/main.ts          the reference bot: no orDie or die on library errors (D-done criteria) (M10: the entry
                                  point, which reads the subject's token through config/Credentials.ts, behind the lock)
   reference-bot/bot.ts           (M10) the bot itself, a user's code importing only the package `effect-discord-perms`
-  reference-bot/tsconfig.json    budget project (M10: the bot against the library's emitted declarations, §5.4)
-  reference-bot/tsconfig.declarations.json  (M10) emits the library's declarations into .budget/ (git-ignored); the
-                                 library row of the budget
+  reference-bot/tsconfig.json    budget project (M10: the bot as a consumer of the package compiles it, through the
+                                 package's exports, so with the library's source, §5.4)
   reference-bot/budget.json      committed baseline, with a per-command row (M8: the per-command row first)
   command-probe/                 (M8) the per-command row's two projects: none.ts and commands.ts (20 x 25 options)
 fixtures/
@@ -2292,20 +2291,23 @@ const ch: MessageChannel
   command about 2.2k, close to linear. Revision 1's 20 × 25 probe cost 227,674
   (`[rt:budget/results.txt]`).
 - M10 records the reference-bot baseline once that bot exists.
-- (M10, as built) **The reference bot is compiled against the library's declarations**, as a user's program is: it
-  imports the package by name (`effect-discord-perms`, the package's own `exports`), and its budget project maps that
-  name with `paths` to the declarations `examples/reference-bot/tsconfig.declarations.json` emits afresh (into the
-  git-ignored `.budget/declarations/`) on every budget run, with `skipLibCheck` as everywhere. `scripts/budget.ts`
-  fails if the bot's program lists `src/index.ts` instead of the emitted barrel, so a mapping that stopped resolving
-  cannot fall back to the source unnoticed. Compiled against the source, the bot's project checked the library's whole
-  implementation: 76,573 types and 275,255 instantiations, above two hard ceilings before any handler (the library's
-  barrel alone is 72,904 and 264,000; M9's finding). Against the declarations: **12,541 types, 28,926 instantiations,
-  about 35 ms**, the baseline. The ceilings are unchanged.
-- (M10) **The library row.** So that the library's implementation cannot grow unnoticed now that the reference bot
-  does not check it, the emitting run itself (which checks the library from its barrel) is a third row of
-  `budget.json`, `library`: 72,904 types, 264,000 instantiations, about 350 ms, held to the regression gates (+2% on
-  counts, 1.5 x + 25 ms on check time) but not to the ceilings, which are for a user's program. The per-command row's
-  baseline is unchanged (M9's 7,624 and 43,245; M9's verifier moved the measured cost to 7,636 and 43,296, within it).
+- (M10, after the M10 verifier) **The reference bot is measured as a consumer of this package compiles it, and it is
+  over two hard ceilings.** The bot imports the package by name (`effect-discord-perms`), which the package's own
+  `exports` (`"."` is `src/index.ts`) resolve to the source, so its project checks the library's implementation with
+  the bot, as the design's example-bot measurement above did with the prototype's. `scripts/budget.ts` fails if the
+  bot's program does not include that entry point, so a private `paths` mapping cannot change what is measured.
+  Measured: **76,573 types, 275,255 instantiations, about 360 ms**: above the Types ceiling (60,000) and the
+  Instantiations ceiling (250,000), within the check-time ceiling. The bot's own code is about 3.7k types and 11k
+  instantiations; the rest is the library (its barrel alone is about 72.9k and 264k, which M9 found above the type
+  ceiling). The ceilings are not raised, and `bun run budget` (so `verify:offline`, whose last step it is) fails on
+  exactly these two lines. The baseline row records this measurement; it was written by hand, because `--update`
+  never writes a baseline over a ceiling. The way out (ship declarations and measure through them, cut the library's
+  compile cost by about a fifth, or raise the ceilings) is Rhys's decision (LOG.md, "Waiting for Rhys").
+- (M10, reverted) M10 first compiled the bot against declarations emitted into a git-ignored directory, mapped with
+  `paths` (12,541 types, 28,926 instantiations), and gated the library's own check by regression only. No consumer
+  of this package gets those declarations (nothing builds or ships them), so that measured less than any user pays,
+  and it loosened the budget; it is now one of the options above, as a proposal. The per-command row's baseline is
+  unchanged (M9's 7,624 and 43,245; M9's verifier moved the measured cost to 7,636 and 43,296, within it).
 - (M8) The per-command row's baseline is committed: 20 commands of 25 options cost 7,245 types and
   42,102 instantiations over the probe without commands (362.3 types and 2,105.1 instantiations a
   command, against the design's estimate of about 2.2k). Until M9 a probe command's handler is a
@@ -3547,10 +3549,13 @@ Live milestones run serially, under the lock.
 
 - (M10, as built) Beyond the listed scope: the bot split into `bot.ts` (the bot, importing only the package) and
   `main.ts` (the entry point through `Credentials`); the package's `exports` (`"."` is `src/index.ts`), so the bot
-  imports `effect-discord-perms` by name; the reference bot compiled against the library's declarations, and the
-  budget's library row (§5.4); `test/unit/reference-bot.test.ts` (the bot over the real bot build, a fake Discord and a
+  imports `effect-discord-perms` by name, and the budget checks that the bot's program reaches the library through
+  that entry point (§5.4); `test/unit/reference-bot.test.ts` (the bot over the real bot build, a fake Discord and a
   fake gateway), `test/types/pass/reference-bot.ts` and `test/hover/reference-bot.ts`; and the M9 verifier's four
   leftover minor findings (LOG.md).
+- (M10, exit) Not met: `bun run budget` fails on the Types and Instantiations ceilings (§5.4), and so does
+  `bun run verify:offline` at its last step; every earlier step passes. The decision is Rhys's (LOG.md, "Waiting for
+  Rhys").
 
 ---
 

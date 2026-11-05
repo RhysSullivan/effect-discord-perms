@@ -33,17 +33,13 @@ export interface PerCommandCost extends Schema.Schema.Type<typeof PerCommandCost
 /**
  * The committed baseline, `examples/reference-bot/budget.json`. A row is absent until its projects exist.
  *
- * - `referenceBot`: the reference bot compiled as a user compiles it, against the library's emitted declarations
- *   (M10, DESIGN §5.4): what its code costs, held to the hard ceilings and the regression gates;
- * - `library`: the library's own check from its barrel (the same compiler run that emits those declarations), held to
- *   the regression gates only, so the library's implementation cannot grow unnoticed now that the reference bot no
- *   longer checks it (M10);
+ * - `referenceBot`: the reference bot as a consumer of this package compiles it, with the library it imports (DESIGN
+ *   §5.4), held to the hard ceilings and the regression gates;
  * - `perCommand`: the per-command row.
  */
 export const Baseline = Schema.Struct({
   typescript: Schema.String,
   referenceBot: Schema.optionalKey(ProjectStats),
-  library: Schema.optionalKey(ProjectStats),
   perCommand: Schema.optionalKey(PerCommandCost)
 })
 export interface Baseline extends Schema.Schema.Type<typeof Baseline> {}
@@ -157,9 +153,6 @@ const projectRegressions = (name: string, current: ProjectStats, baseline: Proje
 /** The reference bot's regressions against its baseline row. */
 export const referenceBotRegressions = (current: ProjectStats, baseline: ProjectStats): ReadonlyArray<string> => projectRegressions("reference bot", current, baseline)
 
-/** The library's regressions against its baseline row (the same gates as the reference bot's; no hard ceilings). */
-export const libraryRegressions = (current: ProjectStats, baseline: ProjectStats): ReadonlyArray<string> => projectRegressions("library", current, baseline)
-
 /** The per-command cost from the two probes, or why it is not meaningful. */
 export const perCommandCost = (none: ProjectStats, withCommands: ProjectStats): PerCommandCost | string => {
   const types = withCommands.types - none.types
@@ -171,16 +164,14 @@ export const perCommandCost = (none: ProjectStats, withCommands: ProjectStats): 
 }
 
 /**
- * Whether the reference bot's program (its `--listFilesOnly` lines) consumes the library through the emitted
- * declarations and not through its source: a `paths` mapping that stopped resolving would silently fall back to the
- * package's own `exports`, the source, and measure something else. `undefined` when it does; otherwise the problem.
+ * Whether the reference bot's program (its `--listFilesOnly` lines) reaches the library the way a consumer of this
+ * package does: through the package's own entry point, `entry` (`exports["."]` in `package.json`), and not through a
+ * private `paths` mapping to something the package does not ship. `undefined` when it does; otherwise the problem.
  */
-export const declarationsProblem = (files: ReadonlyArray<string>, sourceBarrel: string, declaredBarrel: string): string | undefined => {
-  const listed = new Set(files.map((file) => file.trim()))
-  if (listed.has(sourceBarrel)) return `the reference bot's program includes the library's source barrel ${sourceBarrel}; it must import the declarations`
-  if (!listed.has(declaredBarrel)) return `the reference bot's program does not include the emitted declarations ${declaredBarrel}`
-  return undefined
-}
+export const consumerEntryProblem = (files: ReadonlyArray<string>, entry: string): string | undefined =>
+  files.some((file) => file.trim() === entry)
+    ? undefined
+    : `the reference bot's program does not include the package's entry point ${entry} (package.json exports "."); it must import effect-discord-perms by name, with no paths mapping, as a consumer does`
 
 /** The per-command row's regressions against its baseline row. */
 export const perCommandRegressions = (current: PerCommandCost, baseline: PerCommandCost): ReadonlyArray<string> => {

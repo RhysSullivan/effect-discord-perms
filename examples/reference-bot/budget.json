@@ -1,18 +1,11 @@
 {
   "typescript": "7.0.2",
   "referenceBot": {
-    "files": 634,
-    "types": 12541,
-    "instantiations": 28926,
-    "memoryKb": 156629,
-    "checkMs": 36
-  },
-  "library": {
-    "files": 669,
-    "types": 72904,
-    "instantiations": 264000,
-    "memoryKb": 232509,
-    "checkMs": 351
+    "files": 673,
+    "types": 76573,
+    "instantiations": 275255,
+    "memoryKb": 234392,
+    "checkMs": 362
   },
   "perCommand": {
     "commands": 20,
