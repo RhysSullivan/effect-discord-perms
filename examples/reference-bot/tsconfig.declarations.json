@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "noEmit": false, "declaration": true, "emitDeclarationOnly": true, "rootDir": "../..", "outDir": "../../.budget/declarations" },
+  "include": ["../../src/index.ts"],
+  "exclude": []
+}

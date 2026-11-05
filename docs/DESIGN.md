@@ -292,8 +292,12 @@ scripts/
                                  hover + lsp (§5.3), budget (§5.4), rules (§5.5), genErrors (§2.2); unit-tested in
                                  test/unit
 examples/
-  reference-bot/main.ts          the reference bot: no orDie or die on library errors (D-done criteria)
-  reference-bot/tsconfig.json    budget project
+  reference-bot/main.ts          the reference bot: no orDie or die on library errors (D-done criteria) (M10: the entry
+                                 point, which reads the subject's token through config/Credentials.ts, behind the lock)
+  reference-bot/bot.ts           (M10) the bot itself, a user's code importing only the package `effect-discord-perms`
+  reference-bot/tsconfig.json    budget project (M10: the bot against the library's emitted declarations, §5.4)
+  reference-bot/tsconfig.declarations.json  (M10) emits the library's declarations into .budget/ (git-ignored); the
+                                 library row of the budget
   reference-bot/budget.json      committed baseline, with a per-command row (M8: the per-command row first)
   command-probe/                 (M8) the per-command row's two projects: none.ts and commands.ts (20 x 25 options)
 fixtures/
@@ -1250,7 +1254,11 @@ export const Main = Handlers.pipe(Layer.provide(Bot.layer(bot, { token: Config.R
 Dropping the `payload` catch is rejected with `UnhandledErrors<"payload">`
 (`src/fail/example-leak.ts`). The real reference bot is
 `examples/reference-bot/main.ts`. It must not use `orDie`, `die` or
-`dieMessage` on library errors.
+`dieMessage` on library errors. (M10, as built: the bot is `examples/reference-bot/bot.ts`, a poll bot importing only
+the package, and `main.ts` its entry point through `config/Credentials.ts`. Its `/poll` catches `["permission",
+"state"]` before `"payload"`: `MissingEmbedLinks` is in both, and the first catch that matches answers it, so the order
+decides which answer the user gets; `test/unit/reference-bot.test.ts` found the reverse order telling the user the
+question was too long.)
 
 ### 2.12 Type-design rules for implementers
 
@@ -2284,6 +2292,20 @@ const ch: MessageChannel
   command about 2.2k, close to linear. Revision 1's 20 × 25 probe cost 227,674
   (`[rt:budget/results.txt]`).
 - M10 records the reference-bot baseline once that bot exists.
+- (M10, as built) **The reference bot is compiled against the library's declarations**, as a user's program is: it
+  imports the package by name (`effect-discord-perms`, the package's own `exports`), and its budget project maps that
+  name with `paths` to the declarations `examples/reference-bot/tsconfig.declarations.json` emits afresh (into the
+  git-ignored `.budget/declarations/`) on every budget run, with `skipLibCheck` as everywhere. `scripts/budget.ts`
+  fails if the bot's program lists `src/index.ts` instead of the emitted barrel, so a mapping that stopped resolving
+  cannot fall back to the source unnoticed. Compiled against the source, the bot's project checked the library's whole
+  implementation: 76,573 types and 275,255 instantiations, above two hard ceilings before any handler (the library's
+  barrel alone is 72,904 and 264,000; M9's finding). Against the declarations: **12,541 types, 28,926 instantiations,
+  about 35 ms**, the baseline. The ceilings are unchanged.
+- (M10) **The library row.** So that the library's implementation cannot grow unnoticed now that the reference bot
+  does not check it, the emitting run itself (which checks the library from its barrel) is a third row of
+  `budget.json`, `library`: 72,904 types, 264,000 instantiations, about 350 ms, held to the regression gates (+2% on
+  counts, 1.5 x + 25 ms on check time) but not to the ceilings, which are for a user's program. The per-command row's
+  baseline is unchanged (M9's 7,624 and 43,245; M9's verifier moved the measured cost to 7,636 and 43,296, within it).
 - (M8) The per-command row's baseline is committed: 20 commands of 25 options cost 7,245 types and
   42,102 instantiations over the probe without commands (362.3 types and 2,105.1 instantiations a
   command, against the design's estimate of about 2.2k). Until M9 a probe command's handler is a
@@ -3522,6 +3544,13 @@ Live milestones run serially, under the lock.
   - `bun run budget` is green against the committed baseline;
   - `bun run verify:offline`, then `bun run verify:live` in a fresh process
     whose table equals the committed one (`--compare`), both exit 0.
+
+- (M10, as built) Beyond the listed scope: the bot split into `bot.ts` (the bot, importing only the package) and
+  `main.ts` (the entry point through `Credentials`); the package's `exports` (`"."` is `src/index.ts`), so the bot
+  imports `effect-discord-perms` by name; the reference bot compiled against the library's declarations, and the
+  budget's library row (§5.4); `test/unit/reference-bot.test.ts` (the bot over the real bot build, a fake Discord and a
+  fake gateway), `test/types/pass/reference-bot.ts` and `test/hover/reference-bot.ts`; and the M9 verifier's four
+  leftover minor findings (LOG.md).
 
 ---
 

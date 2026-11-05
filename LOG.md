@@ -1453,6 +1453,34 @@ the same commit.
   66,891, above the reference bot's hard ceiling of 60,000 types (§5.4), so M10's bot will meet that ceiling whatever
   its handlers cost; the ceiling is not raised here.
 
+- **M10: the reference bot is compiled against the library's declarations, and the library is a budget row of its
+  own** (§5.4 updated, §1.2 and §6 M10 too). The design measured `examples/reference-bot/tsconfig.json` without saying
+  how the bot reaches the library; through the source, the project checks the library's whole implementation, which
+  M9 found above the 60,000-type ceiling on its own. Measured on the final bot: against the source, 76,573 types,
+  275,255 instantiations and 376 ms, over two hard ceilings (the library's barrel alone: 72,904 types, 264,000
+  instantiations); the bot's own code adds about 3.7k types and 11k instantiations to that. A user never pays for that
+  check: a program that imports a library reads its declarations, which `skipLibCheck` (on in every project here, as
+  in nearly every TypeScript project) leaves unchecked except for the types the program reaches. So the bot now
+  imports the package by name (`effect-discord-perms`, through the package's new `exports`, `"."` to `src/index.ts`),
+  its budget project maps the name with `paths` to declarations that `examples/reference-bot/tsconfig.declarations.json`
+  emits afresh on each run into the git-ignored `.budget/declarations/`, and the budget fails if the bot's program
+  lists `src/index.ts` (a mapping that stopped resolving falls back to the package's `exports`, the source, and would
+  measure something else; checked by breaking the mapping: `the reference bot's program includes the library's source
+  barrel ...`). The bot against the declarations: 12,541 types, 28,926 instantiations, 35 ms, the committed baseline,
+  far below the unchanged ceilings. To keep the library's implementation gated, which the reference bot alone would
+  have done through the source, the emitting run (the library checked from its barrel) is a new row, `library`:
+  72,904 types, 264,000 instantiations, 351 ms, under the same +2% and 1.5 x + 25 ms regression gates and no ceiling,
+  since the ceilings bound what a user's program costs. Nothing that was gated before is ungated: before M10 only the
+  per-command row existed, a difference of two probes that both compile the library's source, so the library's cost
+  cancelled out of it. The per-command row's baseline is unchanged (7,624 types and 43,245 instantiations; `--update`
+  wrote the measured 7,636 and 43,296, the M9 verifier's `defer` change, and I put M9's values back rather than move a
+  baseline M10 did not change).
+- **M10: the reference bot is two files** (§1.2 updated): `examples/reference-bot/bot.ts`, the bot as a user writes it
+  (it imports only the package), and `main.ts`, the entry point, which reads the subject's token through
+  `config/Credentials.ts` (the live lock first, §4.3, §5.6), a repository module that is not public API. The budget
+  project compiles both; `Credentials.ts` and what it imports (`Snowflake.ts`, `harness/Lock.ts`) are checked from
+  their source there, which is their whole cost.
+
 ## Escalated rules
 
 Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria.

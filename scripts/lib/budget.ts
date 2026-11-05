@@ -30,10 +30,20 @@ export const PerCommandCost = Schema.Struct({
 })
 export interface PerCommandCost extends Schema.Schema.Type<typeof PerCommandCost> {}
 
-/** The committed baseline, `examples/reference-bot/budget.json`. A row is absent until its projects exist. */
+/**
+ * The committed baseline, `examples/reference-bot/budget.json`. A row is absent until its projects exist.
+ *
+ * - `referenceBot`: the reference bot compiled as a user compiles it, against the library's emitted declarations
+ *   (M10, DESIGN §5.4): what its code costs, held to the hard ceilings and the regression gates;
+ * - `library`: the library's own check from its barrel (the same compiler run that emits those declarations), held to
+ *   the regression gates only, so the library's implementation cannot grow unnoticed now that the reference bot no
+ *   longer checks it (M10);
+ * - `perCommand`: the per-command row.
+ */
 export const Baseline = Schema.Struct({
   typescript: Schema.String,
   referenceBot: Schema.optionalKey(ProjectStats),
+  library: Schema.optionalKey(ProjectStats),
   perCommand: Schema.optionalKey(PerCommandCost)
 })
 export interface Baseline extends Schema.Schema.Type<typeof Baseline> {}
@@ -134,15 +144,21 @@ const growth = (name: string, now: number, then: number): ReadonlyArray<string> 
     ? [`${name} ${then} -> ${now} (${then === 0 ? "from zero" : `+${(((now - then) / then) * 100).toFixed(1)}%`}, tolerance ${tolerance.counts * 100}%)`]
     : []
 
-/** The reference bot's regressions against its baseline row. */
-export const referenceBotRegressions = (current: ProjectStats, baseline: ProjectStats): ReadonlyArray<string> => {
+/** One project row's regressions against its baseline row: +2% on counts, check time at most 1.5 x baseline + 25 ms. */
+const projectRegressions = (name: string, current: ProjectStats, baseline: ProjectStats): ReadonlyArray<string> => {
   const checkLimit = baseline.checkMs * tolerance.checkFactor + tolerance.checkSlackMs
   return [
-    ...growth("reference bot instantiations", current.instantiations, baseline.instantiations),
-    ...growth("reference bot types", current.types, baseline.types),
-    ...(current.checkMs > checkLimit ? [`reference bot check time ${baseline.checkMs} -> ${current.checkMs} ms (limit ${checkLimit} ms)`] : [])
+    ...growth(`${name} instantiations`, current.instantiations, baseline.instantiations),
+    ...growth(`${name} types`, current.types, baseline.types),
+    ...(current.checkMs > checkLimit ? [`${name} check time ${baseline.checkMs} -> ${current.checkMs} ms (limit ${checkLimit} ms)`] : [])
   ]
 }
+
+/** The reference bot's regressions against its baseline row. */
+export const referenceBotRegressions = (current: ProjectStats, baseline: ProjectStats): ReadonlyArray<string> => projectRegressions("reference bot", current, baseline)
+
+/** The library's regressions against its baseline row (the same gates as the reference bot's; no hard ceilings). */
+export const libraryRegressions = (current: ProjectStats, baseline: ProjectStats): ReadonlyArray<string> => projectRegressions("library", current, baseline)
 
 /** The per-command cost from the two probes, or why it is not meaningful. */
 export const perCommandCost = (none: ProjectStats, withCommands: ProjectStats): PerCommandCost | string => {
@@ -152,6 +168,18 @@ export const perCommandCost = (none: ProjectStats, withCommands: ProjectStats): 
     return `the probe with ${commandProbe.commands} commands costs no more than the probe without (types ${types}, instantiations ${instantiations}); the probes are broken`
   }
   return { ...commandProbe, types, instantiations }
+}
+
+/**
+ * Whether the reference bot's program (its `--listFilesOnly` lines) consumes the library through the emitted
+ * declarations and not through its source: a `paths` mapping that stopped resolving would silently fall back to the
+ * package's own `exports`, the source, and measure something else. `undefined` when it does; otherwise the problem.
+ */
+export const declarationsProblem = (files: ReadonlyArray<string>, sourceBarrel: string, declaredBarrel: string): string | undefined => {
+  const listed = new Set(files.map((file) => file.trim()))
+  if (listed.has(sourceBarrel)) return `the reference bot's program includes the library's source barrel ${sourceBarrel}; it must import the declarations`
+  if (!listed.has(declaredBarrel)) return `the reference bot's program does not include the emitted declarations ${declaredBarrel}`
+  return undefined
 }
 
 /** The per-command row's regressions against its baseline row. */
