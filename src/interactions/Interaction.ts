@@ -29,13 +29,12 @@ import type { MessageChannel } from "../channels/Channel.ts"
 import type { ChatInputCommand } from "../commands/Command.ts"
 import type { ComponentRoute } from "../components/CustomId.ts"
 import type { PermissionErrors } from "../errors/Missing.generated.ts"
-import type { ContentTooLong, EmbedTooLarge, MessageEmpty } from "../errors/Payload.ts"
 import type { PermissionDeniedUnattributed } from "../errors/Permission.ts"
 import type { InteractionExpired } from "../errors/State.ts"
 import type { Transient } from "../errors/Transient.ts"
 import type { ActionRow, CustomId, Invalid } from "../payload/Components.ts"
 import type { EditArg, EditMessage, Embed, KnownKeys, NonEmpty } from "../payload/Message.ts"
-import type { EditMayEmpty, MayBeEmpty, MayBeTooLong, MayInclude } from "../payload/PayloadRules.ts"
+import type { ContentTooLongIn, EditEmbedTooLargeIn, EditMessageEmptyIn, EmbedTooLargeIn, MessageEmptyIn } from "../payload/PayloadRules.ts"
 import type { GuildId, UserId } from "../Snowflake.ts"
 
 // ---- payloads -------------------------------------------------------------------------------------------
@@ -163,9 +162,9 @@ export interface Answered {
     | PermissionDeniedUnattributed
     | InteractionExpired
     | Transient
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (true extends MayBeEmpty<P> ? MessageEmpty : never)
-    | (MayInclude<P, "embeds"> extends true ? EmbedTooLarge : never)
+    | ContentTooLongIn<P>
+    | MessageEmptyIn<P>
+    | EmbedTooLargeIn<P>
   >
   /** Edits the original response (`PATCH .../messages/@original`); the deferral's completion. */
   readonly editOriginal: <const P extends EditMessage>(
@@ -174,9 +173,9 @@ export interface Answered {
     Completed,
     | InteractionExpired
     | Transient
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (EditMayEmpty<P> extends true ? MessageEmpty : never)
-    | (P extends { readonly embeds: infer E } ? (E extends readonly [] ? never : EmbedTooLarge) : never)
+    | ContentTooLongIn<P>
+    | EditMessageEmptyIn<P>
+    | EditEmbedTooLargeIn<P>
   >
   /** Deletes the original response. */
   readonly deleteOriginal: () => Effect.Effect<void, InteractionExpired | Transient>
@@ -206,9 +205,9 @@ export interface Replies<M> {
     then?: (answered: Answered) => Handled<A2, E2, R2>
   ) => Effect.Effect<
     Response<R2>,
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (true extends MayBeEmpty<P> ? MessageEmpty : never)
-    | (MayInclude<P, "embeds"> extends true ? EmbedTooLarge : never)
+    | ContentTooLongIn<P>
+    | MessageEmptyIn<P>
+    | EmbedTooLargeIn<P>
   >
   /**
    * Defers (callback 5, EPHEMERAL as the mode fixes it); the continuation must complete the deferral. An `ephemeral`
@@ -227,9 +226,9 @@ export interface Updates {
     patch: EditArg<P>
   ) => Effect.Effect<
     Response<never>,
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (EditMayEmpty<P> extends true ? MessageEmpty : never)
-    | (P extends { readonly embeds: infer E } ? (E extends readonly [] ? never : EmbedTooLarge) : never)
+    | ContentTooLongIn<P>
+    | EditMessageEmptyIn<P>
+    | EditEmbedTooLargeIn<P>
   >
   /** Defers the update (callback 6); the continuation must complete it. */
   readonly deferUpdate: <A2, E2, R2>(then: (deferred: Answered) => HandledCompletion<A2, E2, R2>) => Effect.Effect<Response<R2>>

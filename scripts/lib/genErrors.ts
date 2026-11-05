@@ -26,8 +26,8 @@ export const payloadFlags: ReadonlyArray<string> = [
 ]
 
 /**
- * The same-tag subclasses (D5) that add a category to a generated class for some operations. They are written
- * in `src/errors/Variants.ts`; the generator lists them here so `ErrorCategories` covers every class that
+ * The same-tag variants (D5): for some operations, a generated class's tag with one more category. They are
+ * written in `src/errors/Variants.ts`; the generator lists them here so `ErrorCategories` covers every class that
  * `errorFor` can build.
  */
 export const variants: ReadonlyArray<{ readonly name: string; readonly flag: string; readonly adds: string }> = [
@@ -69,7 +69,7 @@ export const permissionFlagNames = (bits: Readonly<Record<string, bigint>>): Rea
   return kept
 }
 
-/** A flag's categories in the order passed to `withCategory`: always `permission`, then `access`, then `payload`. */
+/** A flag's categories in the order passed to `CategorizedError`: always `permission`, then `access`, then `payload`. */
 export const categoriesOf = (flag: string): ReadonlyArray<string> => [
   "permission",
   ...(accessFlags.includes(flag) ? ["access"] : []),
@@ -98,8 +98,7 @@ export const renderMissingModule = (flags: ReadonlyArray<string>): string => {
     " * Library code never builds these through `missing` directly: it uses `errorFor(op, flag, cause)` from",
     " * `src/permissions/Operations.ts`, which builds the D5 variant an operation promises.",
     " */",
-    'import { Schema } from "effect"',
-    'import { withCategory } from "./Category.ts"',
+    'import { CategorizedError } from "./Category.ts"',
     'import { ErrorCause } from "./Cause.ts"',
     "",
     `/** Every Discord permission flag name, sorted. The deprecated alias ${[...deprecatedAliases].join(", ")} is dropped (H-059). */`,
@@ -114,9 +113,9 @@ export const renderMissingModule = (flags: ReadonlyArray<string>): string => {
     const categories = categoriesOf(flag)
     lines.push(
       `/** The bot lacks the ${flag} permission for this operation. Categories: ${categories.join(", ")}. */`,
-      `export class Missing${flag} extends Schema.TaggedError<Missing${flag}>()(${quote(`Missing${flag}`)}, { cause: ErrorCause }).pipe(`,
-      `  withCategory(${categories.map(quote).join(", ")})`,
-      ") {",
+      `export class Missing${flag} extends CategorizedError<Missing${flag}>()(${quote(`Missing${flag}`)}, { cause: ErrorCause }, [`,
+      `  ${categories.map(quote).join(", ")}`,
+      "]) {",
       "  /** The missing flag. */",
       `  get flag(): ${quote(flag)} {`,
       `    return ${quote(flag)}`,

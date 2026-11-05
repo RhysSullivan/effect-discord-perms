@@ -8,8 +8,7 @@
  * Library code never builds these through `missing` directly: it uses `errorFor(op, flag, cause)` from
  * `src/permissions/Operations.ts`, which builds the D5 variant an operation promises.
  */
-import { Schema } from "effect"
-import { withCategory } from "./Category.ts"
+import { CategorizedError } from "./Category.ts"
 import { ErrorCause } from "./Cause.ts"
 
 /** Every Discord permission flag name, sorted. The deprecated alias ManageEmojisAndStickers is dropped (H-059). */
@@ -71,9 +70,9 @@ export const PermissionFlags = [
 export type PermissionFlag = (typeof PermissionFlags)[number]
 
 /** The bot lacks the AddReactions permission for this operation. Categories: permission. */
-export class MissingAddReactions extends Schema.TaggedError<MissingAddReactions>()("MissingAddReactions", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingAddReactions extends CategorizedError<MissingAddReactions>()("MissingAddReactions", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "AddReactions" {
     return "AddReactions"
@@ -84,9 +83,9 @@ export class MissingAddReactions extends Schema.TaggedError<MissingAddReactions>
 }
 
 /** The bot lacks the Administrator permission for this operation. Categories: permission. */
-export class MissingAdministrator extends Schema.TaggedError<MissingAdministrator>()("MissingAdministrator", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingAdministrator extends CategorizedError<MissingAdministrator>()("MissingAdministrator", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "Administrator" {
     return "Administrator"
@@ -97,9 +96,9 @@ export class MissingAdministrator extends Schema.TaggedError<MissingAdministrato
 }
 
 /** The bot lacks the AttachFiles permission for this operation. Categories: permission, payload. */
-export class MissingAttachFiles extends Schema.TaggedError<MissingAttachFiles>()("MissingAttachFiles", { cause: ErrorCause }).pipe(
-  withCategory("permission", "payload")
-) {
+export class MissingAttachFiles extends CategorizedError<MissingAttachFiles>()("MissingAttachFiles", { cause: ErrorCause }, [
+  "permission", "payload"
+]) {
   /** The missing flag. */
   get flag(): "AttachFiles" {
     return "AttachFiles"
@@ -110,9 +109,9 @@ export class MissingAttachFiles extends Schema.TaggedError<MissingAttachFiles>()
 }
 
 /** The bot lacks the BanMembers permission for this operation. Categories: permission. */
-export class MissingBanMembers extends Schema.TaggedError<MissingBanMembers>()("MissingBanMembers", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingBanMembers extends CategorizedError<MissingBanMembers>()("MissingBanMembers", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "BanMembers" {
     return "BanMembers"
@@ -123,9 +122,9 @@ export class MissingBanMembers extends Schema.TaggedError<MissingBanMembers>()("
 }
 
 /** The bot lacks the BypassSlowmode permission for this operation. Categories: permission. */
-export class MissingBypassSlowmode extends Schema.TaggedError<MissingBypassSlowmode>()("MissingBypassSlowmode", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingBypassSlowmode extends CategorizedError<MissingBypassSlowmode>()("MissingBypassSlowmode", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "BypassSlowmode" {
     return "BypassSlowmode"
@@ -136,9 +135,9 @@ export class MissingBypassSlowmode extends Schema.TaggedError<MissingBypassSlowm
 }
 
 /** The bot lacks the ChangeNickname permission for this operation. Categories: permission. */
-export class MissingChangeNickname extends Schema.TaggedError<MissingChangeNickname>()("MissingChangeNickname", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingChangeNickname extends CategorizedError<MissingChangeNickname>()("MissingChangeNickname", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ChangeNickname" {
     return "ChangeNickname"
@@ -149,9 +148,9 @@ export class MissingChangeNickname extends Schema.TaggedError<MissingChangeNickn
 }
 
 /** The bot lacks the Connect permission for this operation. Categories: permission, access. */
-export class MissingConnect extends Schema.TaggedError<MissingConnect>()("MissingConnect", { cause: ErrorCause }).pipe(
-  withCategory("permission", "access")
-) {
+export class MissingConnect extends CategorizedError<MissingConnect>()("MissingConnect", { cause: ErrorCause }, [
+  "permission", "access"
+]) {
   /** The missing flag. */
   get flag(): "Connect" {
     return "Connect"
@@ -162,9 +161,9 @@ export class MissingConnect extends Schema.TaggedError<MissingConnect>()("Missin
 }
 
 /** The bot lacks the CreateEvents permission for this operation. Categories: permission. */
-export class MissingCreateEvents extends Schema.TaggedError<MissingCreateEvents>()("MissingCreateEvents", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingCreateEvents extends CategorizedError<MissingCreateEvents>()("MissingCreateEvents", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "CreateEvents" {
     return "CreateEvents"
@@ -175,9 +174,9 @@ export class MissingCreateEvents extends Schema.TaggedError<MissingCreateEvents>
 }
 
 /** The bot lacks the CreateGuildExpressions permission for this operation. Categories: permission. */
-export class MissingCreateGuildExpressions extends Schema.TaggedError<MissingCreateGuildExpressions>()("MissingCreateGuildExpressions", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingCreateGuildExpressions extends CategorizedError<MissingCreateGuildExpressions>()("MissingCreateGuildExpressions", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "CreateGuildExpressions" {
     return "CreateGuildExpressions"
@@ -188,9 +187,9 @@ export class MissingCreateGuildExpressions extends Schema.TaggedError<MissingCre
 }
 
 /** The bot lacks the CreateInstantInvite permission for this operation. Categories: permission. */
-export class MissingCreateInstantInvite extends Schema.TaggedError<MissingCreateInstantInvite>()("MissingCreateInstantInvite", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingCreateInstantInvite extends CategorizedError<MissingCreateInstantInvite>()("MissingCreateInstantInvite", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "CreateInstantInvite" {
     return "CreateInstantInvite"
@@ -201,9 +200,9 @@ export class MissingCreateInstantInvite extends Schema.TaggedError<MissingCreate
 }
 
 /** The bot lacks the CreatePrivateThreads permission for this operation. Categories: permission. */
-export class MissingCreatePrivateThreads extends Schema.TaggedError<MissingCreatePrivateThreads>()("MissingCreatePrivateThreads", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingCreatePrivateThreads extends CategorizedError<MissingCreatePrivateThreads>()("MissingCreatePrivateThreads", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "CreatePrivateThreads" {
     return "CreatePrivateThreads"
@@ -214,9 +213,9 @@ export class MissingCreatePrivateThreads extends Schema.TaggedError<MissingCreat
 }
 
 /** The bot lacks the CreatePublicThreads permission for this operation. Categories: permission. */
-export class MissingCreatePublicThreads extends Schema.TaggedError<MissingCreatePublicThreads>()("MissingCreatePublicThreads", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingCreatePublicThreads extends CategorizedError<MissingCreatePublicThreads>()("MissingCreatePublicThreads", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "CreatePublicThreads" {
     return "CreatePublicThreads"
@@ -227,9 +226,9 @@ export class MissingCreatePublicThreads extends Schema.TaggedError<MissingCreate
 }
 
 /** The bot lacks the DeafenMembers permission for this operation. Categories: permission. */
-export class MissingDeafenMembers extends Schema.TaggedError<MissingDeafenMembers>()("MissingDeafenMembers", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingDeafenMembers extends CategorizedError<MissingDeafenMembers>()("MissingDeafenMembers", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "DeafenMembers" {
     return "DeafenMembers"
@@ -240,9 +239,9 @@ export class MissingDeafenMembers extends Schema.TaggedError<MissingDeafenMember
 }
 
 /** The bot lacks the EmbedLinks permission for this operation. Categories: permission, payload. */
-export class MissingEmbedLinks extends Schema.TaggedError<MissingEmbedLinks>()("MissingEmbedLinks", { cause: ErrorCause }).pipe(
-  withCategory("permission", "payload")
-) {
+export class MissingEmbedLinks extends CategorizedError<MissingEmbedLinks>()("MissingEmbedLinks", { cause: ErrorCause }, [
+  "permission", "payload"
+]) {
   /** The missing flag. */
   get flag(): "EmbedLinks" {
     return "EmbedLinks"
@@ -253,9 +252,9 @@ export class MissingEmbedLinks extends Schema.TaggedError<MissingEmbedLinks>()("
 }
 
 /** The bot lacks the KickMembers permission for this operation. Categories: permission. */
-export class MissingKickMembers extends Schema.TaggedError<MissingKickMembers>()("MissingKickMembers", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingKickMembers extends CategorizedError<MissingKickMembers>()("MissingKickMembers", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "KickMembers" {
     return "KickMembers"
@@ -266,9 +265,9 @@ export class MissingKickMembers extends Schema.TaggedError<MissingKickMembers>()
 }
 
 /** The bot lacks the ManageChannels permission for this operation. Categories: permission. */
-export class MissingManageChannels extends Schema.TaggedError<MissingManageChannels>()("MissingManageChannels", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingManageChannels extends CategorizedError<MissingManageChannels>()("MissingManageChannels", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ManageChannels" {
     return "ManageChannels"
@@ -279,9 +278,9 @@ export class MissingManageChannels extends Schema.TaggedError<MissingManageChann
 }
 
 /** The bot lacks the ManageEvents permission for this operation. Categories: permission. */
-export class MissingManageEvents extends Schema.TaggedError<MissingManageEvents>()("MissingManageEvents", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingManageEvents extends CategorizedError<MissingManageEvents>()("MissingManageEvents", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ManageEvents" {
     return "ManageEvents"
@@ -292,9 +291,9 @@ export class MissingManageEvents extends Schema.TaggedError<MissingManageEvents>
 }
 
 /** The bot lacks the ManageGuild permission for this operation. Categories: permission. */
-export class MissingManageGuild extends Schema.TaggedError<MissingManageGuild>()("MissingManageGuild", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingManageGuild extends CategorizedError<MissingManageGuild>()("MissingManageGuild", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ManageGuild" {
     return "ManageGuild"
@@ -305,9 +304,9 @@ export class MissingManageGuild extends Schema.TaggedError<MissingManageGuild>()
 }
 
 /** The bot lacks the ManageGuildExpressions permission for this operation. Categories: permission. */
-export class MissingManageGuildExpressions extends Schema.TaggedError<MissingManageGuildExpressions>()("MissingManageGuildExpressions", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingManageGuildExpressions extends CategorizedError<MissingManageGuildExpressions>()("MissingManageGuildExpressions", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ManageGuildExpressions" {
     return "ManageGuildExpressions"
@@ -318,9 +317,9 @@ export class MissingManageGuildExpressions extends Schema.TaggedError<MissingMan
 }
 
 /** The bot lacks the ManageMessages permission for this operation. Categories: permission. */
-export class MissingManageMessages extends Schema.TaggedError<MissingManageMessages>()("MissingManageMessages", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingManageMessages extends CategorizedError<MissingManageMessages>()("MissingManageMessages", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ManageMessages" {
     return "ManageMessages"
@@ -331,9 +330,9 @@ export class MissingManageMessages extends Schema.TaggedError<MissingManageMessa
 }
 
 /** The bot lacks the ManageNicknames permission for this operation. Categories: permission. */
-export class MissingManageNicknames extends Schema.TaggedError<MissingManageNicknames>()("MissingManageNicknames", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingManageNicknames extends CategorizedError<MissingManageNicknames>()("MissingManageNicknames", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ManageNicknames" {
     return "ManageNicknames"
@@ -344,9 +343,9 @@ export class MissingManageNicknames extends Schema.TaggedError<MissingManageNick
 }
 
 /** The bot lacks the ManageRoles permission for this operation. Categories: permission. */
-export class MissingManageRoles extends Schema.TaggedError<MissingManageRoles>()("MissingManageRoles", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingManageRoles extends CategorizedError<MissingManageRoles>()("MissingManageRoles", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ManageRoles" {
     return "ManageRoles"
@@ -357,9 +356,9 @@ export class MissingManageRoles extends Schema.TaggedError<MissingManageRoles>()
 }
 
 /** The bot lacks the ManageThreads permission for this operation. Categories: permission. */
-export class MissingManageThreads extends Schema.TaggedError<MissingManageThreads>()("MissingManageThreads", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingManageThreads extends CategorizedError<MissingManageThreads>()("MissingManageThreads", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ManageThreads" {
     return "ManageThreads"
@@ -370,9 +369,9 @@ export class MissingManageThreads extends Schema.TaggedError<MissingManageThread
 }
 
 /** The bot lacks the ManageWebhooks permission for this operation. Categories: permission. */
-export class MissingManageWebhooks extends Schema.TaggedError<MissingManageWebhooks>()("MissingManageWebhooks", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingManageWebhooks extends CategorizedError<MissingManageWebhooks>()("MissingManageWebhooks", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ManageWebhooks" {
     return "ManageWebhooks"
@@ -383,9 +382,9 @@ export class MissingManageWebhooks extends Schema.TaggedError<MissingManageWebho
 }
 
 /** The bot lacks the MentionEveryone permission for this operation. Categories: permission, payload. */
-export class MissingMentionEveryone extends Schema.TaggedError<MissingMentionEveryone>()("MissingMentionEveryone", { cause: ErrorCause }).pipe(
-  withCategory("permission", "payload")
-) {
+export class MissingMentionEveryone extends CategorizedError<MissingMentionEveryone>()("MissingMentionEveryone", { cause: ErrorCause }, [
+  "permission", "payload"
+]) {
   /** The missing flag. */
   get flag(): "MentionEveryone" {
     return "MentionEveryone"
@@ -396,9 +395,9 @@ export class MissingMentionEveryone extends Schema.TaggedError<MissingMentionEve
 }
 
 /** The bot lacks the ModerateMembers permission for this operation. Categories: permission. */
-export class MissingModerateMembers extends Schema.TaggedError<MissingModerateMembers>()("MissingModerateMembers", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingModerateMembers extends CategorizedError<MissingModerateMembers>()("MissingModerateMembers", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ModerateMembers" {
     return "ModerateMembers"
@@ -409,9 +408,9 @@ export class MissingModerateMembers extends Schema.TaggedError<MissingModerateMe
 }
 
 /** The bot lacks the MoveMembers permission for this operation. Categories: permission. */
-export class MissingMoveMembers extends Schema.TaggedError<MissingMoveMembers>()("MissingMoveMembers", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingMoveMembers extends CategorizedError<MissingMoveMembers>()("MissingMoveMembers", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "MoveMembers" {
     return "MoveMembers"
@@ -422,9 +421,9 @@ export class MissingMoveMembers extends Schema.TaggedError<MissingMoveMembers>()
 }
 
 /** The bot lacks the MuteMembers permission for this operation. Categories: permission. */
-export class MissingMuteMembers extends Schema.TaggedError<MissingMuteMembers>()("MissingMuteMembers", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingMuteMembers extends CategorizedError<MissingMuteMembers>()("MissingMuteMembers", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "MuteMembers" {
     return "MuteMembers"
@@ -435,9 +434,9 @@ export class MissingMuteMembers extends Schema.TaggedError<MissingMuteMembers>()
 }
 
 /** The bot lacks the PinMessages permission for this operation. Categories: permission. */
-export class MissingPinMessages extends Schema.TaggedError<MissingPinMessages>()("MissingPinMessages", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingPinMessages extends CategorizedError<MissingPinMessages>()("MissingPinMessages", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "PinMessages" {
     return "PinMessages"
@@ -448,9 +447,9 @@ export class MissingPinMessages extends Schema.TaggedError<MissingPinMessages>()
 }
 
 /** The bot lacks the PrioritySpeaker permission for this operation. Categories: permission. */
-export class MissingPrioritySpeaker extends Schema.TaggedError<MissingPrioritySpeaker>()("MissingPrioritySpeaker", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingPrioritySpeaker extends CategorizedError<MissingPrioritySpeaker>()("MissingPrioritySpeaker", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "PrioritySpeaker" {
     return "PrioritySpeaker"
@@ -461,9 +460,9 @@ export class MissingPrioritySpeaker extends Schema.TaggedError<MissingPrioritySp
 }
 
 /** The bot lacks the ReadMessageHistory permission for this operation. Categories: permission. */
-export class MissingReadMessageHistory extends Schema.TaggedError<MissingReadMessageHistory>()("MissingReadMessageHistory", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingReadMessageHistory extends CategorizedError<MissingReadMessageHistory>()("MissingReadMessageHistory", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ReadMessageHistory" {
     return "ReadMessageHistory"
@@ -474,9 +473,9 @@ export class MissingReadMessageHistory extends Schema.TaggedError<MissingReadMes
 }
 
 /** The bot lacks the RequestToSpeak permission for this operation. Categories: permission. */
-export class MissingRequestToSpeak extends Schema.TaggedError<MissingRequestToSpeak>()("MissingRequestToSpeak", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingRequestToSpeak extends CategorizedError<MissingRequestToSpeak>()("MissingRequestToSpeak", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "RequestToSpeak" {
     return "RequestToSpeak"
@@ -487,9 +486,9 @@ export class MissingRequestToSpeak extends Schema.TaggedError<MissingRequestToSp
 }
 
 /** The bot lacks the SendMessages permission for this operation. Categories: permission, access. */
-export class MissingSendMessages extends Schema.TaggedError<MissingSendMessages>()("MissingSendMessages", { cause: ErrorCause }).pipe(
-  withCategory("permission", "access")
-) {
+export class MissingSendMessages extends CategorizedError<MissingSendMessages>()("MissingSendMessages", { cause: ErrorCause }, [
+  "permission", "access"
+]) {
   /** The missing flag. */
   get flag(): "SendMessages" {
     return "SendMessages"
@@ -500,9 +499,9 @@ export class MissingSendMessages extends Schema.TaggedError<MissingSendMessages>
 }
 
 /** The bot lacks the SendMessagesInThreads permission for this operation. Categories: permission, access. */
-export class MissingSendMessagesInThreads extends Schema.TaggedError<MissingSendMessagesInThreads>()("MissingSendMessagesInThreads", { cause: ErrorCause }).pipe(
-  withCategory("permission", "access")
-) {
+export class MissingSendMessagesInThreads extends CategorizedError<MissingSendMessagesInThreads>()("MissingSendMessagesInThreads", { cause: ErrorCause }, [
+  "permission", "access"
+]) {
   /** The missing flag. */
   get flag(): "SendMessagesInThreads" {
     return "SendMessagesInThreads"
@@ -513,9 +512,9 @@ export class MissingSendMessagesInThreads extends Schema.TaggedError<MissingSend
 }
 
 /** The bot lacks the SendPolls permission for this operation. Categories: permission, payload. */
-export class MissingSendPolls extends Schema.TaggedError<MissingSendPolls>()("MissingSendPolls", { cause: ErrorCause }).pipe(
-  withCategory("permission", "payload")
-) {
+export class MissingSendPolls extends CategorizedError<MissingSendPolls>()("MissingSendPolls", { cause: ErrorCause }, [
+  "permission", "payload"
+]) {
   /** The missing flag. */
   get flag(): "SendPolls" {
     return "SendPolls"
@@ -526,9 +525,9 @@ export class MissingSendPolls extends Schema.TaggedError<MissingSendPolls>()("Mi
 }
 
 /** The bot lacks the SendTTSMessages permission for this operation. Categories: permission, payload. */
-export class MissingSendTTSMessages extends Schema.TaggedError<MissingSendTTSMessages>()("MissingSendTTSMessages", { cause: ErrorCause }).pipe(
-  withCategory("permission", "payload")
-) {
+export class MissingSendTTSMessages extends CategorizedError<MissingSendTTSMessages>()("MissingSendTTSMessages", { cause: ErrorCause }, [
+  "permission", "payload"
+]) {
   /** The missing flag. */
   get flag(): "SendTTSMessages" {
     return "SendTTSMessages"
@@ -539,9 +538,9 @@ export class MissingSendTTSMessages extends Schema.TaggedError<MissingSendTTSMes
 }
 
 /** The bot lacks the SendVoiceMessages permission for this operation. Categories: permission, payload. */
-export class MissingSendVoiceMessages extends Schema.TaggedError<MissingSendVoiceMessages>()("MissingSendVoiceMessages", { cause: ErrorCause }).pipe(
-  withCategory("permission", "payload")
-) {
+export class MissingSendVoiceMessages extends CategorizedError<MissingSendVoiceMessages>()("MissingSendVoiceMessages", { cause: ErrorCause }, [
+  "permission", "payload"
+]) {
   /** The missing flag. */
   get flag(): "SendVoiceMessages" {
     return "SendVoiceMessages"
@@ -552,9 +551,9 @@ export class MissingSendVoiceMessages extends Schema.TaggedError<MissingSendVoic
 }
 
 /** The bot lacks the SetVoiceChannelStatus permission for this operation. Categories: permission. */
-export class MissingSetVoiceChannelStatus extends Schema.TaggedError<MissingSetVoiceChannelStatus>()("MissingSetVoiceChannelStatus", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingSetVoiceChannelStatus extends CategorizedError<MissingSetVoiceChannelStatus>()("MissingSetVoiceChannelStatus", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "SetVoiceChannelStatus" {
     return "SetVoiceChannelStatus"
@@ -565,9 +564,9 @@ export class MissingSetVoiceChannelStatus extends Schema.TaggedError<MissingSetV
 }
 
 /** The bot lacks the Speak permission for this operation. Categories: permission. */
-export class MissingSpeak extends Schema.TaggedError<MissingSpeak>()("MissingSpeak", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingSpeak extends CategorizedError<MissingSpeak>()("MissingSpeak", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "Speak" {
     return "Speak"
@@ -578,9 +577,9 @@ export class MissingSpeak extends Schema.TaggedError<MissingSpeak>()("MissingSpe
 }
 
 /** The bot lacks the Stream permission for this operation. Categories: permission. */
-export class MissingStream extends Schema.TaggedError<MissingStream>()("MissingStream", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingStream extends CategorizedError<MissingStream>()("MissingStream", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "Stream" {
     return "Stream"
@@ -591,9 +590,9 @@ export class MissingStream extends Schema.TaggedError<MissingStream>()("MissingS
 }
 
 /** The bot lacks the UseApplicationCommands permission for this operation. Categories: permission. */
-export class MissingUseApplicationCommands extends Schema.TaggedError<MissingUseApplicationCommands>()("MissingUseApplicationCommands", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingUseApplicationCommands extends CategorizedError<MissingUseApplicationCommands>()("MissingUseApplicationCommands", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "UseApplicationCommands" {
     return "UseApplicationCommands"
@@ -604,9 +603,9 @@ export class MissingUseApplicationCommands extends Schema.TaggedError<MissingUse
 }
 
 /** The bot lacks the UseEmbeddedActivities permission for this operation. Categories: permission. */
-export class MissingUseEmbeddedActivities extends Schema.TaggedError<MissingUseEmbeddedActivities>()("MissingUseEmbeddedActivities", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingUseEmbeddedActivities extends CategorizedError<MissingUseEmbeddedActivities>()("MissingUseEmbeddedActivities", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "UseEmbeddedActivities" {
     return "UseEmbeddedActivities"
@@ -617,9 +616,9 @@ export class MissingUseEmbeddedActivities extends Schema.TaggedError<MissingUseE
 }
 
 /** The bot lacks the UseExternalApps permission for this operation. Categories: permission. */
-export class MissingUseExternalApps extends Schema.TaggedError<MissingUseExternalApps>()("MissingUseExternalApps", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingUseExternalApps extends CategorizedError<MissingUseExternalApps>()("MissingUseExternalApps", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "UseExternalApps" {
     return "UseExternalApps"
@@ -630,9 +629,9 @@ export class MissingUseExternalApps extends Schema.TaggedError<MissingUseExterna
 }
 
 /** The bot lacks the UseExternalEmojis permission for this operation. Categories: permission, payload. */
-export class MissingUseExternalEmojis extends Schema.TaggedError<MissingUseExternalEmojis>()("MissingUseExternalEmojis", { cause: ErrorCause }).pipe(
-  withCategory("permission", "payload")
-) {
+export class MissingUseExternalEmojis extends CategorizedError<MissingUseExternalEmojis>()("MissingUseExternalEmojis", { cause: ErrorCause }, [
+  "permission", "payload"
+]) {
   /** The missing flag. */
   get flag(): "UseExternalEmojis" {
     return "UseExternalEmojis"
@@ -643,9 +642,9 @@ export class MissingUseExternalEmojis extends Schema.TaggedError<MissingUseExter
 }
 
 /** The bot lacks the UseExternalSounds permission for this operation. Categories: permission. */
-export class MissingUseExternalSounds extends Schema.TaggedError<MissingUseExternalSounds>()("MissingUseExternalSounds", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingUseExternalSounds extends CategorizedError<MissingUseExternalSounds>()("MissingUseExternalSounds", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "UseExternalSounds" {
     return "UseExternalSounds"
@@ -656,9 +655,9 @@ export class MissingUseExternalSounds extends Schema.TaggedError<MissingUseExter
 }
 
 /** The bot lacks the UseExternalStickers permission for this operation. Categories: permission, payload. */
-export class MissingUseExternalStickers extends Schema.TaggedError<MissingUseExternalStickers>()("MissingUseExternalStickers", { cause: ErrorCause }).pipe(
-  withCategory("permission", "payload")
-) {
+export class MissingUseExternalStickers extends CategorizedError<MissingUseExternalStickers>()("MissingUseExternalStickers", { cause: ErrorCause }, [
+  "permission", "payload"
+]) {
   /** The missing flag. */
   get flag(): "UseExternalStickers" {
     return "UseExternalStickers"
@@ -669,9 +668,9 @@ export class MissingUseExternalStickers extends Schema.TaggedError<MissingUseExt
 }
 
 /** The bot lacks the UseSoundboard permission for this operation. Categories: permission. */
-export class MissingUseSoundboard extends Schema.TaggedError<MissingUseSoundboard>()("MissingUseSoundboard", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingUseSoundboard extends CategorizedError<MissingUseSoundboard>()("MissingUseSoundboard", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "UseSoundboard" {
     return "UseSoundboard"
@@ -682,9 +681,9 @@ export class MissingUseSoundboard extends Schema.TaggedError<MissingUseSoundboar
 }
 
 /** The bot lacks the UseVAD permission for this operation. Categories: permission. */
-export class MissingUseVAD extends Schema.TaggedError<MissingUseVAD>()("MissingUseVAD", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingUseVAD extends CategorizedError<MissingUseVAD>()("MissingUseVAD", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "UseVAD" {
     return "UseVAD"
@@ -695,9 +694,9 @@ export class MissingUseVAD extends Schema.TaggedError<MissingUseVAD>()("MissingU
 }
 
 /** The bot lacks the ViewAuditLog permission for this operation. Categories: permission. */
-export class MissingViewAuditLog extends Schema.TaggedError<MissingViewAuditLog>()("MissingViewAuditLog", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingViewAuditLog extends CategorizedError<MissingViewAuditLog>()("MissingViewAuditLog", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ViewAuditLog" {
     return "ViewAuditLog"
@@ -708,9 +707,9 @@ export class MissingViewAuditLog extends Schema.TaggedError<MissingViewAuditLog>
 }
 
 /** The bot lacks the ViewChannel permission for this operation. Categories: permission, access. */
-export class MissingViewChannel extends Schema.TaggedError<MissingViewChannel>()("MissingViewChannel", { cause: ErrorCause }).pipe(
-  withCategory("permission", "access")
-) {
+export class MissingViewChannel extends CategorizedError<MissingViewChannel>()("MissingViewChannel", { cause: ErrorCause }, [
+  "permission", "access"
+]) {
   /** The missing flag. */
   get flag(): "ViewChannel" {
     return "ViewChannel"
@@ -721,9 +720,9 @@ export class MissingViewChannel extends Schema.TaggedError<MissingViewChannel>()
 }
 
 /** The bot lacks the ViewCreatorMonetizationAnalytics permission for this operation. Categories: permission. */
-export class MissingViewCreatorMonetizationAnalytics extends Schema.TaggedError<MissingViewCreatorMonetizationAnalytics>()("MissingViewCreatorMonetizationAnalytics", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingViewCreatorMonetizationAnalytics extends CategorizedError<MissingViewCreatorMonetizationAnalytics>()("MissingViewCreatorMonetizationAnalytics", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ViewCreatorMonetizationAnalytics" {
     return "ViewCreatorMonetizationAnalytics"
@@ -734,9 +733,9 @@ export class MissingViewCreatorMonetizationAnalytics extends Schema.TaggedError<
 }
 
 /** The bot lacks the ViewGuildInsights permission for this operation. Categories: permission. */
-export class MissingViewGuildInsights extends Schema.TaggedError<MissingViewGuildInsights>()("MissingViewGuildInsights", { cause: ErrorCause }).pipe(
-  withCategory("permission")
-) {
+export class MissingViewGuildInsights extends CategorizedError<MissingViewGuildInsights>()("MissingViewGuildInsights", { cause: ErrorCause }, [
+  "permission"
+]) {
   /** The missing flag. */
   get flag(): "ViewGuildInsights" {
     return "ViewGuildInsights"

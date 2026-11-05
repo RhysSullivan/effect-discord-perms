@@ -19,6 +19,17 @@
  * time), any other value may.
  */
 import type { PermissionFlag } from "../errors/Missing.generated.ts"
+import type {
+  ContentTooLong,
+  EmbedTooLarge,
+  MessageEmpty,
+  NameTooLong,
+  NicknameTooLong,
+  PollTooLarge,
+  SlowmodeOutOfRange,
+  TimeoutTooLong,
+  TopicTooLong
+} from "../errors/Payload.ts"
 import { type CreateMessage, isV2, type MessagePayload } from "./Message.ts"
 
 /** One rule. */
@@ -158,6 +169,31 @@ export type EditMayEmpty<P> =
     | (P extends { readonly embeds: infer E } ? (readonly [] extends E ? true : false) : false)
     ? true
     : false
+
+/** `ContentTooLong` when the content of payload `P` may be over the limit, else nothing. */
+export type ContentTooLongIn<P> = true extends MayBeTooLong<P> ? ContentTooLong : never
+/** `MessageEmpty` when payload `P` may be empty, else nothing. */
+export type MessageEmptyIn<P> = true extends MayBeEmpty<P> ? MessageEmpty : never
+/** `EmbedTooLarge` when payload `P` may carry embeds, else nothing. */
+export type EmbedTooLargeIn<P> = MayInclude<P, "embeds"> extends true ? EmbedTooLarge : never
+/** `PollTooLarge` when payload `P` may carry a poll, else nothing. */
+export type PollTooLargeIn<P> = MayInclude<P, "poll"> extends true ? PollTooLarge : never
+/** `NameTooLong` when the name `N` may be over the limit, else nothing. */
+export type NameTooLongIn<N> = MayExceed<N> extends true ? NameTooLong : never
+/** `EmbedTooLarge` when edit `P` sets embeds that are not `[]`, else nothing. */
+export type EditEmbedTooLargeIn<P> = P extends { readonly embeds: infer E } ? (E extends readonly [] ? never : EmbedTooLarge) : never
+/** `MessageEmpty` when edit `P` may empty the message, else nothing. */
+export type EditMessageEmptyIn<P> = EditMayEmpty<P> extends true ? MessageEmpty : never
+/** `NameTooLong` when channel patch `P` sets a name that may be over the limit, else nothing. */
+export type PatchNameTooLongIn<P> = P extends { readonly name: infer N } ? NameTooLongIn<N> : never
+/** `TopicTooLong` when channel patch `P` sets a topic that may be over the limit, else nothing. */
+export type PatchTopicTooLongIn<P> = P extends { readonly topic: infer T } ? (MayExceed<T> extends true ? TopicTooLong : never) : never
+/** `SlowmodeOutOfRange` when channel patch `P` sets a slowmode that may be out of range, else nothing. */
+export type PatchSlowmodeOutOfRangeIn<P> = P extends { readonly slowmodeSeconds: infer S } ? (MayExceed<S> extends true ? SlowmodeOutOfRange : never) : never
+/** `NicknameTooLong` when the nickname `N` may be over the limit, else nothing. */
+export type NicknameTooLongIn<N> = MayExceed<N> extends true ? NicknameTooLong : never
+/** `TimeoutTooLong` when the timeout's end `U` may be too far ahead, else nothing. */
+export type TimeoutTooLongIn<U> = MayExceed<U> extends true ? TimeoutTooLong : never
 
 // ---- the runtime side ---------------------------------------------------------------------------------
 

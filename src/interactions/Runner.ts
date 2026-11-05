@@ -38,7 +38,7 @@ import { InteractionExpired } from "../errors/State.ts"
 import type { Transient } from "../errors/Transient.ts"
 import { embedLimitExceeded, Limits, lengthOf } from "../payload/Limits.ts"
 import type { EditArg, EditMessage } from "../payload/Message.ts"
-import type { EditMayEmpty, MayBeEmpty, MayBeTooLong, MayInclude } from "../payload/PayloadRules.ts"
+import type { ContentTooLongIn, EditEmbedTooLargeIn, EditMessageEmptyIn, EmbedTooLargeIn, MessageEmptyIn } from "../payload/PayloadRules.ts"
 import { actionRow, editRequest, embedRequest } from "../payload/ToDfx.ts"
 import * as Flags from "../permissions/Flags.ts"
 import type { Route } from "../rest/DiscordApi.ts"
@@ -300,9 +300,9 @@ const answeredFor = (session: Session): Answered => {
     | PermissionDeniedUnattributed
     | InteractionExpired
     | Transient
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (true extends MayBeEmpty<P> ? MessageEmpty : never)
-    | (MayInclude<P, "embeds"> extends true ? EmbedTooLarge : never)
+    | ContentTooLongIn<P>
+    | MessageEmptyIn<P>
+    | EmbedTooLargeIn<P>
   >
   function followUp(payload: ReplyPayload): Effect.Effect<void, FollowUpFailure> {
     return Effect.gen(function* () {
@@ -325,9 +325,9 @@ const answeredFor = (session: Session): Answered => {
     Completed,
     | InteractionExpired
     | Transient
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (EditMayEmpty<P> extends true ? MessageEmpty : never)
-    | (P extends { readonly embeds: infer E } ? (E extends readonly [] ? never : EmbedTooLarge) : never)
+    | ContentTooLongIn<P>
+    | EditMessageEmptyIn<P>
+    | EditEmbedTooLargeIn<P>
   >
   function editOriginal(patch: EditMessage): Effect.Effect<Completed, InteractionExpired | Transient | ReplyFailure> {
     return Effect.gen(function* () {
@@ -376,9 +376,9 @@ const repliesFor = <M>(session: Session): Replies<M> => {
     then?: (answered: Answered) => Handled<A2, E2, R2>
   ): Effect.Effect<
     Response<R2>,
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (true extends MayBeEmpty<P> ? MessageEmpty : never)
-    | (MayInclude<P, "embeds"> extends true ? EmbedTooLarge : never)
+    | ContentTooLongIn<P>
+    | MessageEmptyIn<P>
+    | EmbedTooLargeIn<P>
   >
   function reply<A2, E2, R2>(payload: ReplyPayload, then?: (answered: Answered) => Handled<A2, E2, R2>): Effect.Effect<Response<R2>, ReplyFailure> {
     const [local] = replyFailures(payload, routes.callback.template)
@@ -415,9 +415,9 @@ const updatesFor = (session: Session): Updates => {
     patch: EditArg<P>
   ): Effect.Effect<
     Response<never>,
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (EditMayEmpty<P> extends true ? MessageEmpty : never)
-    | (P extends { readonly embeds: infer E } ? (E extends readonly [] ? never : EmbedTooLarge) : never)
+    | ContentTooLongIn<P>
+    | EditMessageEmptyIn<P>
+    | EditEmbedTooLargeIn<P>
   >
   function update(patch: EditMessage): Effect.Effect<Response<never>, ContentTooLong | EmbedTooLarge> {
     const [local] = editFailures(patch, routes.callback.template)

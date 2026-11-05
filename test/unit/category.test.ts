@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit, Schema } from "effect"
 import {
   catchCategory,
+  CategorizedError,
   CategoryTypeId,
   DiscordResponse,
   hasCategory,
@@ -78,7 +79,7 @@ describe("the category marker", () => {
     expect(categoriesOf(decoded)).toEqual(["payload", "permission"])
   })
 
-  it("is inherited by the D5 variants, which add a category without changing the base class", () => {
+  it("gives the D5 variants the base class's tag, flag and message with their own categories, without changing the base class", () => {
     const base = new MissingReadMessageHistory({ cause: preflight })
     const reply = new MissingReadMessageHistoryForReply({ cause: preflight })
     const reaction = new MissingReadMessageHistoryForReaction({ cause: preflight })
@@ -86,12 +87,40 @@ describe("the category marker", () => {
     expect(categoriesOf(reply)).toEqual(["payload", "permission"])
     expect(categoriesOf(reaction)).toEqual(["access", "permission"])
     expect([base._tag, reply._tag, reaction._tag]).toEqual(["MissingReadMessageHistory", "MissingReadMessageHistory", "MissingReadMessageHistory"])
-    expect(reply).toBeInstanceOf(MissingReadMessageHistory)
-    expect(reaction).toBeInstanceOf(MissingReadMessageHistory)
+    expect([base.flag, reply.flag, reaction.flag]).toEqual(["ReadMessageHistory", "ReadMessageHistory", "ReadMessageHistory"])
+    expect([reply.message, reaction.message]).toEqual([base.message, base.message])
+    // Same-tag classes of their own (DESIGN §2.2, D5 after M10): not subclasses of the base class or of each other.
+    expect(reply).not.toBeInstanceOf(MissingReadMessageHistory)
     expect(reply).not.toBeInstanceOf(MissingReadMessageHistoryForReaction)
-    expect([reply.flag, reaction.flag]).toEqual(["ReadMessageHistory", "ReadMessageHistory"])
-    // Each class owns a distinct frozen object; the base's marker was copied, not mutated.
+    expect(reaction).not.toBeInstanceOf(MissingReadMessageHistoryForReply)
+    // Each class owns a distinct frozen object, and the base's marker is unchanged.
     expect(markerOf(reply)).not.toBe(markerOf(base))
+    expect(markerOf(reply)).not.toBe(markerOf(reaction))
+    const replyMarker = markerOf(reply)
+    expect(replyMarker !== undefined && Object.isFrozen(replyMarker)).toBe(true)
+  })
+
+  it("encodes and decodes a D5 variant as its own class, under the base class's tag", () => {
+    const reply = new MissingReadMessageHistoryForReply({ cause: preflight })
+    const encoded = Schema.encodeSync(MissingReadMessageHistoryForReply)(reply)
+    expect(encoded).toEqual(Schema.encodeSync(MissingReadMessageHistory)(new MissingReadMessageHistory({ cause: preflight })))
+    const decoded = Schema.decodeUnknownSync(MissingReadMessageHistoryForReply)(encoded)
+    expect(decoded).toBeInstanceOf(MissingReadMessageHistoryForReply)
+    expect(categoriesOf(decoded)).toEqual(["payload", "permission"])
+  })
+
+  it("CategorizedError is Schema.TaggedError with the mixin applied: a fresh subclass with a frozen marker of exactly its categories", () => {
+    class Declared extends CategorizedError<Declared>()("Declared", { detail: Schema.String }, ["state", "access"]) {}
+    class Piped extends Schema.TaggedError<Piped>()("Piped", { detail: Schema.String }).pipe(withCategory("state", "access")) {}
+    const declared = new Declared({ detail: "d" })
+    expect(declared._tag).toBe("Declared")
+    expect(categoriesOf(declared)).toEqual(categoriesOf(new Piped({ detail: "d" })))
+    expect(categoriesOf(declared)).toEqual(["access", "state"])
+    expect(Object.hasOwn(declared, CategoryTypeId)).toBe(false)
+    const marker = markerOf(declared)
+    expect(marker !== undefined && Object.isFrozen(marker)).toBe(true)
+    expect(Schema.encodeSync(Declared)(declared)).toEqual({ _tag: "Declared", detail: "d" })
+    expect(Schema.decodeUnknownSync(Declared)({ _tag: "Declared", detail: "e" })).toBeInstanceOf(Declared)
   })
 
   it("gives a fresh class per application, so piping the same base twice never shares a marker", () => {

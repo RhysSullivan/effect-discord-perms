@@ -94,9 +94,10 @@ In brief:
   `Missing<Flag>` per permission flag, and `ThreadLocked`, `ThreadArchived`, `CommunicationDisabled`,
   `TargetAboveInHierarchy`, `ContentTooLong`, `MessagesTooOld`, `InteractionExpired` and the others the live matrix
   showed are distinct. Each carries the raw Discord response (code, message, route template) as its `cause`. Errors
-  belong to one or more categories (`permission`, `payload`, `access`, `state`, `transient`), applied by a mixin and
-  caught with `catchCategory`, which removes exactly that category's members from the type, as `catchTag` removes
-  exactly its tag. There are no string checks in the public API.
+  belong to one or more categories (`permission`, `payload`, `access`, `state`, `transient`), applied by a mixin
+  (`withCategory`, or `CategorizedError`, which is `Schema.TaggedError` with the mixin applied) and caught with
+  `catchCategory`, which removes exactly that category's members from the type, as `catchTag` removes exactly its
+  tag. There are no string checks in the public API.
 - **The permissions come from the types.** An operation's error union is computed from one operation table and from
   the payload's type: embeds add `MissingEmbedLinks`, files `MissingAttachFiles`, a reply
   `MissingReadMessageHistory`, a poll `MissingSendPolls`; in a thread, `SendMessagesInThreads` replaces
@@ -167,13 +168,13 @@ budget. `bun run verify:live` runs the live matrix against a test guild and rewr
 - **Hover snapshots** check that the editor shows named types (`CommandInteraction<{ readonly options: {...} },
   "ephemeral">`, `Effect<Sent, MissingViewChannel | ...>`), never the internal machinery.
 - **The compile budget** (`bun run budget`) compiles the reference bot as a consumer of this package compiles it: by
-  name, through the package's `exports`, which point at the source, so the library is checked with it. The hard
-  ceilings are 60,000 types, 250,000 instantiations and 1,000 ms, with +2% regression gates. **The budget fails
-  today:** the bot costs 76,573 types and 275,255 instantiations (about 360 ms), over two ceilings. The bot's own code
-  is about 3,700 types; the rest is the library. Whether to ship declarations and measure through them, cut the
-  library's compile cost, or change the ceilings is waiting for a decision (`LOG.md`, "Waiting for Rhys"). A second
-  row holds the cost of one 25-option command with its handler (about 2,200 instantiations), so superlinear growth
-  cannot hide.
+  name, through the package's `exports`, which point at the source, so the library is checked with it (the budget
+  fails if the import resolves anywhere else). The hard ceilings are 60,000 types, 250,000 instantiations and
+  1,000 ms, with +2% regression gates. The bot costs 59,620 types, 178,499 instantiations and about 245 ms, of which
+  its own code is about 3,700 types; the rest is the library. That is within budget, but only 380 types under the
+  Types ceiling: it was 76,573 types before the library's types were rewritten to cost less without changing what a
+  user sees (`docs/DESIGN.md` §2.12 rule 10). A second row holds the cost of one 25-option command with its handler
+  (about 2,200 instantiations), so superlinear growth cannot hide.
 
 What is not verified live, and why, is in `LOG.md`: the phase-3 interaction checklist needs a human to click through
 it, the DM content and DM delivery exceptions need a human's DM, the external emoji and sticker rules need a second

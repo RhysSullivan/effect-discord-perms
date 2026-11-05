@@ -20,8 +20,9 @@
  *
  * **The handles** close over the bot's runtime, so their methods need nothing. Each method is an overload: its
  * signature carries the precise union from the operation table (`Channel.ts`, `Message.ts`), over an
- * implementation typed with the wide union (`WideError`, rule 7 of §2.12). `test/unit/op-errors.test.ts` holds
- * the runtime to the declared unions; `test/types/pass/op-errors.ts` holds each method's union to its row.
+ * implementation typed with the wide union (`WideError`, or `Wide<...>` with the overload's table term; rules 7
+ * and 10 of §2.12). `test/unit/op-errors.test.ts` holds the runtime to the declared unions;
+ * `test/types/pass/op-errors.ts` holds each method's union to its row.
  *
  * `channelHandle` and `messageHandle` build handles from what the bot knows (a channel's kind, a message object);
  * they are internal (not in the public barrel), for `Channels.get`, the operations' results and the harness.
@@ -31,7 +32,6 @@ import { Clock, Effect, Schema } from "effect"
 import { BotRuntime } from "../bot/Runtime.ts"
 import { DiscordResponse, PreflightDecision } from "../errors/Cause.ts"
 import type { PermissionFlag } from "../errors/Missing.generated.ts"
-import type { ContentTooLong, EmbedTooLarge, MessageEmpty, NameTooLong, PollTooLarge, SlowmodeOutOfRange, TopicTooLong } from "../errors/Payload.ts"
 import type { PermissionRevokedSinceCheck } from "../errors/Permission.ts"
 import { UnknownChannel } from "../errors/State.ts"
 import type { Transient } from "../errors/Transient.ts"
@@ -43,7 +43,7 @@ import { type FromSnapshot, fromAppPermissions, guildInputFromSnapshot, inputFro
 import * as Limits from "../payload/Limits.ts"
 import type { CreateArg, EditArg, EditMessage, Emoji, MessagePayload } from "../payload/Message.ts"
 import { isV2 } from "../payload/Message.ts"
-import { customEmojiTokens, type DegradableFlags, type EditMayEmpty, features, type MayBeEmpty, type MayBeTooLong, type MayExceed, type MayInclude, type PayloadFlags, PayloadRules, payloadRuleNames } from "../payload/PayloadRules.ts"
+import { type ContentTooLongIn, customEmojiTokens, type EditEmbedTooLargeIn, type EditMessageEmptyIn, type EmbedTooLargeIn, features, type MessageEmptyIn, type NameTooLongIn, type PatchNameTooLongIn, type PatchSlowmodeOutOfRangeIn, type PatchTopicTooLongIn, type PayloadFlags, payloadRuleNames, PayloadRules, type PollTooLargeIn } from "../payload/PayloadRules.ts"
 import * as ToDfx from "../payload/ToDfx.ts"
 import type * as DiscordApi from "../rest/DiscordApi.ts"
 import type { LimitFacts } from "../rest/ErrorMap.ts"
@@ -78,7 +78,7 @@ import type {
   SendMethod,
   SendOpByKind,
   SendReceiver,
-  Sent,
+  SendSuccess,
   SentDegradable,
   StageChannel,
   StartsThreads,
@@ -112,6 +112,14 @@ export type Runtime = BotRuntime["Service"]
 
 /** Every error an operation's implementation can fail with; each public signature narrows it (§4.7). */
 export type WideError = Preflight.PreflightError | PermissionRevokedSinceCheck | DiscordApi.ApiError | Limits.LocalFailure
+
+/**
+ * An implementation's error type when its overload indexes the operation table with a type parameter
+ * (`OpErrors<G>[Op]`): the wide union, plus that term. It adds nothing `WideError` lacks, but with the term in both
+ * signatures tsc's overload check relates it to itself instead of resolving its constraint over every row of the
+ * table, which costs a consumer's compile hundreds of types per method (compile budget, DESIGN §5.4).
+ */
+export type Wide<E> = E | WideError
 
 // ---- the pipeline -------------------------------------------------------------------------------------
 
@@ -302,22 +310,33 @@ export const degradedOf = (payload: MessagePayload, message: Schemas.Message): R
 
 const messagesRoute = "/channels/{channel.id}/messages"
 
-const sendMethod = (core: ChannelCore & { readonly kind: GuildMessageKind }): SendMethod => {
+/**
+ * `SendMethod` over a wide implementation `run` (rule 7 of §2.12): the one place its precise signature is attached,
+ * shared by the guild and DM sends. Internal (the DM send uses it too).
+ */
+export const sendMethodOf = (run: (payload: MessagePayload) => Effect.Effect<SentDegradable<MessageKind, PermissionFlag>, WideError>): SendMethod => {
   function send<C extends SendReceiver, const P extends MessagePayload>(
     this: C,
     payload: CreateArg<P>
   ): Effect.Effect<
-    [DegradableFlags<P>] extends [never] ? Sent<C["kind"]> : SentDegradable<C["kind"], Extract<PermissionFlag, DegradableFlags<P>>>,
+    SendSuccess<C, P>,
     | OpPermissionErrors[SendOpByKind[C["kind"]]][Exclude<SendFlags<C, P>, GrantedOf<C>>]
     | Revoked<SendFlags<C, P>, GrantedOf<C>>
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (true extends MayBeEmpty<P> ? MessageEmpty : never)
-    | (MayInclude<P, "embeds"> extends true ? EmbedTooLarge : never)
-    | (MayInclude<P, "poll"> extends true ? PollTooLarge : never)
+    | ContentTooLongIn<P>
+    | MessageEmptyIn<P>
+    | EmbedTooLargeIn<P>
+    | PollTooLargeIn<P>
     | OpTags[SendOpByKind[C["kind"]]]
     | Transient
   >
-  function send(this: SendReceiver, payload: MessagePayload): Effect.Effect<SentDegradable<GuildMessageKind, PermissionFlag>, WideError> {
+  function send(this: SendReceiver, payload: MessagePayload): Effect.Effect<SentDegradable<MessageKind, PermissionFlag>, WideError> {
+    return run(payload)
+  }
+  return send
+}
+
+const sendMethod = (core: ChannelCore & { readonly kind: GuildMessageKind }): SendMethod =>
+  sendMethodOf((payload) => {
     const wire = ToDfx.createRequest(payload)
     const request: MessageCreateRequest = wire.request
     return perform(core.runtime, {
@@ -333,9 +352,7 @@ const sendMethod = (core: ChannelCore & { readonly kind: GuildMessageKind }): Se
         limits: createLimits(payload)
       }
     }).pipe(Effect.map((message) => ({ message: ownMessageOf(core, message), degraded: degradedOf(payload, message) })))
-  }
-  return send
-}
+  })
 
 // ---- channel operations --------------------------------------------------------------------------------
 
@@ -347,11 +364,11 @@ const editMethod = <Op extends "channel.edit" | "voice.edit" | "thread.edit", G 
   ): Effect.Effect<
     void,
     | OpErrors<G>[Op]
-    | (P extends { readonly name: infer N } ? (MayExceed<N> extends true ? NameTooLong : never) : never)
-    | (P extends { readonly topic: infer T } ? (MayExceed<T> extends true ? TopicTooLong : never) : never)
-    | (P extends { readonly slowmodeSeconds: infer S } ? (MayExceed<S> extends true ? SlowmodeOutOfRange : never) : never)
+    | PatchNameTooLongIn<P>
+    | PatchTopicTooLongIn<P>
+    | PatchSlowmodeOutOfRangeIn<P>
   >
-  function edit(patch: ChannelPatch): Effect.Effect<void, WideError> {
+  function edit(patch: ChannelPatch): Effect.Effect<void, Wide<OpErrors<G>[Op]>> {
     const forum = core.kind === "forum" || core.kind === "media"
     const limits: LimitFacts = {
       ...(patch.name === undefined ? {} : { name: { length: Limits.lengthOf(patch.name), limit: Limits.Limits.name.max } }),
@@ -394,7 +411,7 @@ const threadsRoute = "/channels/{channel.id}/threads"
 const createThreadMethod = <Private extends boolean, Public extends ThreadKind, G extends PermissionFlag>(core: ChannelCore, publicKind: Public): StartsThreads<Private, Public, G>["createThread"] => {
   function createThread<const T extends { readonly name: string; readonly private?: boolean }>(
     thread: ThreadArg<T, Private>
-  ): Effect.Effect<ChannelKinds<never>[ThreadOf<T, Public>], OpErrors<G>[CreateThreadOp<T>] | (MayExceed<T["name"]> extends true ? NameTooLong : never)>
+  ): Effect.Effect<ChannelKinds<never>[ThreadOf<T, Public>], OpErrors<G>[CreateThreadOp<T>] | NameTooLongIn<T["name"]>>
   function createThread(thread: { readonly name: string; readonly private?: boolean }): Effect.Effect<GuildChannel, WideError> {
     const isPrivate = thread.private === true
     const op = isPrivate ? "channel.createThread.private" : "channel.createThread.public"
@@ -423,7 +440,7 @@ const PinsPage = Schema.Struct({ items: Schema.Array(Schema.Struct({ message: Sc
 
 const pinsMethod = <G extends PermissionFlag, Op extends "channel.pins" | "voice.pins">(core: ChannelCore & { readonly kind: GuildMessageKind }, op: Op): Pins<G, Op>["pins"] => {
   function pins(): ReturnType<Pins<G, Op>["pins"]>
-  function pins(): Effect.Effect<PinsList, WideError> {
+  function pins(): Effect.Effect<PinsList, Wide<OpErrors<G>[Op]>> {
     const target = channelTarget(core, op, noPayload)
     const plan: Plan<typeof PinsPage.Type> = {
       span: "discord.channel.pins",
@@ -452,7 +469,7 @@ const bulkDeleteRoute = "/channels/{channel.id}/messages/bulk-delete"
 
 const bulkDeleteMethod = <G extends PermissionFlag, Op extends "channel.bulkDelete" | "thread.bulkDelete" | "voice.bulkDelete">(core: ChannelCore, op: Op): BulkDeletes<G, Op>["bulkDelete"] => {
   function bulkDelete(...ids: Parameters<BulkDeletes<G, Op>["bulkDelete"]>): ReturnType<BulkDeletes<G, Op>["bulkDelete"]>
-  function bulkDelete(ids: ReadonlyArray<MessageId>): Effect.Effect<void, WideError> {
+  function bulkDelete(ids: ReadonlyArray<MessageId>): Effect.Effect<void, Wide<OpErrors<G>[Op]>> {
     const target = channelTarget(core, op, noPayload)
     return Effect.flatMap(Clock.currentTimeMillis, (now) =>
       perform(core.runtime, {
@@ -478,11 +495,11 @@ const createPostMethod = <G extends PermissionFlag>(core: ChannelCore): PostsMes
     PublicThread<never>,
     | OpPermissionErrors["forum.createPost"][Exclude<OpFlags["forum.createPost"] | PayloadFlags<P>, G>]
     | Revoked<OpFlags["forum.createPost"] | PayloadFlags<P>, G>
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (true extends MayBeEmpty<P> ? MessageEmpty : never)
-    | (MayInclude<P, "embeds"> extends true ? EmbedTooLarge : never)
-    | (MayInclude<P, "poll"> extends true ? PollTooLarge : never)
-    | (MayExceed<N> extends true ? NameTooLong : never)
+    | ContentTooLongIn<P>
+    | MessageEmptyIn<P>
+    | EmbedTooLargeIn<P>
+    | PollTooLargeIn<P>
+    | NameTooLongIn<N>
     | OpTags["forum.createPost"]
     | Transient
   >
@@ -661,25 +678,25 @@ const buildHandle = (core: ChannelCore, granted: ReadonlyArray<PermissionFlag>):
   const info = core
   switch (info.kind) {
     case "text":
-      return textChannel({ ...core, kind: "text" }, granted)
+      return textChannel<PermissionFlag>({ ...core, kind: "text" }, granted)
     case "announcement":
-      return announcementChannel({ ...core, kind: "announcement" }, granted)
+      return announcementChannel<PermissionFlag>({ ...core, kind: "announcement" }, granted)
     case "voice":
-      return voiceChannel({ ...core, kind: "voice" }, granted)
+      return voiceChannel<PermissionFlag>({ ...core, kind: "voice" }, granted)
     case "stage":
-      return stageChannel({ ...core, kind: "stage" }, granted)
+      return stageChannel<PermissionFlag>({ ...core, kind: "stage" }, granted)
     case "category":
-      return categoryChannel(core, granted)
+      return categoryChannel<PermissionFlag>(core, granted)
     case "forum":
-      return forumChannel(core, granted)
+      return forumChannel<PermissionFlag>(core, granted)
     case "media":
-      return mediaChannel(core, granted)
+      return mediaChannel<PermissionFlag>(core, granted)
     case "public-thread":
-      return publicThread(core, granted)
+      return publicThread<PermissionFlag>(core, granted)
     case "private-thread":
-      return privateThread(core, granted)
+      return privateThread<PermissionFlag>(core, granted)
     case "announcement-thread":
-      return announcementThread(core, granted)
+      return announcementThread<PermissionFlag>(core, granted)
   }
 }
 
@@ -744,11 +761,11 @@ const reactMethod = <K extends GuildMessageKind>(core: MessageCore & { readonly 
 const pinMethods = <K extends GuildMessageKind>(core: MessageCore & { readonly kind: K }, ops: { readonly pin: PinOp<K>; readonly unpin: UnpinOp<K> }) => {
   const route = "/channels/{channel.id}/messages/pins/{message.id}"
   function pin(): Effect.Effect<void, OpErrors<never>[PinOp<K>]>
-  function pin(): Effect.Effect<void, WideError> {
+  function pin(): Effect.Effect<void, Wide<OpErrors<never>[PinOp<K>]>> {
     return plainMessageOp(core, "discord.message.pin", ops.pin, { method: "PUT", template: route }, (rest) => rest.createPin(core.channelId, core.id), Schema.Void)
   }
   function unpin(): Effect.Effect<void, OpErrors<never>[UnpinOp<K>]>
-  function unpin(): Effect.Effect<void, WideError> {
+  function unpin(): Effect.Effect<void, Wide<OpErrors<never>[UnpinOp<K>]>> {
     return plainMessageOp(core, "discord.message.unpin", ops.unpin, { method: "DELETE", template: route }, (rest) => rest.deletePin(core.channelId, core.id), Schema.Void)
   }
   return { pin, unpin }
@@ -756,7 +773,7 @@ const pinMethods = <K extends GuildMessageKind>(core: MessageCore & { readonly k
 
 const createThreadFromMessage = <K extends "text" | "announcement">(core: MessageCore & { readonly kind: K }): CreateThreadFromMessage<K> => {
   const route = `${messageRoute}/threads`
-  function createThread<const T extends { readonly name: string }>(thread: T): Effect.Effect<ChannelKinds<never>[ThreadFrom<K>], OpErrors<never>["channel.createThread.public"] | (MayExceed<T["name"]> extends true ? NameTooLong : never)>
+  function createThread<const T extends { readonly name: string }>(thread: T): Effect.Effect<ChannelKinds<never>[ThreadFrom<K>], OpErrors<never>["channel.createThread.public"] | NameTooLongIn<T["name"]>>
   function createThread(thread: { readonly name: string }): Effect.Effect<GuildChannel, WideError> {
     const target = messageTarget(core, "channel.createThread.public", noPayload)
     return perform(core.runtime, {
@@ -778,7 +795,7 @@ const createThreadFromMessage = <K extends "text" | "announcement">(core: Messag
 
 const crosspostMethod = <Op extends "message.crosspostOwn" | "message.crosspostForeign">(core: MessageCore, op: Op) => {
   function crosspost(): Effect.Effect<void, OpErrors<never>[Op]>
-  function crosspost(): Effect.Effect<void, WideError> {
+  function crosspost(): Effect.Effect<void, Wide<OpErrors<never>[Op]>> {
     return plainMessageOp(core, "discord.message.crosspost", op, { method: "POST", template: `${messageRoute}/crosspost` }, (rest) => rest.crosspostMessage(core.channelId, core.id), Schemas.Message).pipe(Effect.asVoid)
   }
   return crosspost
@@ -792,11 +809,11 @@ const editOwnMethod = <K extends GuildMessageKind>(core: MessageCore & { readonl
   ): Effect.Effect<
     OwnMessage<K>,
     | OpErrors<never>[EditOp<K>]
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (P extends { readonly embeds: infer E } ? (E extends readonly [] ? never : EmbedTooLarge) : never)
-    | (EditMayEmpty<P> extends true ? MessageEmpty : never)
+    | ContentTooLongIn<P>
+    | EditEmbedTooLargeIn<P>
+    | EditMessageEmptyIn<P>
   >
-  function edit(patch: EditMessage): Effect.Effect<unknown, WideError> {
+  function edit(patch: EditMessage): Effect.Effect<unknown, Wide<OpErrors<never>[EditOp<K>]>> {
     const op = byKind(core.kind, { channel: "message.edit.channel", thread: "message.edit.thread", voice: "message.edit.voice" } as const)
     const target = messageTarget(core, op, noPayload)
     return perform(core.runtime, {
@@ -818,7 +835,7 @@ const editOwnMethod = <K extends GuildMessageKind>(core: MessageCore & { readonl
 
 const deleteMethod = <Op extends OpName>(core: MessageCore, op: Op) => {
   function deleteMessage(): Effect.Effect<void, OpErrors<never>[Op]>
-  function deleteMessage(): Effect.Effect<void, WideError> {
+  function deleteMessage(): Effect.Effect<void, Wide<OpErrors<never>[Op]>> {
     return plainMessageOp(core, "discord.message.delete", op, { method: "DELETE", template: messageRoute }, (rest) => rest.deleteMessage(core.channelId, core.id), Schema.Void)
   }
   return deleteMessage
@@ -842,40 +859,40 @@ const ownHandle = (core: MessageCore): OwnMessages<GuildMessageKind> => {
   switch (core.kind) {
     case "text": {
       const typed = { ...core, kind: "text" as const }
-      return { ...shared, channelKind: "text", react: reactMethod(typed), ...pinMethods(typed, pinOps.channel), createThread: createThreadFromMessage(typed), edit: editOwnMethod(typed), delete: deleteMethod(typed, deleteOwnOps.channel) }
+      return { ...shared, channelKind: "text", react: reactMethod<"text">(typed), ...pinMethods<"text">(typed, pinOps.channel), createThread: createThreadFromMessage<"text">(typed), edit: editOwnMethod<"text">(typed), delete: deleteMethod(typed, deleteOwnOps.channel) }
     }
     case "announcement": {
       const typed = { ...core, kind: "announcement" as const }
       return {
         ...shared,
         channelKind: "announcement",
-        react: reactMethod(typed),
-        ...pinMethods(typed, pinOps.channel),
-        createThread: createThreadFromMessage(typed),
+        react: reactMethod<"announcement">(typed),
+        ...pinMethods<"announcement">(typed, pinOps.channel),
+        createThread: createThreadFromMessage<"announcement">(typed),
         crosspost: crosspostMethod(typed, "message.crosspostOwn"),
-        edit: editOwnMethod(typed),
+        edit: editOwnMethod<"announcement">(typed),
         delete: deleteMethod(typed, deleteOwnOps.channel)
       }
     }
     case "voice": {
       const typed = { ...core, kind: "voice" as const }
-      return { ...shared, channelKind: "voice", react: reactMethod(typed), edit: editOwnMethod(typed), delete: deleteMethod(typed, deleteOwnOps.voice) }
+      return { ...shared, channelKind: "voice", react: reactMethod<"voice">(typed), edit: editOwnMethod<"voice">(typed), delete: deleteMethod(typed, deleteOwnOps.voice) }
     }
     case "stage": {
       const typed = { ...core, kind: "stage" as const }
-      return { ...shared, channelKind: "stage", react: reactMethod(typed), edit: editOwnMethod(typed), delete: deleteMethod(typed, deleteOwnOps.voice) }
+      return { ...shared, channelKind: "stage", react: reactMethod<"stage">(typed), edit: editOwnMethod<"stage">(typed), delete: deleteMethod(typed, deleteOwnOps.voice) }
     }
     case "public-thread": {
       const typed = { ...core, kind: "public-thread" as const }
-      return { ...shared, channelKind: "public-thread", react: reactMethod(typed), ...pinMethods(typed, pinOps.thread), edit: editOwnMethod(typed), delete: deleteMethod(typed, deleteOwnOps.thread) }
+      return { ...shared, channelKind: "public-thread", react: reactMethod<"public-thread">(typed), ...pinMethods<"public-thread">(typed, pinOps.thread), edit: editOwnMethod<"public-thread">(typed), delete: deleteMethod(typed, deleteOwnOps.thread) }
     }
     case "private-thread": {
       const typed = { ...core, kind: "private-thread" as const }
-      return { ...shared, channelKind: "private-thread", react: reactMethod(typed), ...pinMethods(typed, pinOps.thread), edit: editOwnMethod(typed), delete: deleteMethod(typed, deleteOwnOps.thread) }
+      return { ...shared, channelKind: "private-thread", react: reactMethod<"private-thread">(typed), ...pinMethods<"private-thread">(typed, pinOps.thread), edit: editOwnMethod<"private-thread">(typed), delete: deleteMethod(typed, deleteOwnOps.thread) }
     }
     case "announcement-thread": {
       const typed = { ...core, kind: "announcement-thread" as const }
-      return { ...shared, channelKind: "announcement-thread", react: reactMethod(typed), ...pinMethods(typed, pinOps.thread), edit: editOwnMethod(typed), delete: deleteMethod(typed, deleteOwnOps.thread) }
+      return { ...shared, channelKind: "announcement-thread", react: reactMethod<"announcement-thread">(typed), ...pinMethods<"announcement-thread">(typed, pinOps.thread), edit: editOwnMethod<"announcement-thread">(typed), delete: deleteMethod(typed, deleteOwnOps.thread) }
     }
   }
 }
@@ -885,39 +902,39 @@ const foreignHandle = (core: MessageCore, authorId: UserId, authorIsBot: boolean
   switch (core.kind) {
     case "text": {
       const typed = { ...core, kind: "text" as const }
-      return { ...shared, channelKind: "text", react: reactMethod(typed), ...pinMethods(typed, pinOps.channel), createThread: createThreadFromMessage(typed), delete: deleteMethod(typed, deleteForeignOps.channel) }
+      return { ...shared, channelKind: "text", react: reactMethod<"text">(typed), ...pinMethods<"text">(typed, pinOps.channel), createThread: createThreadFromMessage<"text">(typed), delete: deleteMethod(typed, deleteForeignOps.channel) }
     }
     case "announcement": {
       const typed = { ...core, kind: "announcement" as const }
       return {
         ...shared,
         channelKind: "announcement",
-        react: reactMethod(typed),
-        ...pinMethods(typed, pinOps.channel),
-        createThread: createThreadFromMessage(typed),
+        react: reactMethod<"announcement">(typed),
+        ...pinMethods<"announcement">(typed, pinOps.channel),
+        createThread: createThreadFromMessage<"announcement">(typed),
         crosspost: crosspostMethod(typed, "message.crosspostForeign"),
         delete: deleteMethod(typed, deleteForeignOps.channel)
       }
     }
     case "voice": {
       const typed = { ...core, kind: "voice" as const }
-      return { ...shared, channelKind: "voice", react: reactMethod(typed), delete: deleteMethod(typed, deleteForeignOps.voice) }
+      return { ...shared, channelKind: "voice", react: reactMethod<"voice">(typed), delete: deleteMethod(typed, deleteForeignOps.voice) }
     }
     case "stage": {
       const typed = { ...core, kind: "stage" as const }
-      return { ...shared, channelKind: "stage", react: reactMethod(typed), delete: deleteMethod(typed, deleteForeignOps.voice) }
+      return { ...shared, channelKind: "stage", react: reactMethod<"stage">(typed), delete: deleteMethod(typed, deleteForeignOps.voice) }
     }
     case "public-thread": {
       const typed = { ...core, kind: "public-thread" as const }
-      return { ...shared, channelKind: "public-thread", react: reactMethod(typed), ...pinMethods(typed, pinOps.thread), delete: deleteMethod(typed, deleteForeignOps.thread) }
+      return { ...shared, channelKind: "public-thread", react: reactMethod<"public-thread">(typed), ...pinMethods<"public-thread">(typed, pinOps.thread), delete: deleteMethod(typed, deleteForeignOps.thread) }
     }
     case "private-thread": {
       const typed = { ...core, kind: "private-thread" as const }
-      return { ...shared, channelKind: "private-thread", react: reactMethod(typed), ...pinMethods(typed, pinOps.thread), delete: deleteMethod(typed, deleteForeignOps.thread) }
+      return { ...shared, channelKind: "private-thread", react: reactMethod<"private-thread">(typed), ...pinMethods<"private-thread">(typed, pinOps.thread), delete: deleteMethod(typed, deleteForeignOps.thread) }
     }
     case "announcement-thread": {
       const typed = { ...core, kind: "announcement-thread" as const }
-      return { ...shared, channelKind: "announcement-thread", react: reactMethod(typed), ...pinMethods(typed, pinOps.thread), delete: deleteMethod(typed, deleteForeignOps.thread) }
+      return { ...shared, channelKind: "announcement-thread", react: reactMethod<"announcement-thread">(typed), ...pinMethods<"announcement-thread">(typed, pinOps.thread), delete: deleteMethod(typed, deleteForeignOps.thread) }
     }
   }
 }

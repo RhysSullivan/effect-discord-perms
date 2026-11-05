@@ -107,13 +107,15 @@ src/
   Snowflake.ts *                 branded IDs (ChannelId, GuildId, UserId, RoleId, MessageId, ApplicationId,
                                  CommandId, InteractionId, EmojiId, StickerId): Schema.brand, X.make
   errors/
-    Category.ts *                withCategory mixin, hasCategory, catchCategory (dual), Categories,
-                                 CategoryMarker, ExtractCategory, ExcludeCategory (from [cc:src/category.ts])
+    Category.ts *                withCategory mixin, CategorizedError (M10: TaggedError with the mixin applied, typed
+                                 as one class), hasCategory, catchCategory (dual), Categories, CategoryMarker,
+                                 ExtractCategory, ExcludeCategory (from [cc:src/category.ts])
     Cause.ts *                   DiscordResponse, PreflightDecision, NoResponse, FieldError, ErrorCause union
     Missing.generated.ts *       GENERATED: 52 Missing<Flag> classes, PermissionFlags, PermissionErrors, `missing`,
                                  MissingClasses, and ErrorCategories (class name -> sorted categories mirror, incl. the
                                  D5 variants)
-    Variants.ts *                same-tag subclasses: MissingReadMessageHistoryForReply / ...ForReaction (D5)
+    Variants.ts *                same-tag variants: MissingReadMessageHistoryForReply / ...ForReaction (D5; M10: classes
+                                 of their own with the base class's tag, not subclasses, §2.2)
     Permission.ts *              PermissionDeniedUnattributed, PermissionRevokedSinceCheck
     State.ts *                   CommunicationDisabled, ThreadLocked, ThreadArchived, SlowmodeActive,
                                  TargetAboveInHierarchy, RoleAboveInHierarchy, TargetIsAdministrator, AlreadyCrossposted,
@@ -367,8 +369,8 @@ from discord-api-types `PermissionFlagsBits`, drops the deprecated alias
 `any` and no casts (`[sd:gen-errors.ts]`, `[sd:src/errors/Missing.generated.ts]`):
 
 ```ts
-export class MissingEmbedLinks extends Schema.TaggedError<MissingEmbedLinks>()("MissingEmbedLinks", { cause: ErrorCause })
-  .pipe(withCategory("permission", "payload")) {
+export class MissingEmbedLinks extends CategorizedError<MissingEmbedLinks>()("MissingEmbedLinks", { cause: ErrorCause }, [
+  "permission", "payload"]) {   // M10; M1-M9: Schema.TaggedError<...>()(...).pipe(withCategory("permission", "payload"))
   get flag(): "EmbedLinks" { return "EmbedLinks" }
   override get message(): string { return "Missing permission EmbedLinks (" + this.cause.route + ")" }
 }
@@ -422,6 +424,29 @@ export const catchCategory: {
     f: (error: ExtractCategory<E, K>) => Effect.Effect<A2, E2, R2>): Effect.Effect<A | A2, E2 | ExcludeCategory<E, K>, R | R2>
 }
 ```
+
+(M10, after the M10 verifier) **The library declares its error classes with
+`CategorizedError`**, which is `Schema.TaggedError` with the mixin applied:
+
+```ts
+export function CategorizedError<Self = never>(): <const Tag extends string, const Fields extends Schema.Struct.Fields,
+  const K extends ReadonlyArray<string>>(tag: Tag, fields: Fields, categories: K)
+    => [Self] extends [never] ? MissingSelf : Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError & Categorized<K[number]>>
+```
+
+At run time it is exactly `Schema.TaggedError<Self>()(tag, fields).pipe(withCategory(...categories))` (the same
+subclass and frozen prototype marker; `mixCategories` is their shared run time). Its type is the one `Schema.Class`
+that `Schema.TaggedError` gives, with the marker in its `Inherited` slot, where the piped mixin re-types the class as
+a second `Schema.Class` (about 90 more types for each of the 93 classes; measured per class, 187 against 95). The
+categories are written once, so type and marker cannot disagree; the trust boundary is the same kind as
+`withCategory`'s, an overload over a wider implementation. `withCategory` stays the public mixin, for adding
+categories to an existing class; its implementation signature returns `(base: never) => ...` so the overload
+check does not instantiate `Schema.Class` generically (that check alone cost every consumer about 1,900 types).
+**The D5 variants are same-tag classes of their own** (`CategorizedError` with the tag `"MissingReadMessageHistory"`
+and the base class's fields, `flag` and `message`), not subclasses: piping the mixin onto a subclass matches its
+class type against `Schema.Class` member by member, which cost every consumer about 2,800 types for the two. They
+keep everything D5 relies on (the tag, so `catchTag` catches all three; their categories; the mirror and the
+constructor table); `instanceof MissingReadMessageHistory` no longer holds for them, and nothing used it.
 
 Neither Effect 4.1.1 nor dfx ships an equivalent; `catchReason` is a different
 model (effect-v4 §4). Exactness of the narrowing (`[sd:src/errors-types.ts]` §3):
@@ -1269,6 +1294,11 @@ Each rule below came from a failure seen while compiling.
    `DegradableFlags<P>` in a success type): the hover prints the alias with the
    whole argument (C11; `[sd:probe2/hover-ops.ts]`, `[sd:probe2/hover-degraded.ts]`).
    `OpErrors<G>[Op]` is fine because it resolves through a mapped type.
+   (M10) A per-term conditional alias that resolves to one class or `never`
+   (`ContentTooLongIn<P>`, `PatchTopicTooLongIn<P>`, `SendSuccess<C, P>` in
+   `payload/PayloadRules.ts` and `channels/Channel.ts`) is fine too: for a
+   concrete argument it resolves to the class, which is what the hover prints
+   (the hover snapshots did not change). See rule 10.
 2. **Never intersect a user literal with a conflicting literal.**
    `"Reason" & "reason"` collapses to `never`. Carry messages on the branded
    `Invalid<Msg>` marker (`[sd:src/payload.ts]`).
@@ -1289,6 +1319,35 @@ Each rule below came from a failure seen while compiling.
    context-sensitive handler.** Use a string argument (§2.10).
 9. **Every positive type claim has an `Equals` assertion**, and every negative
    claim has a fail fixture with a code, a mention, a snapshot and a `@valid` twin.
+10. (M10, compile budget, §5.4) **Write a signature so that tsc can relate it
+    to its twin by identity.** Each rule below cut the reference bot's types
+    measurably (in parentheses, what undoing it alone adds back to the final
+    76,573 to 59,620; LOG.md); none changes a type a user sees:
+    - an overload that restates an interface's method (the handles in
+      `channels/Ops.ts`, `Direct.ts`, `members/Member.ts`, the runner's
+      answers) uses the same named aliases as the interface for its
+      payload-derived terms, never inline conditionals: two inline
+      conditionals are two types, compared structurally member by member
+      (about 1,000 types over the handles, measured as they were added);
+    - a signature implemented twice is attached once: the guild and DM sends
+      share `sendMethodOf` (about 300, measured as it was added);
+    - an implementation whose overload indexes the operation table with a type
+      parameter (`OpErrors<G>[Op]`) has the error type `Wide<OpErrors<G>[Op]>`
+      (`WideError` plus that term), so the overload check relates the term to
+      itself instead of resolving its constraint over every row (2,319 types,
+      26,417 instantiations); only where the index is a type parameter: a
+      literal row (`OpErrors<G>["thread.join"]`) gains nothing;
+    - a generic call returned into a large union passes its type arguments
+      (`textChannel<PermissionFlag>(...)` in `buildHandle`,
+      `reactMethod<"text">(typed)` in the message handles): otherwise tsc infers
+      them from the contextual return type, walking every member (2,840 and
+      637);
+    - `Extract<DegradableFlags<P>, PermissionFlag>`, not
+      `Extract<PermissionFlag, DegradableFlags<P>>`, which distributes over the
+      52 flags into 52 deferred conditionals (1,257);
+    - error classes are declared with `CategorizedError`, not by piping
+      `withCategory` (§2.2; 8,078 types and 50,064 instantiations, with the
+      variants and `withCategory`'s implementation signature).
 
 ---
 
@@ -2291,23 +2350,28 @@ const ch: MessageChannel
   command about 2.2k, close to linear. Revision 1's 20 × 25 probe cost 227,674
   (`[rt:budget/results.txt]`).
 - M10 records the reference-bot baseline once that bot exists.
-- (M10, after the M10 verifier) **The reference bot is measured as a consumer of this package compiles it, and it is
-  over two hard ceilings.** The bot imports the package by name (`effect-discord-perms`), which the package's own
-  `exports` (`"."` is `src/index.ts`) resolve to the source, so its project checks the library's implementation with
-  the bot, as the design's example-bot measurement above did with the prototype's. `scripts/budget.ts` fails if the
-  bot's program does not include that entry point, so a private `paths` mapping cannot change what is measured.
-  Measured: **76,573 types, 275,255 instantiations, about 360 ms**: above the Types ceiling (60,000) and the
-  Instantiations ceiling (250,000), within the check-time ceiling. The bot's own code is about 3.7k types and 11k
-  instantiations; the rest is the library (its barrel alone is about 72.9k and 264k, which M9 found above the type
-  ceiling). The ceilings are not raised, and `bun run budget` (so `verify:offline`, whose last step it is) fails on
-  exactly these two lines. The baseline row records this measurement; it was written by hand, because `--update`
-  never writes a baseline over a ceiling. The way out (ship declarations and measure through them, cut the library's
-  compile cost by about a fifth, or raise the ceilings) is Rhys's decision (LOG.md, "Waiting for Rhys").
+- (M10, after the M10 verifier) **The reference bot is measured as a consumer of this package compiles it.** The bot
+  imports the package by name (`effect-discord-perms`), which the package's own `exports` (`"."` is `src/index.ts`)
+  resolve to the source, so its project checks the library's implementation with the bot, as the design's
+  example-bot measurement above did with the prototype's. `scripts/budget.ts` fails unless every import of the
+  package resolves to that entry point (`tsc --traceResolution`; after the second M10 verifier, in place of a check
+  that the program merely contained it), so a private `paths` mapping cannot change what is measured. Measured first
+  at **76,573 types and 275,255 instantiations**, above the Types and Instantiations ceilings; the ceilings stayed.
+- (M10, after the second M10 verifier) **The library's compile cost was cut, without changing a type a user sees,
+  to 59,620 types, 178,499 instantiations and about 245 ms**, within all three ceilings (60,000; 250,000; 1,000 ms),
+  so `bun run budget` passes against the re-baselined row. The cuts are §2.12 rule 10 and §2.2's `CategorizedError`:
+  the error classes typed as one schema class each (8,078 types), the operation implementations' `Wide` error types
+  (2,319), explicit type arguments where a generic call returns into a large union (3,477), `Extract`'s operands
+  swapped (1,257), shared aliases for the payload-derived terms (about 1,000) and one shared send overload (about
+  300). The hover snapshots and the fail fixtures' diagnostics are unchanged. The margin under the Types ceiling is
+  thin (380 types): the next growth of the library's types will meet it, and the regression gates (+2%) are looser
+  than that margin.
 - (M10, reverted) M10 first compiled the bot against declarations emitted into a git-ignored directory, mapped with
   `paths` (12,541 types, 28,926 instantiations), and gated the library's own check by regression only. No consumer
   of this package gets those declarations (nothing builds or ships them), so that measured less than any user pays,
-  and it loosened the budget; it is now one of the options above, as a proposal. The per-command row's baseline is
-  unchanged (M9's 7,624 and 43,245; M9's verifier moved the measured cost to 7,636 and 43,296, within it).
+  and it loosened the budget. Shipping declarations stays a possible later change for the package; the budget does
+  not need it. The per-command row's baseline is unchanged (M9's 7,624 and 43,245; M9's verifier moved the measured
+  cost to 7,636 and 43,296, and M10's cuts to 7,636 and 43,302, within it).
 - (M8) The per-command row's baseline is committed: 20 commands of 25 options cost 7,245 types and
   42,102 instantiations over the probe without commands (362.3 types and 2,105.1 instantiations a
   command, against the design's estimate of about 2.2k). Until M9 a probe command's handler is a
@@ -3549,13 +3613,14 @@ Live milestones run serially, under the lock.
 
 - (M10, as built) Beyond the listed scope: the bot split into `bot.ts` (the bot, importing only the package) and
   `main.ts` (the entry point through `Credentials`); the package's `exports` (`"."` is `src/index.ts`), so the bot
-  imports `effect-discord-perms` by name, and the budget checks that the bot's program reaches the library through
-  that entry point (§5.4); `test/unit/reference-bot.test.ts` (the bot over the real bot build, a fake Discord and a
+  imports `effect-discord-perms` by name, and the budget checks that every import of it resolves to that entry point
+  (§5.4); `test/unit/reference-bot.test.ts` (the bot over the real bot build, a fake Discord and a
   fake gateway), `test/types/pass/reference-bot.ts` and `test/hover/reference-bot.ts`; and the M9 verifier's four
   leftover minor findings (LOG.md).
-- (M10, exit) Not met: `bun run budget` fails on the Types and Instantiations ceilings (§5.4), and so does
-  `bun run verify:offline` at its last step; every earlier step passes. The decision is Rhys's (LOG.md, "Waiting for
-  Rhys").
+- (M10, exit, after the second M10 verifier) `bun run budget` passes (§5.4: 59,620 types, 178,499 instantiations),
+  and so does `bun run verify:offline`; the fresh-process `bun run verify:live` on the same code is recorded in
+  LOG.md. The escalation after the first M10 verifier (the budget over two ceilings, a decision for Rhys) is
+  withdrawn: the library's compile cost was cut instead (§2.2, §2.12 rule 10).
 
 ---
 
@@ -3569,7 +3634,7 @@ Live milestones run serially, under the lock.
 | D2 | Readability gate | adopted with change | 4 lines and 800 characters **after collapsing unions of plain names**; directives carry the TS code; wrong-reason codes rejected; `@valid` twin per fixture; truncation banned inside message types (§5.2) |
 | D3 | Category mixin (effect-v4) | adopted | |
 | D4 | `catchCategory(K \| [K, ...K[]])`, dual | adopted | every listed category must be present |
-| D5 | Same-tag subclasses where needed | adopted | built only through `errorFor` and the typed constructor table; recorded as tag plus categories |
+| D5 | Same-tag subclasses where needed | adopted with change | built only through `errorFor` and the typed constructor table; recorded as tag plus categories; M10: same-tag classes of their own rather than subclasses (compile budget, §2.2) |
 | D6 | Unhandled = any non-transient; transient never combined | adopted | now implemented in `Handled` itself, plus the runtime invariant over `AllErrors` |
 | D7 | Most-fundamental ordering | adopted with change | generalised to every operation (§3.2); preflight returns the full ordered list; dedicated codes go through the recompute |
 | D8 | `PermissionRevokedSinceCheck` | adopted | `granted` is a real runtime field on handles |

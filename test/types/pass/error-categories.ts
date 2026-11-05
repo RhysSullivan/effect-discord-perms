@@ -1,11 +1,14 @@
 // The category table at the type level (DESIGN §2.2, §3.1): the generated ErrorCategories mirror names exactly
 // the categories each permission class carries in its type, every library error is categorised, and D6 holds:
 // a transient error is in no other category.
+import { Effect, Schema } from "effect"
 import { expectTypeOf } from "vitest"
 import {
+  CategorizedError,
   type AllErrors,
   type Categories,
   type CategoryMarker,
+  catchCategory,
   type CustomIdTooLong,
   type DiscordUnavailable,
   ErrorCategories,
@@ -23,7 +26,8 @@ import {
   type PermissionRevokedSinceCheck,
   type RateLimited,
   type RequestTimedOut,
-  type ThreadLocked
+  type ThreadLocked,
+  withCategory
 } from "../../../src/errors/index.ts"
 import type { DiscordResponse, NoResponse } from "../../../src/errors/Cause.ts"
 
@@ -70,3 +74,20 @@ expectTypeOf<RequestTimedOut["cause"]>().toEqualTypeOf<NoResponse>()
 expectTypeOf<NetworkError["cause"]>().toEqualTypeOf<NoResponse>()
 expectTypeOf<DiscordUnavailable["cause"]>().toEqualTypeOf<DiscordResponse>()
 expectTypeOf<RateLimited["cause"]>().toEqualTypeOf<DiscordResponse>()
+
+// CategorizedError (§2.2): the class it declares carries exactly the listed categories, as the piped mixin's does,
+// and stays a schema class of itself with its fields and tag.
+class Declared extends CategorizedError<Declared>()("Declared", { detail: Schema.String }, ["state", "access"]) {}
+class Piped extends Schema.TaggedError<Piped>()("Piped", { detail: Schema.String }).pipe(withCategory("state", "access")) {}
+expectTypeOf<Categories<Declared>>().toEqualTypeOf<"access" | "state">()
+expectTypeOf<Categories<Declared>>().toEqualTypeOf<Categories<Piped>>()
+expectTypeOf<Declared["_tag"]>().toEqualTypeOf<"Declared">()
+expectTypeOf<Declared["detail"]>().toEqualTypeOf<string>()
+expectTypeOf<Schema.Schema.Type<typeof Declared>>().toEqualTypeOf<Declared>()
+expectTypeOf(Declared.make({ detail: "d" })).toEqualTypeOf<Declared>()
+// The category catch removes it, and a tag catch removes exactly it.
+declare const declaredOrLocked: Effect.Effect<void, Declared | ThreadLocked>
+expectTypeOf<Effect.Error<ReturnType<typeof caughtAccess>>>().toEqualTypeOf<ThreadLocked>()
+const caughtAccess = () => declaredOrLocked.pipe(catchCategory("access", () => Effect.void))
+expectTypeOf<Effect.Error<ReturnType<typeof caughtTag>>>().toEqualTypeOf<ThreadLocked>()
+const caughtTag = () => declaredOrLocked.pipe(Effect.catchTag("Declared", () => Effect.void))

@@ -9,31 +9,6 @@ milestone appends its entries.
 
 ## Waiting for Rhys
 
-- **The compile budget: the reference bot is over two hard ceilings (M10, after the M10 verifier; a decision, and it
-  keeps `verify:offline` red).** Compiled as a consumer of this package compiles it (it imports `effect-discord-perms`
-  by name, and the package's `exports` point at `src/index.ts`, so the library's implementation is checked with it),
-  the reference bot costs **76,573 types and 275,255 instantiations** (about 360 ms), above the hard ceilings of 60,000
-  and 250,000 (DESIGN §5.4, "never raised"; check time is within its 1,000 ms). `bun run budget` fails on exactly those
-  two lines, so `bun run verify:offline` fails at its last step; every earlier step passes. The bot's own code is about
-  3.7k types and 11k instantiations; the rest is the library (its barrel alone about 72.9k and 264k; M9 found `Bot`
-  alone at 66.9k). The ceilings were set with a library in the program (the design's example bot, 34,652 types,
-  compiled the prototype's source), and the library grew past them as the runtime was built (M5 to M9). To pass, the
-  bot's program must lose about 16,600 types (22%) and 25,300 instantiations (9%). Three ways out, each Rhys's call:
-  1. **Ship declarations and measure through them** (what M10 first did without shipping them, now a proposal): a build
-     step that emits `.d.ts` files, a `types` condition in the package's `exports` pointing at them, the budget project
-     resolving the package through that condition as a consumer does (not a private `paths` mapping), and the library's
-     own check as a budget row with an absolute bound of its own. Measured at `656aa0d`: against emitted declarations
-     the bot costs 12,541 types and 28,926 instantiations (about 35 ms); the library's own check, 72,904 and 264,000.
-  2. **Cut the library's compile cost** without weakening its types. Where it goes (each module with what it imports,
-     types and instantiations, `--checkers 1`): the error classes 26.7k and 108k (the 57 generated `Missing*` classes
-     16.2k and 62k; each `Schema.TaggedError` class instantiates Effect's schema class types, and `effect`'s
-     `schema.d.ts` declares 16.2k of the barrel's 72.9k types), `channels/Ops.ts` 59.3k and 222k, `gateway/Events.ts`
-     62.5k and 234k, `bot/Bot.ts` 67.0k and 244k. Not started: a performance project across the error module and the
-     runtime with an uncertain outcome.
-  3. **Raise the ceilings**, which the design does not allow without this decision.
-
-  Until one is chosen, the Done criterion "a reference bot with no `orDie` that compiles within budget" is not met.
-
 - **The phase-3 checklist (M9; never run by an agent alone).** It shows the eight phase-3 rules' behaviour live and
   answers open question 8 (whether `app_permissions` agrees with the guild state, item `app-permissions`), and Q-17,
   Q-18 and Q-22 below, whose rule parts `verify:live` prints as unmet Done criteria until it is done or Rhys decides
@@ -1479,7 +1454,8 @@ the same commit.
   its handlers cost; the ceiling is not raised here.
 
 - **M10: the reference bot was compiled against emitted declarations; reverted after the M10 verifier, so the budget
-  now fails** (§5.4 updated, §1.2 and §6 M10 too). M10 first mapped `effect-discord-perms` in the bot's budget project
+  failed until the library's compile cost was cut after the second M10 verifier (below)** (§5.4 updated, §1.2 and §6
+  M10 too). M10 first mapped `effect-discord-perms` in the bot's budget project
   with `paths` to declarations emitted afresh on each run into a git-ignored `.budget/` (12,541 types, 28,926
   instantiations, 35 ms), and held the library's own check (72,904, 264,000, 351 ms) to +2% regression gates with no
   ceiling, on the argument that a user's program reads a library's declarations. The M10 verifier showed this loosened
@@ -1493,10 +1469,10 @@ the same commit.
   not include the package's entry point .../src/index.ts (package.json exports "."); it must import
   effect-discord-perms by name, with no paths mapping, as a consumer does`). `tsconfig.declarations.json`, the
   `library` row and the `.budget/` ignore entry are gone. Measured: 76,573 types, 275,255 instantiations, 362 ms, and
-  `bun run budget` fails on the Types and Instantiations ceilings, which stay where they are; the decision is under
-  "Waiting for Rhys", with the declarations measurement as one proposal. The baseline's reference-bot row records that
-  measurement, written by hand because `--update` never writes a baseline over a ceiling (the regression gates matter
-  again once the ceilings pass). The per-command row's baseline is unchanged (7,624 types and 43,245 instantiations;
+  `bun run budget` failed on the Types and Instantiations ceilings, which stayed where they are; the decision went to
+  "Waiting for Rhys" (withdrawn after the second M10 verifier, below), with the declarations measurement as one
+  proposal. The baseline's reference-bot row recorded that measurement, written by hand because `--update` never
+  writes a baseline over a ceiling; it was re-baselined by `--update` once the ceilings passed (below). The per-command row's baseline is unchanged (7,624 types and 43,245 instantiations;
   `--update` wrote the measured 7,636 and 43,296, the M9 verifier's `defer` change, and I put M9's values back rather
   than move a baseline M10 did not change).
 - **M10: the reference bot is two files** (§1.2 updated): `examples/reference-bot/bot.ts`, the bot as a user writes it
@@ -1504,6 +1480,72 @@ the same commit.
   `config/Credentials.ts` (the live lock first, §4.3, §5.6), a repository module that is not public API. The budget
   project compiles both; `Credentials.ts` and what it imports (`Snowflake.ts`, `harness/Lock.ts`) are checked from
   their source there, which is their whole cost.
+- **M10, after the second M10 verifier: the library's compile cost was cut, so the budget passes; the escalation is
+  withdrawn** (§2.2, §2.12 rule 10, §5.4 and §6 M10 updated). The first M10 verifier's result (the reference bot over
+  the Types and Instantiations ceilings, a decision for Rhys between shipping declarations, cutting the cost and
+  raising the ceilings) was put to the second verifier, which showed one mechanical cut and asked for the cost to be
+  cut or the lever recorded. The cost was cut without changing a type a user sees, and the ceilings, the regression
+  gates and the measurement are as they were. The bot now costs **59,620 types, 178,499 instantiations, about 245 ms**
+  (was 76,573, 275,255, 360 ms). Each cut, with what undoing it alone adds back to the final state (measured on the
+  reference bot, `--checkers 1`):
+  - **Error classes as one schema class each** (8,078 types, 50,064 instantiations). `Schema.TaggedError(...).pipe(
+    withCategory(...))` typed every class twice: the mixin's return type is a second `Schema.Class` (187 types a class
+    against 95, measured on 1 and 11 classes). `CategorizedError<Self>()(tag, fields, categories)` (`errors/
+    Category.ts`) is `Schema.TaggedError` with the mixin applied, at run time exactly the piped form (the same
+    subclass and frozen marker, through the shared `mixCategories`), typed as the one class `Schema.TaggedError` gives
+    with `Categorized<...>` in its `Inherited` slot. The categories are written once, so type and marker cannot
+    disagree (the verifier's lever, a marker declared in the class body, would have written them twice). The
+    generator, `State.ts`, `Payload.ts`, `Transient.ts`, `Permission.ts` and `Variants.ts` use it; `withCategory`
+    stays public with its typing, and its implementation signature now returns `(base: never) => ...`, because the
+    overload check against `Schema.Class` cost every consumer about 1,900 types.
+  - **The D5 variants are same-tag classes of their own, not subclasses** (DESIGN D5 "adopted with change"). With the
+    piped mixin on `MissingReadMessageHistory`, tsc matched the subclass's class type against `Schema.Class` member by
+    member: 2,818 types for the two. As `CategorizedError` classes with the tag `"MissingReadMessageHistory"` they keep
+    the tag (`catchTag` still catches all three; `test/types/pass/catch-tag-exact.ts`), the base class's fields, `flag`
+    and `message`, and their categories (the mirror tests); what changes is that `instanceof MissingReadMessageHistory`
+    no longer holds for them, which nothing in the library, harness or tests used except the one unit test that
+    asserted it. That test now asserts the new relation (`not.toBeInstanceOf`), the shared tag, flag and message,
+    distinct frozen markers, and a variant's encode and decode.
+  - **`Wide<E>` implementation error types** (2,319 types, 26,417 instantiations). An overload whose error indexes the
+    operation table with an outer type parameter (`OpErrors<G>[Op]` in `editMethod`, `pinsMethod`, `bulkDeleteMethod`,
+    `pinMethods`, `crosspostMethod`, `editOwnMethod`, `deleteMethod`, `dmDelete`) made tsc's overload check resolve
+    that term's constraint over every row of the table, against `WideError`. The implementations now return
+    `Wide<OpErrors<G>[Op]>` (`WideError` plus that term), which adds nothing to what they may fail with and lets the
+    check relate the term to itself. Where the index is a literal (`OpErrors<G>["thread.join"]`) it saved nothing, so
+    those stay `WideError`.
+  - **Explicit type arguments into large unions** (2,840 and 637 types). `buildHandle` returned `textChannel(...)` and
+    the other nine constructors into `ChannelKinds<PermissionFlag>[GuildChannelKind]`, and tsc inferred each call's `G`
+    from that contextual union too, walking all ten handle types; `buildHandle` now calls `textChannel<PermissionFlag>
+    (...)`. The message handles likewise pass the kind (`reactMethod<"text">(typed)`).
+  - **`Extract<DegradableFlags<P>, PermissionFlag>`** (1,257 types) in place of `Extract<PermissionFlag,
+    DegradableFlags<P>>`, which distributed over the 52 flags into 52 deferred conditionals; for a concrete payload
+    both are the same union.
+  - **Shared aliases for the payload-derived error terms** (about 1,000 types, measured as they were added).
+    `ContentTooLongIn<P>`, `MessageEmptyIn<P>`, `EmbedTooLargeIn<P>`, `PollTooLargeIn<P>`, `NameTooLongIn<N>`, the
+    edit, patch and member terms (`payload/PayloadRules.ts`) and `SendSuccess<C, P>` (`channels/Channel.ts`) replace
+    the inline conditionals that each interface and the overload implementing it wrote twice, so the two signatures
+    resolve to identical types. Rule 1 of §2.12 forbids aliases over a payload because the hover prints the alias;
+    these resolve to one class or `never` for a concrete payload, and the hover snapshots did not change (rule 1 now
+    says so). A single alias for a whole result (`SendResult<C, P>`) saved more (456 types) but the hovers printed
+    `SendResult<TextChannel<never>, {...}>`, so it was not kept.
+  - **One send overload** (about 300 types, measured as it was added): the guild and DM sends now attach
+    `SendMethod`'s signature in one place, `sendMethodOf` in `channels/Ops.ts`.
+
+  What was tried and not kept: `Wide` on overloads with their own type parameters (`createPost`, `setArchived`,
+  `createThread`: no change or worse), a named interface for `createPost`'s argument (20 types), taking `AllErrors`
+  out of the barrel (143 types in the bot's program; an explicit union saved nothing), and a category check inside the mixin
+  (`withCategory` comparing its list with a declared brand: 40 to 150 types a class more, and cascading diagnostics).
+  The margin under the Types ceiling is 380 types: the next growth of the library's types will meet it.
+- **M10, after the second M10 verifier: the budget's guard checks the import's resolution** (§5.4 updated). The second
+  verifier showed that the guard (the bot's program includes `src/index.ts`) would pass a `paths` mapping of the
+  package to anything else whenever another file imports `src/index.ts`. `consumerResolutionProblem`
+  (`scripts/lib/budget.ts`) reads `tsc --traceResolution` and fails unless the bot imports `effect-discord-perms` and
+  every such import resolves to `exports["."]`. Checked by mapping the package, in the bot's project, to a file under
+  `.scratch/` that re-exports `src/index.ts` (so the program still contains the entry point): `budget FAIL: the
+  reference bot's import of effect-discord-perms resolves to .../.scratch/fake/index.ts, not to the package's entry
+  point .../src/index.ts (package.json exports "."); it must resolve through the package's exports, with no paths
+  mapping, as a consumer's does`. The unit tests cover that case, a resolution elsewhere, a missing import and an
+  unresolved one.
 
 ## Escalated rules
 

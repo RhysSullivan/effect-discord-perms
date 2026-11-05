@@ -16,10 +16,9 @@
  * author with the bot's user ID; `send` and `edit` return own messages.
  */
 import type { Effect } from "effect"
-import type { ContentTooLong, EmbedTooLarge, MessageEmpty, NameTooLong } from "../errors/Payload.ts"
 import type { OpErrors, OpFlags, OpName, OpPermissionErrors, OpTags, Transient } from "../permissions/Operations.ts"
 import type { EditArg, EditMessage, Emoji } from "../payload/Message.ts"
-import type { EditMayEmpty, MayBeTooLong, MayExceed } from "../payload/PayloadRules.ts"
+import type { ContentTooLongIn, EditEmbedTooLargeIn, EditMessageEmptyIn, NameTooLongIn } from "../payload/PayloadRules.ts"
 import type { ChannelId, GuildId, MessageId, UserId } from "../Snowflake.ts"
 import type { ChannelKinds, MessageKind, ThreadKind } from "./Channel.ts"
 
@@ -62,7 +61,7 @@ export type ThreadFrom<K extends MessageKind> = K extends "announcement" ? "anno
 
 /** `POST /channels/{channel.id}/messages/{message.id}/threads`. A non-literal name may be too long. */
 export interface CreateThreadFromMessage<K extends MessageKind> {
-  <const T extends { readonly name: string }>(thread: T): Effect.Effect<ChannelKinds<never>[ThreadFrom<K>], OpErrors<never>["channel.createThread.public"] | (MayExceed<T["name"]> extends true ? NameTooLong : never)>
+  <const T extends { readonly name: string }>(thread: T): Effect.Effect<ChannelKinds<never>[ThreadFrom<K>], OpErrors<never>["channel.createThread.public"] | NameTooLongIn<T["name"]>>
 }
 
 /** Reacting: every kind with a guild. */
@@ -111,9 +110,9 @@ export interface EditOwnMethod<K extends MessageKind> {
   <const P extends EditMessage>(patch: EditArg<P>): Effect.Effect<
     OwnMessage<K>,
     | OpErrors<never>[EditOp<K>]
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (P extends { readonly embeds: infer E } ? (E extends readonly [] ? never : EmbedTooLarge) : never)
-    | (EditMayEmpty<P> extends true ? MessageEmpty : never)
+    | ContentTooLongIn<P>
+    | EditEmbedTooLargeIn<P>
+    | EditMessageEmptyIn<P>
   >
 }
 

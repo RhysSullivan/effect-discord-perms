@@ -16,14 +16,13 @@ import { Clock, Effect, Schema } from "effect"
 import { BotRuntime } from "../bot/Runtime.ts"
 import { perform, type Runtime, type WideError } from "../channels/Ops.ts"
 import { PreflightDecision } from "../errors/Cause.ts"
-import type { NicknameTooLong, TimeoutTooLong } from "../errors/Payload.ts"
 import { UnknownMember } from "../errors/State.ts"
 import type { Transient } from "../errors/Transient.ts"
 import type { OpErrors, OpName } from "../permissions/Operations.ts"
 import type * as Recompute from "../permissions/Recompute.ts"
 import type { MemberInput } from "../permissions/Resolver.ts"
 import * as Limits from "../payload/Limits.ts"
-import type { MayExceed } from "../payload/PayloadRules.ts"
+import type { NicknameTooLongIn, TimeoutTooLongIn } from "../payload/PayloadRules.ts"
 import type * as DiscordApi from "../rest/DiscordApi.ts"
 import type { LimitFacts } from "../rest/ErrorMap.ts"
 import * as Schemas from "../rest/Schemas.ts"
@@ -40,9 +39,9 @@ export interface GuildMember {
   /** `DELETE /guilds/{guild.id}/members/{user.id}/roles/{role.id}`. */
   readonly removeRole: (role: RoleId) => Effect.Effect<void, OpErrors<never>["member.removeRole"]>
   /** `PATCH /guilds/{guild.id}/members/{user.id}` with `nick`; `null` clears it. */
-  readonly setNickname: <const N extends string | null>(nick: N) => Effect.Effect<void, OpErrors<never>["member.setNickname"] | (MayExceed<N> extends true ? NicknameTooLong : never)>
+  readonly setNickname: <const N extends string | null>(nick: N) => Effect.Effect<void, OpErrors<never>["member.setNickname"] | NicknameTooLongIn<N>>
   /** `PATCH /guilds/{guild.id}/members/{user.id}` with `communication_disabled_until`; `null` lifts the timeout. */
-  readonly timeout: <const U extends Date | null>(until: U) => Effect.Effect<void, OpErrors<never>["member.timeout"] | (MayExceed<U> extends true ? TimeoutTooLong : never)>
+  readonly timeout: <const U extends Date | null>(until: U) => Effect.Effect<void, OpErrors<never>["member.timeout"] | TimeoutTooLongIn<U>>
   /** `DELETE /guilds/{guild.id}/members/{user.id}`. */
   readonly kick: () => Effect.Effect<void, OpErrors<never>["member.kick"]>
   /** `PUT /guilds/{guild.id}/bans/{user.id}`; `deleteMessageSeconds` defaults to 0. */
@@ -86,7 +85,7 @@ export const memberHandle = (runtime: Runtime, guildId: GuildId, member: Schemas
   function removeRole(role: RoleId): Effect.Effect<void, WideError> {
     return run("discord.member.removeRole", "member.removeRole", role, { method: "DELETE", template: roleRoute }, (rest) => rest.deleteGuildMemberRole(guildId, userId, role), Schema.Void, [], {})
   }
-  function setNickname<const N extends string | null>(nick: N): Effect.Effect<void, OpErrors<never>["member.setNickname"] | (MayExceed<N> extends true ? NicknameTooLong : never)>
+  function setNickname<const N extends string | null>(nick: N): Effect.Effect<void, OpErrors<never>["member.setNickname"] | NicknameTooLongIn<N>>
   function setNickname(nick: string | null): Effect.Effect<void, WideError> {
     const limits: LimitFacts = nick === null ? {} : { nick: { length: Limits.lengthOf(nick), limit: Limits.Limits.nickname } }
     return run(
@@ -100,7 +99,7 @@ export const memberHandle = (runtime: Runtime, guildId: GuildId, member: Schemas
       limits
     )
   }
-  function timeout<const U extends Date | null>(until: U): Effect.Effect<void, OpErrors<never>["member.timeout"] | (MayExceed<U> extends true ? TimeoutTooLong : never)>
+  function timeout<const U extends Date | null>(until: U): Effect.Effect<void, OpErrors<never>["member.timeout"] | TimeoutTooLongIn<U>>
   function timeout(until: Date | null): Effect.Effect<void, WideError> {
     return Effect.flatMap(Clock.currentTimeMillis, (now) =>
       run(

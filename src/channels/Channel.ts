@@ -15,11 +15,10 @@
  */
 import type { Effect } from "effect"
 import type { PermissionFlag } from "../errors/Missing.generated.ts"
-import type { ContentTooLong, EmbedTooLarge, MessageEmpty, NameTooLong, PollTooLarge, SlowmodeOutOfRange, TopicTooLong } from "../errors/Payload.ts"
 import type { OpErrors, OpFlags, OpPermissionErrors, OpTags, Revoked, Transient } from "../permissions/Operations.ts"
 import type { Invalid } from "../payload/Components.ts"
 import type { CreateArg, MessagePayload } from "../payload/Message.ts"
-import type { DegradableFlags, MayBeEmpty, MayBeTooLong, MayExceed, MayInclude, PayloadFlags } from "../payload/PayloadRules.ts"
+import type { ContentTooLongIn, DegradableFlags, EmbedTooLargeIn, MessageEmptyIn, NameTooLongIn, PatchNameTooLongIn, PatchSlowmodeOutOfRangeIn, PatchTopicTooLongIn, PayloadFlags, PollTooLargeIn } from "../payload/PayloadRules.ts"
 import type { ChannelId, ForumTagId, GuildId, MessageId, UserId } from "../Snowflake.ts"
 import type { AnyMessage, OwnMessages } from "./Message.ts"
 
@@ -75,6 +74,9 @@ type GuildPayloadFlags<C extends SendReceiver, P> = [Exclude<C["kind"], "dm">] e
 /** Every flag a send of `P` on `C` needs. */
 export type SendFlags<C extends SendReceiver, P> = OpFlags[SendOpByKind[C["kind"]]] | GuildPayloadFlags<C, P>
 
+/** What a send of `P` on `C` succeeds with: `Sent`, or `SentDegradable` with the flags when `P` may degrade. */
+export type SendSuccess<C extends SendReceiver, P> = [DegradableFlags<P>] extends [never] ? Sent<C["kind"]> : SentDegradable<C["kind"], Extract<DegradableFlags<P>, PermissionFlag>>
+
 /**
  * `POST /channels/{channel.id}/messages`: one method type shared by every message kind; `this` carries the kind
  * and the granted flags, so the same signature serves a narrowed handle, a union, and a handle from `require`.
@@ -85,13 +87,13 @@ export type SendFlags<C extends SendReceiver, P> = OpFlags[SendOpByKind[C["kind"
  */
 export interface SendMethod {
   <C extends SendReceiver, const P extends MessagePayload>(this: C, payload: CreateArg<P>): Effect.Effect<
-    [DegradableFlags<P>] extends [never] ? Sent<C["kind"]> : SentDegradable<C["kind"], Extract<PermissionFlag, DegradableFlags<P>>>,
+    SendSuccess<C, P>,
     | OpPermissionErrors[SendOpByKind[C["kind"]]][Exclude<SendFlags<C, P>, GrantedOf<C>>]
     | Revoked<SendFlags<C, P>, GrantedOf<C>>
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (true extends MayBeEmpty<P> ? MessageEmpty : never)
-    | (MayInclude<P, "embeds"> extends true ? EmbedTooLarge : never)
-    | (MayInclude<P, "poll"> extends true ? PollTooLarge : never)
+    | ContentTooLongIn<P>
+    | MessageEmptyIn<P>
+    | EmbedTooLargeIn<P>
+    | PollTooLargeIn<P>
     | OpTags[SendOpByKind[C["kind"]]]
     | Transient
   >
@@ -132,9 +134,9 @@ export interface Editable<Op extends "channel.edit" | "voice.edit" | "thread.edi
   readonly edit: <const P extends ChannelPatch>(patch: PatchArg<P, Fields>) => Effect.Effect<
     void,
     | OpErrors<G>[Op]
-    | (P extends { readonly name: infer N } ? (MayExceed<N> extends true ? NameTooLong : never) : never)
-    | (P extends { readonly topic: infer T } ? (MayExceed<T> extends true ? TopicTooLong : never) : never)
-    | (P extends { readonly slowmodeSeconds: infer S } ? (MayExceed<S> extends true ? SlowmodeOutOfRange : never) : never)
+    | PatchNameTooLongIn<P>
+    | PatchTopicTooLongIn<P>
+    | PatchSlowmodeOutOfRangeIn<P>
   >
 }
 
@@ -161,7 +163,7 @@ export interface StartsThreads<Private extends boolean, Public extends ThreadKin
   /** `POST /channels/{channel.id}/threads`. A non-literal name may be too long. */
   readonly createThread: <const T extends { readonly name: string; readonly private?: boolean }>(thread: ThreadArg<T, Private>) => Effect.Effect<
     ChannelKinds<never>[ThreadOf<T, Public>],
-    OpErrors<G>[CreateThreadOp<T>] | (MayExceed<T["name"]> extends true ? NameTooLong : never)
+    OpErrors<G>[CreateThreadOp<T>] | NameTooLongIn<T["name"]>
   >
 }
 
@@ -190,11 +192,11 @@ export interface PostsMessages<G extends PermissionFlag> {
     PublicThread<never>,
     | OpPermissionErrors["forum.createPost"][Exclude<OpFlags["forum.createPost"] | PayloadFlags<P>, G>]
     | Revoked<OpFlags["forum.createPost"] | PayloadFlags<P>, G>
-    | (true extends MayBeTooLong<P> ? ContentTooLong : never)
-    | (true extends MayBeEmpty<P> ? MessageEmpty : never)
-    | (MayInclude<P, "embeds"> extends true ? EmbedTooLarge : never)
-    | (MayInclude<P, "poll"> extends true ? PollTooLarge : never)
-    | (MayExceed<N> extends true ? NameTooLong : never)
+    | ContentTooLongIn<P>
+    | MessageEmptyIn<P>
+    | EmbedTooLargeIn<P>
+    | PollTooLargeIn<P>
+    | NameTooLongIn<N>
     | OpTags["forum.createPost"]
     | Transient
   >

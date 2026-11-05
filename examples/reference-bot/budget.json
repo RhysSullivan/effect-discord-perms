@@ -2,10 +2,10 @@
   "typescript": "7.0.2",
   "referenceBot": {
     "files": 673,
-    "types": 76573,
-    "instantiations": 275255,
-    "memoryKb": 234392,
-    "checkMs": 362
+    "types": 59620,
+    "instantiations": 178499,
+    "memoryKb": 212398,
+    "checkMs": 244
   },
   "perCommand": {
     "commands": 20,
