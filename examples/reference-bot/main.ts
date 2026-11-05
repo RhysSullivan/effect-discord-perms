@@ -6,7 +6,9 @@
  * The token is read the only way this repository reads a Perms Lab token: through `config/Credentials.ts`, which takes
  * the host's live lock first and holds it while the bot runs (DESIGN §4.3, §5.6), so the bot never drives Perms Lab
  * while the harness does. Run it only on minisforum (the lock is host-local) and only when nothing else live runs.
- * `/poll` is registered in Perms Lab at startup; the next harness reset removes it.
+ * `/poll` is registered in Perms Lab at startup; the next harness reset removes it. Unlike the harness's identities,
+ * its requests do not pass the lab guard (§5.6, which lives in the harness's shared client): it is an ordinary bot,
+ * run by hand only. `test/unit/reference-bot.test.ts` drives it through the real bot build over a fake Discord.
  *
  * Every startup failure is a typed error (`StartupFailed`, `ConfigError`, `LockHeld`, `PlatformError`), which
  * `runMain` reports before exiting non-zero.
