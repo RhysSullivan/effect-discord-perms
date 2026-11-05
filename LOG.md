@@ -12,15 +12,20 @@ milestone appends its entries.
 - **The phase-3 checklist (M9; never run by an agent alone).** It shows the eight phase-3 rules' behaviour live and
   answers open question 8 (whether `app_permissions` agrees with the guild state, item `app-permissions`), and Q-17,
   Q-18 and Q-22 below, whose rule parts `verify:live` prints as unmet Done criteria until it is done or Rhys decides
-  otherwise. One sitting of about ten minutes, with an agent at the minisforum terminal:
+  otherwise. One sitting of about fifteen minutes, with an agent at the minisforum terminal:
   1. The agent runs `bun --no-env-file harness/main.ts checklist` (it takes the live lock; nothing else live runs then).
+     It resets the lab and gives the subject the rule rows' `text-messages` setup (`lab-grant` with View, SendMessages
+     and ReadMessageHistory, so it sees #lab-text), and resets the lab again when it ends, however it ends. It needs
+     about four role edits of the guild's bucket and one command create.
   2. In Perms Lab, in #lab-text, start typing `/checklist`, type a few letters in its `search` option and check that a
      suggestion `search: <your letters>` appears; then run it with any choice, any member and #lab-text.
-  3. The bot replies with what it decoded and posts ten buttons, each with a line saying what should happen. Click each
-     button, compare, and click "As expected" or "Not as expected" under its answer (and under the /checklist reply).
+  3. The bot replies with what it decoded (with a verdict pair), then posts five messages: autocomplete's verdict pair;
+     seven prompt buttons, each with a line saying what should happen; the Update prompt; the Slow update prompt; and
+     the Expired prompt with its verdict pair. Click each prompt button, compare, and click "As expected" or "Not as
+     expected" under its answer (the two update prompts' verdicts replace their buttons). Twelve verdicts in all.
   4. Open a DM with Perms Subject: send any message, add a reaction to it, and type for a few seconds.
   5. When the terminal says "Now without the DM intents", DM it once more (message, reaction, typing), then post any
-     message in #lab-text.
+     message in #lab-text (the canary; the closing reset leaves your own messages, so delete it afterwards if you like).
   6. Paste the "checklist results" block the terminal prints back to the agent, who records it here.
 
   The alternative for each question below is to accept that part as typed and unit-tested only.

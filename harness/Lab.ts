@@ -37,8 +37,11 @@
  *   are never edited or deleted;
  * - nothing creates or writes to a DM channel, leaves the guild, edits global commands, webhooks or invites, except
  *   an interaction's answers (M9, the checklist Rhys runs): its callback, and the follow-ups and original-response edits
- *   of the subject application's interaction webhook (`/webhooks/{subject's application}/{token}`). An interaction can
- *   only come from where the subject's commands and buttons are, and they are registered and posted in the lab only.
+ *   of the subject application's interaction webhook (`/webhooks/{subject's application}/{token}`). Their URLs name no
+ *   channel, so the guard cannot check where the answer goes: a guild command can be invoked in any channel the invoker
+ *   can use, `#rules` and `#mod-updates` included, and Rhys owns the guild. So the checklist drops an interaction from
+ *   any channel that is not an admitted lab channel (`isLabChannel`) before a handler sees it
+ *   (`ChecklistRun.labInteractionsOnly`), and nothing answers it (the M9 verifier).
  *
  * A lab object is admitted after the harness has read it from Discord (or created it) and checked its name and
  * guild, so the stored IDs in `.lab-state.json` are never trusted on their own.
@@ -364,6 +367,11 @@ export interface Interface {
   readonly checkDry: (request: HttpClientRequest.HttpClientRequest) => Effect.Effect<void>
   /** Allows writes, once the identity checks have found the bots and the protected channels. */
   readonly arm: (armed: Armed) => Effect.Effect<void>
+  /**
+   * Whether `channelId` is an admitted lab channel (and so not protected): what the checklist asks of an interaction's
+   * channel, which the URL of its answer does not name. False before the guard is armed.
+   */
+  readonly isLabChannel: (channelId: string) => Effect.Effect<boolean>
   /** Admits a channel the harness read or created. Dies if it is not a lab channel. */
   readonly admitChannel: (channel: { readonly id: ChannelId; readonly name: string }) => Effect.Effect<void>
   /** Admits a role the harness read or created. Dies if it is neither a lab role nor a bot's managed role. */
@@ -441,6 +449,10 @@ export const make = (guildId: GuildId): Effect.Effect<Interface> =>
           })
         ),
       arm: (armed) => Ref.update(state, (current) => ({ ...current, armed: Option.some(armed) })),
+      isLabChannel: (channelId) =>
+        Ref.get(state).pipe(
+          Effect.map((current) => Option.isSome(current.armed) && current.channels.has(channelId) && !current.armed.value.protectedChannels.has(channelId))
+        ),
       admitChannel: (channel) =>
         Effect.gen(function* () {
           const armed = yield* armedState

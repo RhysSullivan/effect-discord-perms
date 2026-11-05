@@ -2055,7 +2055,16 @@ orchestrator sets that flag, and §4.4 reads it back.
   failure `discord-unavailable`, 401 `invalid-token`; anything else is an unmapped
   defect.)
 - The `checklist` command posts the phase-3 prompts. It is registered and
-  tested offline only.
+  tested offline only. (After the M9 verifier, which found that a sitting could
+  never finish: every one of its twelve items has a verdict pair, under its answer
+  or, for autocomplete and the expired control, whose answers carry no buttons, on
+  its own prompt's message; the update and slow-update prompts each have a message
+  of their own, because an update replaces its message's components; and
+  `harness/main.ts checklist` converges the lab to the rule rows' `text-messages`
+  setup first and resets it after (also when the sitting fails or is
+  interrupted), so the subject sees #lab-text and the DM absence check's canary,
+  a message there, can reach it. `checklist.test.ts` drives a whole simulated
+  sitting, clicking every button a human would see, to `ChecklistRun.isDone`.)
 - (M9, as built in `interactions/Runner.ts`.) Each registration subscribes to INTERACTION_CREATE on the build's own
   dispatch stream (`Dispatches.DispatchName` adds INTERACTION_CREATE, which needs no intent, beside `bot.on`'s events),
   as `bot.on` does, so a command or route is registered once; each interaction runs in its own fiber and scope, in a
@@ -2470,7 +2479,11 @@ member), `R-must-respond` a forged response literal, `R-deferred-must-complete` 
   - (M9) an interaction's callback and the subject application's interaction webhook (a follow-up, or the original
     response's edit or delete) are admitted once the identity checks arm the guard with the subject's application ID:
     they answer only interactions the subject received, which come from the lab, where its commands and buttons are
-    (the checklist Rhys runs, `harness/main.ts checklist`); any other webhook stays refused;
+    (the checklist Rhys runs, `harness/main.ts checklist`); any other webhook stays refused. (After the M9 verifier:
+    those URLs name no channel, and a guild command can be invoked in any channel, `#rules` included, so the guard
+    alone cannot keep an answer out of a protected channel. The checklist registers its handlers on a runtime whose
+    INTERACTION_CREATE dispatches pass only from channels the guard admitted, `LabGuard.isLabChannel`, through
+    `ChecklistRun.labInteractionsOnly`; any other interaction is dropped with a warning and never answered.)
   - the guild is `DISCORD_TEST_GUILD_ID` (reads too, for guild routes);
   - the channel or role is in the provisioned lab set (by stored ID, admitted
     after the harness read or created it and checked its `lab`/`lab-*` name)

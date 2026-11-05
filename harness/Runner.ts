@@ -145,7 +145,7 @@ const Remaining = Schema.Struct({ permissions: Schema.String })
  * `lab-grant`'s permissions back unchanged and reading `x-ratelimit-remaining` (§5.11; M4 live: a run that starts
  * short stalls inside dfx's limiter without a 429). Costs one role edit.
  */
-const checkRoleBudget = (ids: Materialize.Ids, needed: number): Effect.Effect<void, LabCheckFailed | LabRequestFailed, HarnessRest> =>
+export const checkRoleBudget = (ids: Materialize.Ids, needed: number): Effect.Effect<void, LabCheckFailed | LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {
     const rest = yield* HarnessRest
     const grant = ids.roles.get("lab-grant")

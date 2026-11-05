@@ -275,6 +275,19 @@ describe("the guard service", () => {
     })
   )
 
+  it.effect("says a channel is a lab channel only once armed and admitted, never a protected or unknown one (the checklist's interactions, M9 verifier)", () =>
+    Effect.gen(function* () {
+      const guard = yield* make(guild)
+      expect(yield* guard.isLabChannel(labChannel)).toBe(false)
+      yield* guard.arm({ harnessUserId: harness, subjectUserId: subject, targetUserId: target, protectedChannels: new Set([rules]) })
+      expect(yield* guard.isLabChannel(labChannel)).toBe(false)
+      yield* guard.admitChannel({ id: labChannel, name: "lab-text" })
+      expect(yield* guard.isLabChannel(labChannel)).toBe(true)
+      expect(yield* guard.isLabChannel(rules)).toBe(false)
+      expect(yield* guard.isLabChannel(elsewhere)).toBe(false)
+    })
+  )
+
   it.effect("issues a one-shot kick or ban permit only when the docs model predicts failure from the harness's reads (§5.6)", () =>
     Effect.gen(function* () {
       const guard = yield* make(guild)

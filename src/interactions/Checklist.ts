@@ -4,9 +4,13 @@
  * Rhys's (LOG.md "Waiting for Rhys"), through `harness/main.ts checklist`.
  *
  * `/checklist` (with its options filled in) replies with the invocation it decoded (Q-18: the option values a handler
- * receives), then posts the prompts: a button per item, each exercising one path of the runner, on the route whose
- * mode that path needs. Every answer carries two verdict buttons, "As expected" and "Not as expected"; the human's
- * verdicts are kept in {@link Session.verdicts} and logged. {@link items} says what the human should see.
+ * receives), then posts {@link followUps}: a button per item, each exercising one path of the runner, on the route whose
+ * mode that path needs. Every item gets two verdict buttons, "As expected" and "Not as expected": under its answer, or,
+ * for the two items whose answer carries none (autocomplete's suggestions, the runner's fixed expired-control reply), on
+ * its own prompt's message. A verdict replaces the message it is on, and an update replaces its button's message, so
+ * each update prompt has a message of its own (the M9 verifier: on one shared message, the first update removed every
+ * other prompt). The human's verdicts are kept in {@link Session.verdicts} and logged. {@link items} says what the human
+ * should see.
  */
 import { Effect, Ref, Schema, type Scope } from "effect"
 import type { BotRuntime } from "../bot/Runtime.ts"
@@ -109,27 +113,44 @@ const verdictRow = (item: Item): Effect.Effect<ActionRow, CustomIdTooLong> =>
 const button = (label: string, customId: Effect.Effect<InteractiveButton["customId"], CustomIdTooLong>): Effect.Effect<InteractiveButton, CustomIdTooLong> =>
   Effect.map(customId, (id) => ({ kind: "button", style: "primary", label, customId: id }))
 
-/** The prompts' rows: a button per item (the option values and autocomplete are checked on /checklist itself). */
-export const promptRows: Effect.Effect<ReadonlyArray<ActionRow>, CustomIdTooLong> = Effect.gen(function* () {
-  const first = [
+/** One message the checklist posts after its reply: its text and its rows. */
+export interface Prompt {
+  readonly content: string
+  readonly components: ReadonlyArray<ActionRow>
+}
+
+/** An item's line: its name and what the human checks. */
+const line = (item: Item): string => `${item}: ${items[item]}`
+
+/** The items answered with a new message, which carries the item's verdict: the prompts on one message. */
+export const replyItems = ["click-data", "slow-public", "slow-ephemeral", "modal", "follow-up", "defer-edit", "app-permissions"] as const satisfies ReadonlyArray<Item>
+
+/**
+ * The follow-ups after `/checklist`'s reply, in order: autocomplete's verdict (its answer is Discord's suggestion list),
+ * the prompts answered with a new message, the update prompt and the slow update prompt on a message each (an update
+ * replaces its message), and the expired control with its verdict (the runner's expired-control reply carries none).
+ * Every item but `option-values`, whose verdict is on the reply, appears on exactly one of them.
+ */
+export const followUps: Effect.Effect<ReadonlyArray<Prompt>, CustomIdTooLong> = Effect.gen(function* () {
+  const replies = [
     yield* button("Click data", manualStep.customId({ item: "click-data", n: 42 })),
     yield* button("Slow public", publicStep.customId({ item: "slow-public" })),
     yield* button("Slow ephemeral", ephemeralStep.customId({ item: "slow-ephemeral" })),
-    yield* button("Update", updateStep.customId({ item: "update" })),
-    yield* button("Slow update", updateStep.customId({ item: "slow-update" }))
-  ] as const
-  const second = [
     yield* button("Modal", manualStep.customId({ item: "modal" })),
-    yield* button("Follow-up", manualStep.customId({ item: "follow-up" })),
-    yield* button("Defer, edit", manualStep.customId({ item: "defer-edit" })),
-    yield* button("Expired", oldControl.customId({ version: 1 })),
-    yield* button("app_permissions", manualStep.customId({ item: "app-permissions" }))
+    yield* button("Follow-up", manualStep.customId({ item: "follow-up" }))
   ] as const
-  return [row(first), row(second)]
+  const more = [yield* button("Defer, edit", manualStep.customId({ item: "defer-edit" })), yield* button("app_permissions", manualStep.customId({ item: "app-permissions" }))] as const
+  return [
+    { content: `${line("autocomplete")}\nDid it? Click a verdict.`, components: [yield* verdictRow("autocomplete")] },
+    { content: ["Click each button, check its answer against its line, and click the verdict under the answer.", ...replyItems.map(line)].join("\n"), components: [row(replies), row(more)] },
+    { content: `${line("update")}\nClick the button, then the verdict that replaces it.`, components: [row([yield* button("Update", updateStep.customId({ item: "update" }))])] },
+    { content: `${line("slow-update")}\nClick the button, then the verdict that replaces it.`, components: [row([yield* button("Slow update", updateStep.customId({ item: "slow-update" }))])] },
+    { content: `${line("expired")}\nClick the button, then a verdict here.`, components: [row([yield* button("Expired", oldControl.customId({ version: 1 }))]), yield* verdictRow("expired")] }
+  ]
 })
 
-/** The prompts' text: each item and what to see. */
-export const promptText = ["Phase-3 checklist: click each button below, then its verdict.", ...itemList.map((item) => `- ${item}: ${items[item]}`)].join("\n")
+/** `/checklist`'s reply: the options it decoded, and what to check. */
+export const optionValuesText = (decoded: string): string => `option-values: ${decoded}\nCheck: ${items["option-values"]}`
 
 /** Builds a checklist session (see the module comment). */
 export const make: Effect.Effect<Session> = Effect.gen(function* () {
@@ -140,10 +161,13 @@ export const make: Effect.Effect<Session> = Effect.gen(function* () {
   const onCommand = Interactions.command(command, (ix) =>
     Effect.gen(function* () {
       const { pick, who, where } = ix.invocation.options
-      const rows = yield* promptRows
+      const prompts = yield* followUps
       const components = yield* verdictsFor("option-values")
-      return yield* ix.reply({ content: `option-values: pick=${pick}, who=${who.id}, where=${where.kind} ${where.id}`, components }, (answered) =>
-        answered.followUp({ content: promptText, components: rows }).pipe(catchCategory(["permission", "state", "payload"], (error) => failed(`the prompts: ${error._tag}`)))
+      return yield* ix.reply({ content: optionValuesText(`pick=${pick}, who=${who.id}, where=${where.kind} ${where.id}`), components }, (answered) =>
+        // in order, each after the one before; a refused prompt stops the rest, and is logged
+        Effect.forEach(prompts, (prompt) => answered.followUp({ content: prompt.content, components: prompt.components }), { discard: true }).pipe(
+          catchCategory(["permission", "state", "payload"], (error) => failed(`the prompts: ${error._tag}`))
+        )
       )
     }).pipe(catchCategory("payload", (error) => ix.reply({ content: `checklist: ${error._tag}` })))
   )
