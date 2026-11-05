@@ -42,7 +42,12 @@ Type 'true' is not assignable to type 'true & Invalid<"ephemeral must match the 
   Type 'boolean' is not assignable to type 'Invalid<"ephemeral must match the registration mode public">'.
 
 L59:64 TS2322
-Type 'true' is not assignable to type 'false'.
+Type 'true' is not assignable to type 'true & Invalid<"ephemeral must match the registration mode public">'.
+  Type 'boolean' is not assignable to type 'Invalid<"ephemeral must match the registration mode public">'.
 
-L61:59 TS2339
+L61:77 TS2322
+Type 'false' is not assignable to type 'false & Invalid<"ephemeral must match the registration mode ephemeral">'.
+  Type 'boolean' is not assignable to type 'Invalid<"ephemeral must match the registration mode ephemeral">'.
+
+L63:59 TS2339
 Property 'reply' does not exist on type 'UpdateComponentInteraction<{ readonly poll: number; readonly choice: "no" | "yes"; }>'.

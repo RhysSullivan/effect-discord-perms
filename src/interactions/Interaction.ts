@@ -78,11 +78,14 @@ export type ModalMode = "public" | "ephemeral"
 /** The ephemeral state a mode fixes: `false` for "public", `true` for "ephemeral", either for "manual". */
 export type EphemeralFor<M> = M extends "public" ? false : M extends "ephemeral" ? true : boolean
 
+/** An `ephemeral` value `X` under mode `M`: itself when the mode allows it, else a type naming the rule and the mode. */
+export type EphemeralMatches<X, M> = [X] extends [EphemeralFor<M>] ? unknown : Invalid<`ephemeral must match the registration mode ${M & string}`>
+
 /** After a deferral the ephemeral state cannot change (H-227), so a reply must agree with the registration. */
 export type EphemeralCheck<P, M> = P extends { readonly ephemeral: infer X }
   ? [X] extends [EphemeralFor<M>]
     ? unknown
-    : { readonly ephemeral: X & Invalid<`ephemeral must match the registration mode ${M & string}`> }
+    : { readonly ephemeral: X & EphemeralMatches<X, M> }
   : unknown
 
 /** Everything checked on a reply or follow-up: a body, known keys, the mode's ephemeral state. */
@@ -207,8 +210,14 @@ export interface Replies<M> {
     | (true extends MayBeEmpty<P> ? MessageEmpty : never)
     | (MayInclude<P, "embeds"> extends true ? EmbedTooLarge : never)
   >
-  /** Defers (callback 5, EPHEMERAL as the mode fixes it); the continuation must complete the deferral. */
-  readonly defer: <A2, E2, R2>(options: { readonly ephemeral: EphemeralFor<M> }, then: (deferred: Answered) => HandledCompletion<A2, E2, R2>) => Effect.Effect<Response<R2>>
+  /**
+   * Defers (callback 5, EPHEMERAL as the mode fixes it); the continuation must complete the deferral. An `ephemeral`
+   * the mode does not allow names the rule and the mode (`EphemeralMatches`).
+   */
+  readonly defer: <const X extends boolean, A2, E2, R2>(
+    options: { readonly ephemeral: X & EphemeralMatches<X, M> },
+    then: (deferred: Answered) => HandledCompletion<A2, E2, R2>
+  ) => Effect.Effect<Response<R2>>
 }
 
 /** `update` and `deferUpdate`, on a component's message. */

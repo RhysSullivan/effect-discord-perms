@@ -1,11 +1,11 @@
 /**
  * A bot runtime for the interaction runner's tests (DESIGN §4.14, M9): the real `DiscordApi` and route check over a
  * recording fake of Discord, the real dispatch stream, and a stubbed guild state. `publish` hands an INTERACTION_CREATE
- * to the registrations; `sent` lists every request with its JSON body; `logs` every log line.
+ * to the registrations; `sent` lists every request with its JSON body; `logs` every log line, with its annotations.
  */
 import { DiscordConfig, DiscordRESTMemoryLive } from "dfx"
 import { DiscordREST } from "dfx/DiscordREST"
-import { Effect, Layer, Logger, Redacted, Ref, Schema, type Scope } from "effect"
+import { Effect, Layer, Logger, Redacted, Ref, References, Schema, type Scope } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { BotRuntime } from "../../src/bot/Runtime.ts"
@@ -59,8 +59,11 @@ export const withRunner = <A, E>(
     const rest = DiscordRESTMemoryLive.pipe(Layer.provide(DiscordConfig.layer({ token: Redacted.make("fake-token") })), Layer.provide(Layer.succeed(HttpClient.HttpClient, checked(client))))
     const snapshot = snapshotOf({ roles: [role(everyone, set("ViewChannel", "SendMessages"), 0)], channels: [channel("text")], botRoles: [] })
     const stub = yield* stubGuildState(snapshot, snapshot)
+    // each line with its annotations (dfx annotates its own log lines with the request's URL and route)
     const collector = Logger.make((options) => {
-      logs.pipe(Ref.update((all) => [...all, `${options.logLevel}: ${[options.message].flat().join(" ")}`]), Effect.runSync)
+      const annotations = options.fiber.getRef(References.CurrentLogAnnotations)
+      const annotated = Object.keys(annotations).length === 0 ? "" : ` ${JSON.stringify(annotations)}`
+      logs.pipe(Ref.update((all) => [...all, `${options.logLevel}: ${[options.message].flat().join(" ")}${annotated}`]), Effect.runSync)
     })
     return yield* Effect.gen(function* () {
       const dispatches = yield* Dispatches.Dispatches

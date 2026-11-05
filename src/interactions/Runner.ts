@@ -55,7 +55,7 @@ import {
   completed,
   type ComponentIx,
   type ComponentMode,
-  type EphemeralFor,
+  type EphemeralMatches,
   type HandledCompletion,
   type HandledIx,
   type InteractionContext,
@@ -311,9 +311,10 @@ const answeredFor = (session: Session): Answered => {
       const answer = yield* session.runtime.api.sendJson(routes.followUp, webhookPath(session), withFlags(payload))
       if (answer._tag === "Ok") return
       if (answer.response.code === 50013) {
-        // attributed from the interaction's own permissions, never guessed
-        const held = session.appPermissions !== undefined && Flags.has(session.appPermissions, "SendMessages")
-        return yield* Effect.fail(held ? new PermissionDeniedUnattributed({ cause: answer.response }) : missing.SendMessages(answer.response))
+        // attributed from the interaction's own permissions, never guessed: MissingSendMessages only when app_permissions
+        // is present and lacks the flag; held, or absent, it is unattributed
+        const lacks = session.appPermissions !== undefined && !Flags.has(session.appPermissions, "SendMessages")
+        return yield* Effect.fail(lacks ? missing.SendMessages(answer.response) : new PermissionDeniedUnattributed({ cause: answer.response }))
       }
       return yield* Effect.fail(yield* refusalOf(routes.followUp, answer.response))
     }).pipe(Effect.withSpan("discord.interaction.followUp", { attributes: { "discord.interaction": session.label } }))
@@ -391,7 +392,11 @@ const repliesFor = <M>(session: Session): Replies<M> => {
       })
     )
   }
-  function defer<A2, E2, R2>(options: { readonly ephemeral: EphemeralFor<M> }, then: (deferred: Answered) => HandledCompletion<A2, E2, R2>): Effect.Effect<Response<R2>> {
+  function defer<const X extends boolean, A2, E2, R2>(
+    options: { readonly ephemeral: X & EphemeralMatches<X, M> },
+    then: (deferred: Answered) => HandledCompletion<A2, E2, R2>
+  ): Effect.Effect<Response<R2>>
+  function defer<A2, E2, R2>(options: { readonly ephemeral: boolean }, then: (deferred: Answered) => HandledCompletion<A2, E2, R2>): Effect.Effect<Response<R2>> {
     return Effect.succeed(
       makeResponse<R2>({
         kind: "defer",

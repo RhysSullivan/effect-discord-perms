@@ -746,7 +746,7 @@ export const rules: ReadonlyArray<Rule> = [
     statement: "the registration mode fixes the response: a reply's and a deferral's ephemeral state match it (H-227), and \"update\" offers only update and deferUpdate",
     pass: "test/types/pass/interactions.ts",
     fail: "test/types/fail/interactions.ts",
-    claims: ["ephemeral must match the registration mode public", "Type 'true' is not assignable to type 'false'", "Property 'reply' does not exist on type 'UpdateComponentInteraction"],
+    claims: ["ephemeral must match the registration mode public", "ephemeral must match the registration mode ephemeral", "Property 'reply' does not exist on type 'UpdateComponentInteraction"],
     live: { kind: "not-live", reason: "phase-3-offline" }
   },
   {

@@ -1411,8 +1411,10 @@ the same commit.
   option's handle reads its resolved channel's `permissions`.
 - **M9: interaction calls go through `DiscordApi.sendJson`** (§4.14 updated), not dfx's typed `createInteractionResponse`
   and webhook methods: the callback's and messages' bodies are the library's own JSON (as registration's are, M8), and the
-  call is still bounded, made under its declared route (the token is a path segment, which the route check and the span
-  never show) and classified. 10062, 10015 and 50027 are `InteractionExpired`, 50006 `MessageEmpty`, anything else an
+  call is still bounded, made under its declared route (the token is a path segment: the route check and the
+  `discord.rest` span show only the template) and classified. As first built this was wrong about telemetry: Effect's
+  HTTP client opens its own span below `discord.rest`, with `url.full` and `url.path`, and those held the token (the M9
+  verifier's recording tracer); see "After the M9 verifier". 10062, 10015 and 50027 are `InteractionExpired`, 50006 `MessageEmpty`, anything else an
   unmapped defect.
 - **M9: INTERACTION_CREATE through the build's dispatch stream** (§4.14 updated): `Dispatches.DispatchName` adds it
   beside `bot.on`'s events (it needs no intent, so it is not in `EventIntents`, whose events each need a live intent

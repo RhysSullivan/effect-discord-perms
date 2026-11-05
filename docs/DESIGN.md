@@ -1123,7 +1123,8 @@ export interface Answered {
 interface Replies<M> {
   readonly reply: <const P extends ReplyPayload, A2 = unknown, E2 = never, R2 = never>(payload: P & CheckReply<P, M>,
     then?: (answered: Answered) => Handled<A2, E2, R2>) => Effect.Effect<Response<R2>, /* ContentTooLong | MessageEmpty | EmbedTooLarge as for P */>
-  readonly defer: <A2, E2, R2>(options: { readonly ephemeral: EphemeralFor<M> }, then: (deferred: Answered) => HandledCompletion<A2, E2, R2>) => Effect.Effect<Response<R2>>
+  readonly defer: <const X extends boolean, A2, E2, R2>(options: { readonly ephemeral: X & EphemeralMatches<X, M> },
+    then: (deferred: Answered) => HandledCompletion<A2, E2, R2>) => Effect.Effect<Response<R2>>   // (M9 verifier)
 }
 export interface InteractionContext { readonly guildId: GuildId; readonly user: { readonly id: UserId }; readonly channel: MessageChannel }
 export interface CommandInteraction<I, M extends "public" | "ephemeral"> extends InteractionContext, Replies<M> { readonly invocation: I }
@@ -1202,7 +1203,12 @@ assignable to type 'true & Invalid<"ephemeral must match the registration mode p
   open a modal, so no "manual"); `autocomplete(command, handler)` has no mode and no deferral (Discord has none for it);
   its `ix` is `AutocompleteInteraction<string | number>`, whose `focused` is `{ name, value }`.
 - **`followUp`'s union adds `PermissionDeniedUnattributed`**: a 50013 on a follow-up is `MissingSendMessages` only when
-  the interaction's `app_permissions` lacks SendMessages, else unattributed (never a guess, §3).
+  the interaction's `app_permissions` is present and lacks SendMessages; held or absent, it is unattributed (never a
+  guess, §3; the M9 verifier found the absent case attributed).
+- **`defer`'s `ephemeral` names the rule** (M9 verifier): it is `X & EphemeralMatches<X, M>`, as a reply's is, so a
+  deferral against the mode prints `Type 'true' is not assignable to type 'true & Invalid<"ephemeral must match the
+  registration mode public">'` (it printed `Type 'true' is not assignable to type 'false'`, naming neither the rule nor
+  the mode).
 - **The interaction's channel** is a handle with basis `"app-permissions"`, whose preflight reads the interaction's
   `app_permissions` (§4.7, as built there); a channel option's handle reads its resolved channel's `permissions`.
 - **Interactions outside a guild are dropped** with a log (commands are guild commands, D18; a button on a DM message
@@ -1972,7 +1978,14 @@ orchestrator sets that flag, and §4.4 reads it back.
   `url.full` and the Authorization header redacted. Bot routes carry only IDs,
   but an interaction webhook URL carries the interaction token in its path, so
   M9 must keep those requests out of the HTTP client's span attributes (for
-  example with `HttpClient.TracerDisabledWhen`).
+  example with `HttpClient.TracerDisabledWhen`). (As built after the M9
+  verifier, which found the token in `url.full` and `url.path`: `DiscordApi.sendJson`,
+  through which every interaction call goes, provides `HttpClient.TracerDisabledWhen`
+  for its requests, so the client opens no span for them, and raises the minimum
+  log level to Info for them, because dfx logs a 403's or 429's URL, and a route
+  key holding the token, at Debug. `interactions-runner.test.ts` records every span
+  and every Debug line of a callback, a `PATCH @original` and a refused follow-up
+  and asserts none holds the token.)
 
 ### 4.14 Per-event fibers (D29) and interactions runtime
 
@@ -2051,7 +2064,7 @@ orchestrator sets that flag, and §4.4 reads it back.
   transient failure, a defect, an invocation that does not fit the command's definition (`Wire.Malformed`: every
   required option, each value of its option's type, the choices and channel kinds checked) and a refused post; none
   escapes. The callback and the webhook calls go through `DiscordApi.sendJson` (bounded, under the declared route, in a
-  `discord.rest` span whose route template hides the token); 10062, 10015 and 50027 are `InteractionExpired`, 50006
+  `discord.rest` span whose route template hides the token, with no HTTP client span and no Debug line of dfx's, §4.13); 10062, 10015 and 50027 are `InteractionExpired`, 50006
   `MessageEmpty`, anything else an unmapped defect. `harness/main.ts checklist` runs the checklist for Rhys (LOG.md).
 
 ### 4.15 Obfuscation codec (D20, G7)

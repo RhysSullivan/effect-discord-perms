@@ -55,7 +55,9 @@ export const e4 = Interactions.command(ban, (ix) => ix.reply({ content: dynamic 
 // ---- the mode fixes the response: ephemeral matches it, and "update" offers only update and deferUpdate ----
 // @expect-error TS2322 ephemeral must match the registration mode public
 export const e3 = Interactions.command(ban, (ix) => ix.reply({ content: "hi", ephemeral: true }))
-// @expect-error TS2322 Type 'true' is not assignable to type 'false'
+// @expect-error TS2322 ephemeral must match the registration mode public
 export const e5 = Interactions.command(ban, (ix) => ix.defer({ ephemeral: true }, (deferred) => deferred.editOriginal({ content: "x" }).pipe(Effect.catchTag("InteractionExpired", deferred.giveUp))))
+// @expect-error TS2322 ephemeral must match the registration mode ephemeral
+export const e6 = Interactions.command(ban, "ephemeral", (ix) => ix.defer({ ephemeral: false }, (deferred) => deferred.editOriginal({ content: "x" }).pipe(Effect.catchTag("InteractionExpired", deferred.giveUp))))
 // @expect-error TS2339 Property 'reply' does not exist on type 'UpdateComponentInteraction
 export const u1 = Interactions.component(vote, (ix) => ix.reply({ content: "a new message" }))

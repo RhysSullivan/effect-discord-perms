@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, Ref, Schema } from "effect"
+import { Deferred, Effect, References, Ref, Schema, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { Command } from "../../src/commands/Command.ts"
 import { ComponentRoute } from "../../src/components/CustomId.ts"
@@ -196,15 +196,37 @@ describe("the interaction runner", () => {
     )
   )
 
-  it.effect("routes by name and route prefix: another command, another route and another type are not this handler's", () =>
-    withRunner(({ publish, sent }) =>
+  it.effect("routes a command by type and name: an autocomplete of it and another command that fits its definition are not its handler's", () =>
+    withRunner(({ publish, sent, logs }) =>
       Effect.gen(function* () {
-        yield* Interactions.command(ping, (ix) => ix.reply({ content: "pong" }))
-        yield* publish(interaction(2, { id: "700000000000000002", name: "other", type: 1 }))
+        yield* Interactions.command(ping, (ix) => ix.reply({ content: `pong ${ix.invocation.options.word}` }))
+        // each of these would decode as ping's invocation: only the type and the name keep them out
+        yield* publish(interaction(2, { id: "700000000000000002", name: "other", type: 1, options: [{ name: "word", type: 3, value: "hi" }] }))
+        yield* publish(interaction(4, { id: "700000000000000001", name: "ping", type: 1, options: [{ name: "word", type: 3, value: "hi", focused: true }] }))
         yield* publish(click("other:{}"))
-        yield* publish(interaction(4, { id: "700000000000000001", name: "ping", type: 1, options: [{ name: "word", type: 3, value: "h", focused: true }] }))
         yield* settle
         expect(yield* sent).toEqual([])
+        expect((yield* logs).filter((line) => line.startsWith("Error"))).toEqual([])
+        // and ping itself is answered
+        yield* publish(invoke)
+        yield* settle
+        expect(only(yield* sent)).toEqual([`POST ${callback}`])
+      })
+    )
+  )
+
+  it.effect("routes an autocomplete by type and name: an invocation of its command and another command's autocomplete are not its handler's", () =>
+    withRunner(({ publish, sent, logs }) =>
+      Effect.gen(function* () {
+        yield* Interactions.autocomplete(ping, (ix) => ix.choices([{ name: "hi", value: "hi" }]))
+        yield* publish(invoke)
+        yield* publish(interaction(4, { id: "700000000000000002", name: "other", type: 1, options: [{ name: "word", type: 3, value: "h", focused: true }] }))
+        yield* settle
+        expect(yield* sent).toEqual([])
+        expect((yield* logs).filter((line) => line.startsWith("Error"))).toEqual([])
+        yield* publish(interaction(4, { id: "700000000000000001", name: "ping", type: 1, options: [{ name: "word", type: 3, value: "h", focused: true }] }))
+        yield* settle
+        expect(only(yield* sent)).toEqual([`POST ${callback}`])
       })
     )
   )
@@ -290,6 +312,110 @@ describe("the interaction runner", () => {
         yield* settle
         expect(yield* Ref.get(outcome)).toBe("MissingSendMessages app-permissions")
         expect(only(yield* sent)).toEqual([`POST ${callback}`])
+      })
+    )
+  )
+
+  it.effect("keeps the interaction token out of every span and log line: the callback, PATCH @original and a follow-up dfx logs at Debug", () => {
+    const spans: Array<Tracer.NativeSpan> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      }
+    })
+    return withRunner(
+      ({ publish, sent, logs }) =>
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>()
+          const followed = yield* Ref.make("")
+          yield* Interactions.command(ping, (ix) =>
+            Effect.andThen(
+              Deferred.await(gate),
+              ix.reply({ content: "slow" }, (answered) => answered.followUp({ content: "more" }).pipe(Effect.catchTag("PermissionDeniedUnattributed", (error) => Ref.set(followed, error._tag)), catchCategory(["permission", "state"], () => Effect.void)))
+            )
+          )
+          yield* publish(invoke)
+          yield* settle
+          yield* TestClock.adjust("2500 millis")
+          yield* settle
+          yield* Deferred.succeed(gate, undefined)
+          yield* settle
+          expect(only(yield* sent)).toEqual([`POST ${callback}`, `PATCH ${original}`, `POST ${followUp}`])
+          expect(yield* Ref.get(followed)).toBe("PermissionDeniedUnattributed")
+          // every request ran in its discord.rest span, named by its route template
+          expect(spans.filter((span) => span.name === "discord.rest").map((span) => span.attributes.get("discord.route"))).toEqual([
+            "/interactions/{interaction.id}/{interaction.token}/callback",
+            "/webhooks/{application.id}/{interaction.token}/messages/@original",
+            "/webhooks/{application.id}/{interaction.token}"
+          ])
+          const texts = spans.flatMap((span) => [span.name, ...[...span.attributes.values()].map(String), ...span.events.flatMap(([name, , attributes]) => [name, JSON.stringify(attributes ?? {})])])
+          expect(texts.filter((text) => text.includes(token))).toEqual([])
+          // Debug is on, and dfx logs a 403's URL at Debug: nothing of it reaches a line
+          expect((yield* logs).filter((line) => line.includes(token))).toEqual([])
+        }),
+      (method, path) => (method === "POST" && path === followUp ? { status: 403, body: { code: 50013, message: "Missing Permissions" } } : undefined)
+    ).pipe(Effect.provideService(Tracer.Tracer, tracer), Effect.provideService(References.MinimumLogLevel, "Debug"))
+  })
+
+  it.effect("attributes a follow-up's 50013 to SendMessages only when app_permissions lacks it; held or absent, it is unattributed", () =>
+    Effect.gen(function* () {
+      const refusedWith = (appPermissions: string | undefined) =>
+        withRunner(
+          ({ publish }) =>
+            Effect.gen(function* () {
+              const outcome = yield* Ref.make("")
+              yield* Interactions.command(ping, (ix) =>
+                ix.reply({ content: "first" }, (answered) =>
+                  answered.followUp({ content: "second" }).pipe(
+                    Effect.catchTags({ MissingSendMessages: (error) => Ref.set(outcome, error._tag), PermissionDeniedUnattributed: (error) => Ref.set(outcome, error._tag) }),
+                    catchCategory("state", () => Effect.void)
+                  )
+                )
+              )
+              const { app_permissions: _, ...withoutPermissions } = invoke
+              yield* publish(appPermissions === undefined ? withoutPermissions : { ...invoke, app_permissions: appPermissions })
+              yield* settle
+              return yield* Ref.get(outcome)
+            }),
+          (method, path) => (method === "POST" && path === followUp ? { status: 403, body: { code: 50013, message: "Missing Permissions" } } : undefined)
+        )
+      expect(yield* refusedWith(String(set("ViewChannel")))).toBe("MissingSendMessages")
+      expect(yield* refusedWith(String(set("ViewChannel", "SendMessages")))).toBe("PermissionDeniedUnattributed")
+      expect(yield* refusedWith(undefined)).toBe("PermissionDeniedUnattributed")
+    })
+  )
+
+  it.effect("stops a continuation at 14 minutes (the token lasts 15) and logs it", () =>
+    withRunner(({ publish, sent, logs }) =>
+      Effect.gen(function* () {
+        const interrupted = yield* Ref.make(false)
+        yield* Interactions.command(ping, (ix) => ix.reply({ content: "first" }, () => Effect.never.pipe(Effect.onInterrupt(() => Ref.set(interrupted, true)))))
+        yield* publish(invoke)
+        yield* settle
+        expect(only(yield* sent)).toEqual([`POST ${callback}`])
+        yield* TestClock.adjust("13 minutes")
+        yield* settle
+        expect(yield* Ref.get(interrupted)).toBe(false)
+        expect((yield* logs).some((line) => line.includes("continuation passed"))).toBe(false)
+        yield* TestClock.adjust("1 minute")
+        yield* settle
+        expect(yield* Ref.get(interrupted)).toBe(true)
+        expect((yield* logs).find((line) => line.includes("continuation passed"))).toBe("Warn: discord.interaction command ping: the continuation passed 14m; the token lasts 15 minutes")
+      })
+    )
+  )
+
+  it.effect("posts nothing for a copy of a response: only the value its method made is a response (the plans are kept by identity)", () =>
+    withRunner(({ publish, sent, logs }) =>
+      Effect.gen(function* () {
+        // a copy has the response's type, symbol key included, but no plan
+        yield* Interactions.command(ping, (ix) => Effect.map(ix.reply({ content: "pong" }), (response) => ({ ...response })))
+        yield* publish(invoke)
+        yield* settle
+        expect(yield* sent).toEqual([])
+        expect((yield* logs).find((line) => line.includes("returned no response"))).toBe("Error: discord.interaction command ping: the handler returned no response")
       })
     )
   )

@@ -14,10 +14,13 @@
  *   IDs; a body that does not decode is a defect naming the route template.
  * - **Span** (§4.13, D28): `discord.rest`, with the route template, method, operation and guild (and channel)
  *   as attributes, never a URL or a token. Nothing inside it recovers: an error the caller catches still marks
- *   the span (and the operation's span around it) failed.
+ *   the span (and the operation's span around it) failed. Effect's HTTP client opens its own span below it, with
+ *   `url.full`; bot routes carry only IDs, but `sendJson`'s interaction routes carry the interaction token, so that
+ *   span is disabled for them (M9 verifier).
  */
 import type { DiscordRESTError, DiscordRestService } from "dfx/DiscordREST"
-import { Context, Duration, Effect, Schema } from "effect"
+import { Context, Duration, Effect, LogLevel, References, Schema } from "effect"
+import * as HttpClient from "effect/http/HttpClient"
 import type { DiscordResponse, HttpMethod } from "../errors/Cause.ts"
 import type { Transient } from "../errors/Transient.ts"
 import * as Recompute from "../permissions/Recompute.ts"
@@ -80,7 +83,9 @@ export interface Interface {
    * A JSON request outside the operation table (phase 3: an interaction's callback and its webhook calls), bounded by
    * the deadline, made under its declared route, in a `discord.rest` span. Discord's answer is returned (`Ok` or
    * `Rejected`) for the caller to map; no answer is a `Transient`. `path` may hold the interaction token, so only the
-   * route template reaches spans and causes.
+   * route template reaches spans, logs and causes: the HTTP client opens no span of its own for the request
+   * (`HttpClient.TracerDisabledWhen`, as its span records the URL), and the request runs at a minimum log level of at
+   * least Info (dfx logs the URL at Debug on a 403 or 429).
    */
   readonly sendJson: (route: Route, path: string, body: unknown) => Effect.Effect<Answered<Schema.Json>, Transient>
 }
@@ -194,9 +199,15 @@ export const make = (rest: DiscordRestService, guildState: GuildState.Interface)
       )
 
     const sendJson = (route: Route, path: string, body: unknown): Effect.Effect<Answered<Schema.Json>, Transient> =>
-      sendJsonRequest(rest, route.template, route.method, path, body, config.requestDeadline).pipe(
-        Effect.withSpan("discord.rest", { attributes: { "discord.route": route.template, "discord.method": route.method } })
-      )
+      Effect.gen(function* () {
+        // `path` may hold an interaction token: Effect's HTTP client span records `url.full` and `url.path`, and dfx
+        // logs the URL (and a route key holding the token) at Debug on a 403 or 429, so neither may see this request
+        const minimum = yield* References.MinimumLogLevel
+        return yield* sendJsonRequest(rest, route.template, route.method, path, body, config.requestDeadline).pipe(
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+          Effect.provideService(References.MinimumLogLevel, LogLevel.isGreaterThan(minimum, "Info") ? minimum : "Info")
+        )
+      }).pipe(Effect.withSpan("discord.rest", { attributes: { "discord.route": route.template, "discord.method": route.method } }))
 
     return DiscordApi.of({ execute, read, executeDirect, sendJson })
   })
