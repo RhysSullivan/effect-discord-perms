@@ -115,7 +115,8 @@ const optionTypeOf: { readonly [K in ValueOption["type"]]: number } = { string: 
 const valueOf = (place: Place, option: ValueOption, wire: OptionWire): Effect.Effect<unknown, Malformed> => {
   const value = wire.value
   if (wire.type !== optionTypeOf[option.type]) return malformed(`option ${option.name} has type ${wire.type}, not ${option.type}`)
-  const choices = "choices" in option && option.choices !== undefined && option.choices.length > 0 ? option.choices.map((choice) => choice.value) : undefined
+  const listed = option.type === "string" || option.type === "integer" || option.type === "number" ? option.choices : undefined
+  const choices = listed !== undefined && listed.length > 0 ? listed.map((choice) => choice.value) : undefined
   if (choices !== undefined && (typeof value !== "string" && typeof value !== "number" ? true : !choices.some((choice) => choice === value))) return malformed(`option ${option.name}: ${String(value)} is not one of its choices`)
   switch (option.type) {
     case "string":

@@ -590,7 +590,7 @@ export const rules: ReadonlyArray<Rule> = [
     statement: "required options come before every optional option, at the top level and in subcommands",
     pass: "test/types/pass/commands.ts",
     fail: "test/types/fail/commands.ts",
-    claims: ["required option feature must come before every optional option", "required option user must come before every optional option"],
+    claims: ["required option feature must come before every optional option", "required option user must come before every optional option", "required option b must come before every optional option"],
     live: commandSides("raw-option-order", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.1", code: "APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID" }] }, [
       ["raw-option-order-nested", { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.options.1", code: "APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID" }] }]
     ])
@@ -638,7 +638,16 @@ export const rules: ReadonlyArray<Rule> = [
       "a handler's option values are typed from the definition: required versus optional, choices as their literal union (of the option's type), channel options as the handles of their kinds",
     pass: "test/types/pass/commands.ts",
     fail: "test/types/fail/commands.ts",
-    claims: ["Type 'number' is not assignable to type 'string'", "possibly 'undefined'", "have no overlap", "Property 'createPost' does not exist"],
+    claims: [
+      "Type 'number' is not assignable to type 'string'",
+      "possibly 'undefined'",
+      "have no overlap",
+      "Property 'createPost' does not exist",
+      "only string, integer and number options take choices",
+      "only integer and number options take minValue",
+      "only channel options take channelTypes",
+      "only string options take minLength"
+    ],
     live: pair(
       "commands",
       ["typed-register-choices", applied("options")],

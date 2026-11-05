@@ -166,7 +166,8 @@ export const storedAsDefined = (options: ReadonlyArray<OptionLike>, stored: Sche
     if (match === undefined) return false
     const required = "required" in option && option.required === true
     if ((match["required"] === true) !== required) return false
-    const choices = "choices" in option && option.choices !== undefined ? option.choices.map((choice) => `${choice.name}=${JSON.stringify(choice.value)}`) : []
+    const listed = option.type === "string" || option.type === "integer" || option.type === "number" ? option.choices : undefined
+    const choices = listed !== undefined ? listed.map((choice) => `${choice.name}=${JSON.stringify(choice.value)}`) : []
     if (storedChoices(match).join("\n") !== choices.join("\n")) return false
     const kinds = option.type === "channel" && option.channelTypes !== undefined ? [...new Set(option.channelTypes.map((kind) => documentedChannelTypes[kind]))].sort((a, b) => a - b) : []
     return storedKinds(match).join() === kinds.join()

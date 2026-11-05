@@ -17,6 +17,7 @@ const ban = Command.chatInput({
   ]
 })
 declare const options: InvocationOf<typeof ban>["options"]
+declare const maybe: boolean
 
 // @valid
 export const ok = [
@@ -135,6 +136,23 @@ export const optional = options.days.toFixed()
 export const notAChoice = options.reason === "other"
 // @expect-error TS2339 Property 'createPost' does not exist
 export const narrowed = options.log?.createPost({ name: "lab-post", message: { content: "x" } })
+
+// ---- each option type takes only its own keys (after the final audit): choices on a boolean, user, role or channel
+// option, minValue or channelTypes on a string, minLength on an integer ----
+// @expect-error TS2741 only string, integer and number options take choices
+export const boolChoices = Command.chatInput({ name: "x", description: "d", options: [{ type: "boolean", name: "on", description: "d", choices: [{ name: "yes", value: "yes" }] }] })
+// @expect-error TS2741 only string, integer and number options take choices
+export const channelChoices = Command.chatInput({ name: "x", description: "d", options: [{ type: "channel", name: "c", description: "d", choices: [{ name: "x", value: "x" }] }] })
+// @expect-error TS2322 only integer and number options take minValue
+export const stringMin = Command.chatInput({ name: "x", description: "d", options: [{ type: "string", name: "s", description: "d", minValue: 3 }] })
+// @expect-error TS2741 only channel options take channelTypes
+export const stringKinds = Command.chatInput({ name: "x", description: "d", options: [{ type: "string", name: "s", description: "d", channelTypes: ["text"] }] })
+// @expect-error TS2322 only string options take minLength
+export const integerLength = Command.chatInput({ name: "x", description: "d", options: [{ type: "integer", name: "n", description: "d", minLength: 2 }] })
+
+// ---- a `required` that is not a literal may be true, so it must come before every optional option too ----
+// @expect-error TS2322 required option b must come before every optional option
+export const maybeRequired = Command.chatInput({ name: "x", description: "d", options: [{ type: "string", name: "a", description: "d" }, { type: "string", name: "b", description: "d", required: maybe }] })
 
 // ---- commands are registered in a guild only: no commands without a guildId (D18) ----
 // @expect-error TS2322 guildId

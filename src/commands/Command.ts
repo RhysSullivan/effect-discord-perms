@@ -35,35 +35,51 @@ interface Base<T extends string> {
   readonly description: string
   readonly required?: boolean
 }
+
+/**
+ * The keys an option type does not take, each typed as a message, so such a key is an error at that property (after
+ * the final audit: `choices` on a boolean option compiled, typed the handler's value as the choices' union, and
+ * registration dropped them, so every invocation was dropped as malformed). One message per key, shared by the types.
+ */
+interface NotTaken {
+  readonly choices?: Invalid<"only string, integer and number options take choices">
+  readonly autocomplete?: Invalid<"only string, integer and number options take autocomplete">
+  readonly minLength?: Invalid<"only string options take minLength">
+  readonly maxLength?: Invalid<"only string options take maxLength">
+  readonly minValue?: Invalid<"only integer and number options take minValue">
+  readonly maxValue?: Invalid<"only integer and number options take maxValue">
+  readonly channelTypes?: Invalid<"only channel options take channelTypes">
+}
+
 /** A string option: optional choices (the handler gets their values' literal union), autocomplete, a length range. */
-export interface StringOption extends Base<"string"> {
+export interface StringOption extends Base<"string">, Pick<NotTaken, "minValue" | "maxValue" | "channelTypes"> {
   readonly choices?: ReadonlyArray<{ readonly name: string; readonly value: string }>
   readonly autocomplete?: boolean
   readonly minLength?: number
   readonly maxLength?: number
 }
 /** An integer option: optional choices, autocomplete, a value range. */
-export interface IntegerOption extends Base<"integer"> {
+export interface IntegerOption extends Base<"integer">, Pick<NotTaken, "minLength" | "maxLength" | "channelTypes"> {
   readonly choices?: ReadonlyArray<{ readonly name: string; readonly value: number }>
   readonly autocomplete?: boolean
   readonly minValue?: number
   readonly maxValue?: number
 }
 /** A number option: optional choices, autocomplete, a value range. */
-export interface NumberOption extends Base<"number"> {
+export interface NumberOption extends Base<"number">, Pick<NotTaken, "minLength" | "maxLength" | "channelTypes"> {
   readonly choices?: ReadonlyArray<{ readonly name: string; readonly value: number }>
   readonly autocomplete?: boolean
   readonly minValue?: number
   readonly maxValue?: number
 }
 /** A boolean option. */
-export interface BooleanOption extends Base<"boolean"> {}
+export interface BooleanOption extends Base<"boolean">, NotTaken {}
 /** A user option: the handler gets the user's ID. */
-export interface UserOption extends Base<"user"> {}
+export interface UserOption extends Base<"user">, NotTaken {}
 /** A role option: the handler gets the role's ID. */
-export interface RoleOption extends Base<"role"> {}
+export interface RoleOption extends Base<"role">, NotTaken {}
 /** A channel option, optionally restricted to some kinds: the handler gets a handle of one of them. */
-export interface ChannelOption extends Base<"channel"> {
+export interface ChannelOption extends Base<"channel">, Omit<NotTaken, "channelTypes"> {
   readonly channelTypes?: ReadonlyArray<GuildChannelKind>
 }
 /** A value option (anything but a subcommand or group). */
@@ -139,6 +155,7 @@ interface Prev {
   readonly "25": "24"
 }
 type Over25 = "25" | "26" | "27" | "28" | "29" | "30" | "31" | "32" | "33" | "34" | "35" | "36" | "37" | "38" | "39" | "40"
+/** Possibly optional: `required` absent, `false`, or a `boolean` (a non-literal may be false). */
 type IsOptional<X> = X extends { readonly required: true } ? false : true
 type PrevIsOptional<O extends ReadonlyArray<unknown>, I> = I extends keyof Prev ? (Prev[I] extends keyof O ? IsOptional<O[Prev[I]]> : false) : false
 
@@ -148,11 +165,16 @@ type CheckOption<O extends ReadonlyArray<OptionLike>, I extends string, H> =
     ? Mark<H, "name", "at most 25 options per level">
     : H extends SubcommandDef | GroupDef
       ? Mark<H, "type", "subcommands and groups go in Command.withSubcommands">
-      : H extends { readonly required: true; readonly name: infer N extends string }
-        ? PrevIsOptional<O, I> extends true
-          ? Mark<H, "required", `required option ${N} must come before every optional option`>
+      : H extends { readonly required: infer B }
+        ? // possibly required (`true`, or a non-literal `boolean`, which may be true) after a possibly optional option
+          // (after the final audit); the previous option is looked at first, the cheaper test for a valid list
+          PrevIsOptional<O, I> extends true
+          ? true extends B
+            ? Mark<H, "required", `required option ${NameOf<H>} must come before every optional option`>
+            : CheckOptionName<H>
           : CheckOptionName<H>
         : CheckOptionName<H>
+type NameOf<H> = H extends { readonly name: infer N extends string } ? N : never
 type CheckOptionName<H> = H extends { readonly name: infer N extends string } ? ([NameMessage<N>] extends [never] ? H : Mark<H, "name", NameMessage<N>>) : H
 
 /** Value options at one level: count, order, names, no nesting. */
