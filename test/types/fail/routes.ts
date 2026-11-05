@@ -9,6 +9,7 @@ import { row } from "../../../src/payload/Components.ts"
 const vote = ComponentRoute.make("vote", Schema.Struct({ choice: Schema.Literals(["yes", "no"]) }))
 const bot = Bot.make({ intents: ["Guilds", "GuildMessages"] })
 declare const received: string
+declare const prefix: string
 
 // @valid
 export const ok = [
@@ -24,6 +25,8 @@ export const ok = [
 
 // @expect-error TS2345 route names cannot contain ':'
 export const colon = ComponentRoute.make("vote:2", Schema.Struct({}))
+// @expect-error TS2345 route names must be literals
+export const computedName = ComponentRoute.make(prefix, Schema.Struct({}))
 // @expect-error TS2741 UnhandledErrors<"payload">
 export const leak = bot.on("MESSAGE_CREATE", () => vote.customId({ choice: "yes" }))
 // @expect-error TS2322 Type '"maybe"' is not assignable

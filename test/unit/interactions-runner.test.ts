@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Duration, Effect, References, Ref, Schema, Tracer } from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, References, Ref, Schema, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { Command } from "../../src/commands/Command.ts"
 import { ComponentRoute } from "../../src/components/CustomId.ts"
@@ -567,6 +567,32 @@ describe("the interaction runner", () => {
         expect(errors).toEqual([
           "Error: discord.interaction command ping: the continuation made 1 response(s) (reply), which are never posted: the interaction was already answered (use answered.followUp)"
         ])
+      })
+    )
+  )
+
+  it.effect("dies on a second registration of a route or a command name, which would answer each interaction twice; a closed registration frees its name", () =>
+    withRunner(({ publish, sent }) =>
+      Effect.gen(function* () {
+        // the final audit's case: two routes named "vote" with different schemas both answered one click
+        const other = ComponentRoute.make("vote", Schema.Struct({ n: Schema.Int }))
+        yield* Interactions.component(vote, (ix) => ix.update({ content: "A handled it" }))
+        const second = yield* Effect.exit(Interactions.component(other, (ix) => ix.update({ content: "B handled it" })))
+        expect(Exit.isFailure(second) && Cause.hasDies(second.cause)).toBe(true)
+        expect(Exit.isFailure(second) ? Cause.pretty(second.cause) : "").toContain("component vote is already registered on this bot")
+        const command = yield* Effect.exit(Effect.andThen(Interactions.command(ping, (ix) => ix.reply({ content: "one" })), Interactions.command(ping, (ix) => ix.reply({ content: "two" }))))
+        expect(Exit.isFailure(command) ? Cause.pretty(command.cause) : "").toContain("command ping is already registered on this bot")
+        // a modal route and an autocomplete may share a name with a component route and a command: other interactions
+        yield* Interactions.modal(vote, (ix) => ix.reply({ content: "modal" }))
+        yield* Interactions.autocomplete(ping, (ix) => ix.choices([]))
+        // a registration whose scope closed frees its name
+        yield* Effect.scoped(Interactions.command(Command.chatInput({ name: "once", description: "Once" }), (ix) => ix.reply({ content: "x" })))
+        yield* Interactions.command(Command.chatInput({ name: "once", description: "Once" }), (ix) => ix.reply({ content: "again" }))
+        yield* publish(click(`vote:${JSON.stringify({ choice: "yes" })}`))
+        yield* settle
+        const all = yield* sent
+        expect(only(all)).toEqual([`POST ${callback}`])
+        expect(all[0]?.body).toEqual({ type: 7, data: { allowed_mentions: { parse: [] }, content: "A handled it" } })
       })
     )
   )

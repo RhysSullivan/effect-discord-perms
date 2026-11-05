@@ -77,7 +77,8 @@ export const withRunner = <A, E>(
         guildId,
         guildState: stub.state,
         api,
-        events: { subscribe: dispatches.subscribe }
+        events: { subscribe: dispatches.subscribe },
+        interactionHandlers: yield* Ref.make<ReadonlySet<string>>(new Set())
       })
       return yield* Effect.scoped(
         body({

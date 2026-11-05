@@ -1,12 +1,16 @@
-L26:42 TS2345
+L27:42 TS2345
 Argument of type '"vote:2"' is not assignable to parameter of type '"vote:2" & Invalid<"route names cannot contain ':'">'.
   Type 'string' is not assignable to type 'Invalid<"route names cannot contain ':'">'.
 
-L28:52 TS2741
+L29:49 TS2345
+Argument of type 'string' is not assignable to parameter of type 'string & Invalid<"route names must be literals">'.
+  Type 'string' is not assignable to type 'Invalid<"route names must be literals">'.
+
+L31:52 TS2741
 Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<string & Brand<"CustomId">, CustomIdTooLong, never>' but required in type 'UnhandledErrors<"payload">'.
 
-L30:42 TS2322
+L33:42 TS2322
 Type '"maybe"' is not assignable to type '"no" | "yes"'.
 
-L32:68 TS2367
+L35:68 TS2367
 This comparison appears to be unintentional because the types '"no" | "yes"' and '"maybe"' have no overlap.

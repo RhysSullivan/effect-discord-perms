@@ -675,10 +675,10 @@ export const rules: ReadonlyArray<Rule> = [
   {
     id: "R-custom-id-routing",
     statement:
-      "a component's custom_id comes from a route: schema-typed data, checked against 100 characters when built (CustomIdTooLong), decoded back to the same data; a route name has no ':'",
+      "a component's custom_id comes from a route: schema-typed data, checked against 100 characters when built (CustomIdTooLong), decoded back to the same data; a route name is a literal with no ':' (a route or command registered twice on one bot dies, after the final audit)",
     pass: "test/types/pass/routes.ts",
     fail: "test/types/fail/routes.ts",
-    claims: ["route names cannot contain ':'", 'UnhandledErrors<"payload">', "Type '\"maybe\"' is not assignable", "have no overlap"],
+    claims: ["route names cannot contain ':'", "route names must be literals", 'UnhandledErrors<"payload">', "Type '\"maybe\"' is not assignable", "have no overlap"],
     live: pair(
       "commands",
       ["typed-custom-id-max", succeeded],

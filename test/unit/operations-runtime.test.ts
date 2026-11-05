@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DiscordConfig, DiscordRESTMemoryLive } from "dfx"
 import { DiscordREST } from "dfx/DiscordREST"
-import { Cause, Effect, Exit, Layer, Option, Redacted, Schema, Tracer } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Redacted, Ref, Schema, Tracer } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as TestClock from "effect/testing/TestClock"
@@ -92,7 +92,8 @@ const runtimeWith = (options: { readonly before: Snapshot; readonly after?: Snap
       guildState: stub.state,
       api,
       // these tests run operations only; no dispatch ever arrives
-      events: { subscribe: () => Effect.void }
+      events: { subscribe: () => Effect.void },
+      interactionHandlers: yield* Ref.make<ReadonlySet<string>>(new Set())
     }
     return { runtime, sent, refreshes: stub.refreshes }
   })

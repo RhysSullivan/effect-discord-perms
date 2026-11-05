@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DiscordREST } from "dfx/DiscordREST"
-import { Cause, Effect, Exit, Option, Predicate, Schema } from "effect"
+import { Cause, Effect, Exit, Option, Predicate, Ref, Schema } from "effect"
 import type { Runtime } from "../../src/bot/Runtime.ts"
 import { coreOf } from "../../src/channels/Ops.ts"
 import { Command } from "../../src/commands/Command.ts"
@@ -28,7 +28,8 @@ const makeRuntime = Effect.gen(function* () {
     guildId,
     guildState: stub.state,
     api,
-    events: { subscribe: () => Effect.void }
+    events: { subscribe: () => Effect.void },
+    interactionHandlers: yield* Ref.make<ReadonlySet<string>>(new Set())
   }
   return runtime
 }).pipe(Effect.provide(scriptedRest(() => json(404, { message: "404: Not Found", code: 0 }))))

@@ -4,7 +4,7 @@
  * module, so the handles (`channels/Ops.ts`), the events (`gateway/Events.ts`) and the bot (`Bot.ts`) can all
  * depend on it without a cycle.
  */
-import { type Config, Context, type Effect, type Redacted, type Scope } from "effect"
+import { type Config, Context, type Effect, type Redacted, type Ref, type Scope } from "effect"
 import type { AnyChatInputCommand } from "../commands/Command.ts"
 import type { DispatchName } from "../gateway/Dispatches.ts"
 import type { Intent } from "../gateway/Intents.ts"
@@ -62,6 +62,12 @@ export interface Runtime {
   readonly api: DiscordApi.Interface
   /** The gateway's dispatches (`Bot.on`). */
   readonly events: EventSource
+  /**
+   * The interaction handlers registered on this build, by kind and name (`command ping`, `component vote`), while their
+   * registrations' scopes are open: the runner dies on a second registration of one, which would answer each
+   * interaction twice (after the final audit).
+   */
+  readonly interactionHandlers: Ref.Ref<ReadonlySet<string>>
 }
 
 /** The running bot of one build. Handles close over it, so their methods need nothing (§4.1). */

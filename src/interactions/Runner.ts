@@ -526,11 +526,16 @@ function invocationFor(runtime: Runtime, guildId: GuildId, command: AnyChatInput
 
 /**
  * Subscribes `handle` to INTERACTION_CREATE for the caller's scope; each interaction runs in its own fiber and scope,
- * and nothing it fails with escapes.
+ * and nothing it fails with escapes. `label` (`command ping`, `component vote`) is claimed in the build's registry for
+ * the scope: a second registration of the same command or route would answer each interaction twice (Discord refuses
+ * the second answer, 40060), so it dies naming it (after the final audit).
  */
 const subscribe = <R>(label: string, handle: (runtime: Runtime, wire: InteractionWire) => Effect.Effect<void, Malformed, R>): Effect.Effect<void, never, Exclude<R, Scope.Scope> | BotRuntime | Scope.Scope> =>
   Effect.gen(function* () {
     const runtime = yield* BotRuntime
+    const taken = yield* Ref.modify(runtime.interactionHandlers, (all): readonly [boolean, ReadonlySet<string>] => (all.has(label) ? [true, all] : [false, new Set([...all, label])]))
+    if (taken) return yield* Effect.die(new Error(`Interactions: ${label} is already registered on this bot; register each command and route once`))
+    yield* Effect.addFinalizer(() => Ref.update(runtime.interactionHandlers, (all) => new Set([...all].filter((entry) => entry !== label))))
     yield* runtime.events.subscribe("INTERACTION_CREATE", (data) =>
       decodeAs(InteractionWire, "INTERACTION_CREATE", data).pipe(Effect.flatMap((wire) => handle(runtime, wire)), Effect.scoped, Effect.catchCause(report(label, "the interaction")))
     )

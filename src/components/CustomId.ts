@@ -14,9 +14,14 @@ import { Effect, Option, Schema } from "effect"
 import { CustomIdTooLong } from "../errors/Payload.ts"
 import { CustomId, type Invalid } from "../payload/Components.ts"
 import { Limits, lengthOf } from "../payload/Limits.ts"
+import type { IsFiniteLiteral } from "../payload/PayloadRules.ts"
 
-/** A route name may not contain the separator. */
-export type CheckRouteName<N extends string> = N extends `${string}:${string}` ? Invalid<"route names cannot contain ':'"> : unknown
+/**
+ * A route name is a literal without the separator: a name typed `string` could hold a `:` the type cannot see, and
+ * its IDs would then never route (after the final audit).
+ */
+export type CheckRouteName<N extends string> =
+  IsFiniteLiteral<N> extends false ? Invalid<"route names must be literals"> : N extends `${string}:${string}` ? Invalid<"route names cannot contain ':'"> : unknown
 
 /** A component route: its name, and the `custom_id`s it builds and reads. */
 export interface ComponentRoute<Name extends string, A> {

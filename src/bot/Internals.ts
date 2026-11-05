@@ -26,7 +26,7 @@
 import { DiscordConfig, DiscordRESTMemoryLive } from "dfx"
 import { DiscordREST, type DiscordRestService } from "dfx/DiscordREST"
 import { DiscordGateway } from "dfx/gateway"
-import { type Config, Context, Duration, Effect, Layer, Option } from "effect"
+import { type Config, Context, Duration, Effect, Layer, Option, Ref } from "effect"
 import type * as HttpClient from "effect/http/HttpClient"
 import type * as Socket from "effect/socket/Socket"
 import { DiscordLiveWithCapabilities, SentIdentify } from "../gateway/Codec.ts"
@@ -85,7 +85,8 @@ const build = (bot: BotDefinition, config: BotConfig) => {
           yield* Registration.sync(yield* DiscordREST, { applicationId: identity.applicationId, guildId }, config.commands, requestDeadline)
         }
       }
-      return BotRuntime.of({ identity, intents: bot.intents, guildId, guildState, api, events })
+      const interactionHandlers = yield* Ref.make<ReadonlySet<string>>(new Set())
+      return BotRuntime.of({ identity, intents: bot.intents, guildId, guildState, api, events, interactionHandlers })
     })
   )
   const raw = Layer.effect(SubjectRaw, Effect.map(Effect.service(DiscordREST), (rest) => SubjectRaw.of(rest)))
