@@ -18,6 +18,7 @@ import { callback, followUp, interaction, only, original, settle, token, withRun
 const ping = Command.chatInput({ name: "ping", description: "Ping", options: [{ type: "string", name: "word", description: "a word", required: true, choices: [{ name: "Hi", value: "hi" }] }] })
 const invoke = interaction(2, { id: "700000000000000001", name: "ping", type: 1, options: [{ name: "word", type: 3, value: "hi" }] })
 const vote = ComponentRoute.make("vote", Schema.Struct({ choice: Schema.Literals(["yes", "no"]) }))
+const reason = ComponentRoute.make("reason", Schema.Struct({ poll: Schema.Int }))
 const click = (customId: string) => interaction(3, { custom_id: customId, component_type: 2 }, { message: { id: "500000000000000009" } })
 
 describe("the interaction runner", () => {
@@ -277,6 +278,67 @@ describe("the interaction runner", () => {
         yield* settle
         expect(yield* sent).toEqual([{ method: "POST", path: callback, body: { type: 4, data: { allowed_mentions: { parse: [] }, content: "no: busy", flags: 64 } } }])
       })
+    )
+  )
+
+  it.effect("routes a modal submit by its custom_id's route prefix: with two modal routes registered, only the submitted route's handler answers", () =>
+    withRunner(({ publish, sent, logs }) =>
+      Effect.gen(function* () {
+        const why = { components: [{ type: 1, components: [{ type: 4, custom_id: "why", value: "busy" }] }] }
+        yield* Interactions.modal(vote, "ephemeral", (ix) => ix.reply({ content: "vote's handler", ephemeral: true }))
+        yield* Interactions.modal(reason, "ephemeral", (ix) => ix.reply({ content: "reason's handler", ephemeral: true }))
+        yield* publish(interaction(5, { custom_id: yield* vote.customId({ choice: "yes" }), ...why }))
+        yield* settle
+        // one callback, from vote's handler: reason's registration neither decoded the submit nor answered it as expired
+        expect(yield* sent).toEqual([{ method: "POST", path: callback, body: { type: 4, data: { allowed_mentions: { parse: [] }, content: "vote's handler", flags: 64 } } }])
+        yield* publish(interaction(5, { custom_id: yield* reason.customId({ poll: 3 }), ...why }))
+        yield* settle
+        expect((yield* sent).map((entry) => entry.body)).toEqual([
+          { type: 4, data: { allowed_mentions: { parse: [] }, content: "vote's handler", flags: 64 } },
+          { type: 4, data: { allowed_mentions: { parse: [] }, content: "reason's handler", flags: 64 } }
+        ])
+        expect((yield* logs).filter((line) => line.includes("no longer decodes"))).toEqual([])
+      })
+    )
+  )
+
+  it.effect("runs no continuation when Discord refuses its response: a callback answered 404 10062 sends no follow-up, and the runner logs InteractionExpired at Warn", () =>
+    withRunner(
+      ({ publish, sent, logs }) =>
+        Effect.gen(function* () {
+          const ran = yield* Ref.make(false)
+          yield* Interactions.command(ping, (ix) =>
+            ix.reply({ content: "first" }, (answered) =>
+              Effect.andThen(Ref.set(ran, true), answered.followUp({ content: "second" }).pipe(catchCategory(["permission", "state"], () => Effect.void)))
+            )
+          )
+          yield* publish(invoke)
+          yield* settle
+          expect(only(yield* sent)).toEqual([`POST ${callback}`])
+          expect(yield* Ref.get(ran)).toBe(false)
+          expect((yield* logs).filter((line) => line.includes("was refused"))).toEqual(["Warn: discord.interaction command ping: the reply was refused: InteractionExpired (10062)"])
+        }),
+      (method, path) => (method === "POST" && path === callback ? { status: 404, body: { code: 10062, message: "Unknown interaction" } } : undefined)
+    )
+  )
+
+  it.effect("posts nothing for a manual handler slower than Discord's 3 s; its late answer, refused with 10062, is logged as InteractionExpired", () =>
+    withRunner(
+      ({ publish, sent, logs }) =>
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>()
+          yield* Interactions.command(ping, "manual", (ix) => Effect.andThen(Deferred.await(gate), ix.reply({ content: "too late" })))
+          yield* publish(invoke)
+          yield* settle
+          yield* TestClock.adjust("4 seconds")
+          yield* settle
+          expect(yield* sent).toEqual([])
+          yield* Deferred.succeed(gate, undefined)
+          yield* settle
+          expect(only(yield* sent)).toEqual([`POST ${callback}`])
+          expect((yield* logs).filter((line) => line.includes("was refused"))).toEqual(["Warn: discord.interaction command ping: the reply was refused: InteractionExpired (10062)"])
+        }),
+      (method, path) => (method === "POST" && path === callback ? { status: 404, body: { code: 10062, message: "Unknown interaction" } } : undefined)
     )
   )
 

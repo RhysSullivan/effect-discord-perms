@@ -30,6 +30,16 @@ milestone appends its entries.
 
   The alternative for each question below is to accept that part as typed and unit-tested only.
 
+  **Unverified path (after the M9 verifier).** The checklist registers its handlers on an extra subject gateway
+  session (`sessions.open` in `harness/ChecklistRun.ts`'s `sitting`, with Guilds and the three DM intents), while the
+  subject's main session (the `Identities.live` bot build, intents Guilds and GuildMembers) stays connected. M7's intent
+  rows show Discord delivering guild dispatches to such an extra session with the main one up, but nobody has seen
+  whether Discord delivers an INTERACTION_CREATE to it as well, or only to one of the application's sessions. If
+  `/checklist` (or its autocomplete) gets Discord's "The application did not respond" and the terminal logged no
+  interaction, this is the likely cause, not the checklist's handlers: the agent should stop the sitting (the closing
+  reset runs), register the checklist on the main build's runtime (`labInteractionsOnly` over the main `BotRuntime`,
+  keeping the extra sessions for the DM events only), record the delivery as a live finding, and ask Rhys to sit again.
+
 - **Q-17, the DM content exception (`R-message-content`'s remainder).** A bot cannot DM another bot (H-158) and the
   harness never DMs Rhys, so only Rhys's own DM shows Discord delivering a DM's content without MessageContent: step 4
   of the checklist (the result line "DM events with the DM intents" must show `MESSAGE_CREATE (content delivered)`).
@@ -2436,3 +2446,23 @@ Two major findings and six minor ones, each fixed (commits `812d493`, `79bca42`,
   13 fail fixtures, 110 diagnostics, largest gated 617 characters; hover 6 files, 22 markers; `rules ok 70 rule(s) (55
   live pair, 0 escalated, 5 pure-typing, 10 other not-live), 13 fail fixture(s)`; budget: per command 381.8 types and
   2,164.8 instantiations).
+
+### M10 Reference bot, budget, README, final fresh-process run
+
+- **Before M10, the M9 verifier's four leftover minor findings** (their own commit). Each new test was checked against
+  the verifier's mutant (applied, the test failed, reverted):
+  - modal routing by route prefix (§4.14): `interactions-runner.test.ts` registers two modal routes (`vote`, `reason`)
+    and submits each in turn; only the submitted route's handler answers, one callback each, and no line says a
+    `custom_id` "no longer decodes". Dropping `if (routeNameOf(data.custom_id) !== route.name) return` from `modal`
+    fails it (the other registration answered the submit as an expired control);
+  - `ChecklistRun.isDone` directly (`checklist.test.ts`): with the three DM events, the map of every item's verdict is
+    done, and for each item of `Checklist.itemList` the map of every other item's verdict is not (a map of "not as
+    expected" verdicts is done too). `Checklist.itemList.slice(1).every(...)` fails it;
+  - a refused callback (`interactions-runner.test.ts`, two tests): the fake answers the callback 404 10062; a reply's
+    continuation then never runs and its follow-up is never sent, and the runner logs exactly `Warn: discord.interaction
+    command ping: the reply was refused: InteractionExpired (10062)`; and a "manual" handler slower than Discord's 3 s
+    posts nothing until it answers (4 s under `TestClock`), and its late reply's 10062 is logged the same way (§4.14's
+    "a handler slower than 3 s fails with InteractionExpired, logged by the runner"). `if (plan.continuation ===
+    undefined) return` (no `!posted`) fails the first;
+  - the checklist's extra gateway session: the risk is now under "Waiting for Rhys" (the checklist item's "Unverified
+    path"), with what a `/checklist` that gets no answer would mean and what the agent should then do.

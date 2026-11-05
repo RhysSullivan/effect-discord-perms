@@ -270,6 +270,17 @@ describe("the checklist", () => {
     expect(canary("MESSAGE_UPDATE", { guild_id: "100000000000000000", channel_id: textId })).toBe(false)
   })
 
+  it("is done only when every item has a verdict: leaving out any one item's, with the three DM events, is not done", () => {
+    const all = new Map(Checklist.itemList.map((item) => [item, true] as const))
+    expect(isDone(all, dmEvents)).toBe(true)
+    for (const left of Checklist.itemList) {
+      const others = new Map([...all].filter(([item]) => item !== left))
+      expect({ left, done: isDone(others, dmEvents) }).toEqual({ left, done: false })
+    }
+    // a "not as expected" verdict is a verdict too
+    expect(isDone(new Map(Checklist.itemList.map((item) => [item, false] as const)), dmEvents)).toBe(true)
+  })
+
   it("reads an interaction's channel from `channel`, else `channel_id`", () => {
     expect(interactionChannelOf({ channel: { id: "1", type: 0 }, channel_id: "2" })).toBe("1")
     expect(interactionChannelOf({ channel_id: "2" })).toBe("2")
