@@ -39,7 +39,6 @@ export type ExtractCategory<E, K extends string> = Extract<E, CategoryMarker<K>>
 /** The members of `E` that belong to none of the categories `K`. */
 export type ExcludeCategory<E, K extends string> = Exclude<E, ExtractCategory<E, K>>
 
-
 /** A class as the mixin's run time sees it: something to subclass. */
 type MixableClass = new (...args: never) => object
 
