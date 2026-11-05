@@ -2888,7 +2888,8 @@ setup alone made 216.)
      2 s is resent, its own overwrites written again unchanged, and Discord then
      sends it obfuscated. The run log names the channels resent.)
    - Two oracle reads 100 ms apart are identical (revision 2: 300 ms; with the
-     pacing's 200 ms between request starts they start at least 300 ms apart).
+     pacing's 200 ms between request starts they started at least 300 ms apart;
+     at 10/s, before M9, the second starts 100 ms after the first's answer).
    - A further 100 ms settle has passed (revision 2: 250 ms).
 4. **(a) Resolver** over the subject's GuildState (M3: a scenario thread is
    refreshed first through `GuildState.refresh`, so the subject's view of it is a
