@@ -8,8 +8,9 @@
  *
  * - the reference bot, `examples/reference-bot/tsconfig.json` (built in M10), compiled as a consumer of this package
  *   compiles it: it imports `effect-discord-perms` by name, which resolves through the package's own `exports` (today
- *   `"."` is `src/index.ts`, the source), so the library's implementation is checked with the bot. The script fails if
- *   the bot's program does not include that entry point, so a private `paths` mapping cannot change what is measured.
+ *   `"."` is `src/index.ts`, the source), so the library's implementation is checked with the bot. The script fails
+ *   unless every import of the package resolves to that entry point (`--traceResolution`), so a private `paths`
+ *   mapping cannot change what is measured.
  *   Hard ceilings, +2% on Types and Instantiations, check time at most 1.5 x baseline + 25 ms;
  * - the per-command row: `examples/command-probe/tsconfig.none.json` (no commands) and
  *   `examples/command-probe/tsconfig.commands.json` (20 commands of 25 options with handlers, built with the
@@ -25,7 +26,7 @@ import { Schema } from "effect"
 import {
   Baseline,
   ceilingProblems,
-  consumerEntryProblem,
+  consumerResolutionProblem,
   type PerCommandCost,
   parseExtendedDiagnostics,
   perCommandCost,
@@ -86,7 +87,7 @@ if (baseline !== undefined && baseline.typescript !== version && !update) {
 let referenceBot: ProjectStats | undefined
 if (exists(projects.referenceBot)) {
   const entry = path.join(repoRoot, Schema.decodeUnknownSync(Schema.fromJsonString(PackageExports))(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).exports["."])
-  const reached = consumerEntryProblem(runTsc(["-p", projects.referenceBot, "--listFilesOnly", "--pretty", "false"]).stdout.split("\n"), entry)
+  const reached = consumerResolutionProblem(runTsc(["-p", projects.referenceBot, "--traceResolution", "--noEmit", "--pretty", "false"]).stdout.split("\n"), entry)
   if (reached !== undefined) problems.push(reached)
   else referenceBot = measure(projects.referenceBot)
   if (referenceBot !== undefined) {

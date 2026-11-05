@@ -163,15 +163,33 @@ export const perCommandCost = (none: ProjectStats, withCommands: ProjectStats): 
   return { ...commandProbe, types, instantiations }
 }
 
+/** The package name a consumer imports. */
+export const packageName = "effect-discord-perms"
+
+const resolvedLine = /^=+ Module name '([^']+)' was successfully resolved to '([^']+)'/
+const unresolvedLine = /^=+ Module name '([^']+)' was not resolved/
+
 /**
- * Whether the reference bot's program (its `--listFilesOnly` lines) reaches the library the way a consumer of this
- * package does: through the package's own entry point, `entry` (`exports["."]` in `package.json`), and not through a
- * private `paths` mapping to something the package does not ship. `undefined` when it does; otherwise the problem.
+ * Whether the reference bot reaches the library the way a consumer of this package does, read from the compiler's
+ * `--traceResolution` lines: every import of `effect-discord-perms` resolves to the package's own entry point,
+ * `entry` (`exports["."]` in `package.json`), and there is at least one. A `paths` mapping (or anything else) that
+ * sends the import somewhere the package does not ship fails, even when another file of the program imports the
+ * entry point directly. `undefined` when it does; otherwise the problem.
  */
-export const consumerEntryProblem = (files: ReadonlyArray<string>, entry: string): string | undefined =>
-  files.some((file) => file.trim() === entry)
+export const consumerResolutionProblem = (trace: ReadonlyArray<string>, entry: string): string | undefined => {
+  const targets: Array<string> = []
+  for (const line of trace) {
+    const text = line.trim()
+    if (unresolvedLine.exec(text)?.[1] === packageName) return `the reference bot's import of ${packageName} does not resolve`
+    const resolved = resolvedLine.exec(text)
+    if (resolved !== null && resolved[1] === packageName) targets.push(resolved[2] ?? "")
+  }
+  if (targets.length === 0) return `the reference bot does not import ${packageName}; it must import the package by name, as a consumer does`
+  const elsewhere = targets.find((target) => target !== entry)
+  return elsewhere === undefined
     ? undefined
-    : `the reference bot's program does not include the package's entry point ${entry} (package.json exports "."); it must import effect-discord-perms by name, with no paths mapping, as a consumer does`
+    : `the reference bot's import of ${packageName} resolves to ${elsewhere}, not to the package's entry point ${entry} (package.json exports "."); it must resolve through the package's exports, with no paths mapping, as a consumer's does`
+}
 
 /** The per-command row's regressions against its baseline row. */
 export const perCommandRegressions = (current: PerCommandCost, baseline: PerCommandCost): ReadonlyArray<string> => {

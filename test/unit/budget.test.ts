@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   ceilingProblems,
-  consumerEntryProblem,
+  consumerResolutionProblem,
   parseExtendedDiagnostics,
   perCommandCost,
   perCommandRegressions,
@@ -91,16 +91,34 @@ describe("referenceBotRegressions", () => {
   })
 })
 
-describe("consumerEntryProblem", () => {
+describe("consumerResolutionProblem", () => {
   const entry = "/repo/src/index.ts"
+  const resolving = "======== Resolving module 'effect-discord-perms' from '/repo/examples/reference-bot/bot.ts'. ========"
+  const resolvedTo = (target: string): string =>
+    `======== Module name 'effect-discord-perms' was successfully resolved to '${target}' with Package ID 'effect-discord-perms/src/index.ts@0.0.0'. ========`
 
-  it("accepts a program that reaches the package's entry point, whatever else it lists", () => {
-    expect(consumerEntryProblem(["/repo/node_modules/effect/dist/index.d.ts", ` ${entry}`, "/repo/src/config/Credentials.ts", ""], entry)).toBeUndefined()
+  it("accepts a bot whose every import of the package resolves to its entry point, whatever else resolves", () => {
+    const trace = [resolving, resolvedTo(entry), "======== Module name 'effect' was successfully resolved to '/repo/node_modules/effect/dist/index.d.ts'. ========", resolvedTo(entry), ""]
+    expect(consumerResolutionProblem(trace, entry)).toBeUndefined()
   })
 
-  it("rejects a program that reaches the library some other way (a paths mapping to declarations the package does not ship)", () => {
-    expect(consumerEntryProblem(["/repo/examples/reference-bot/bot.ts", "/repo/.budget/declarations/src/index.d.ts"], entry)).toBe(
-      "the reference bot's program does not include the package's entry point /repo/src/index.ts (package.json exports \".\"); it must import effect-discord-perms by name, with no paths mapping, as a consumer does"
+  it("rejects an import of the package resolved somewhere else (a paths mapping to declarations the package does not ship)", () => {
+    expect(consumerResolutionProblem([resolving, resolvedTo("/repo/.budget/declarations/src/index.d.ts")], entry)).toBe(
+      "the reference bot's import of effect-discord-perms resolves to /repo/.budget/declarations/src/index.d.ts, not to the package's entry point /repo/src/index.ts (package.json exports \".\"); it must resolve through the package's exports, with no paths mapping, as a consumer's does"
+    )
+  })
+
+  it("rejects a mapped import even when another file of the program reaches the entry point directly", () => {
+    const trace = [resolvedTo("/repo/.budget/declarations/src/index.d.ts"), "======== Module name '../../src/index.ts' was successfully resolved to '/repo/src/index.ts'. ========"]
+    expect(consumerResolutionProblem(trace, entry)).toContain("resolves to /repo/.budget/declarations/src/index.d.ts")
+  })
+
+  it("rejects a bot that does not import the package, or whose import does not resolve", () => {
+    expect(consumerResolutionProblem(["======== Module name '../../src/index.ts' was successfully resolved to '/repo/src/index.ts'. ========"], entry)).toBe(
+      "the reference bot does not import effect-discord-perms; it must import the package by name, as a consumer does"
+    )
+    expect(consumerResolutionProblem([resolving, "======== Module name 'effect-discord-perms' was not resolved. ========"], entry)).toBe(
+      "the reference bot's import of effect-discord-perms does not resolve"
     )
   })
 })
