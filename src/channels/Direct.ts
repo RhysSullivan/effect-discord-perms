@@ -18,8 +18,8 @@ import * as ToDfx from "../payload/ToDfx.ts"
 import * as Schemas from "../rest/Schemas.ts"
 import type { ChannelId, UserId } from "../Snowflake.ts"
 import type { DMChannel, SendMethod } from "./Channel.ts"
-import type { AnyMessage, EditOwnMethod, ForeignMessage, OwnMessage } from "./Message.ts"
-import { createLimits, degradedOf, type Runtime, sendMethodOf, type Wide, type WideError } from "./Ops.ts"
+import type { AnyMessage, DeleteMethod, DeleteOp, EditOp, EditOwnMethod, ForeignMessage, KindOf, MessageReceiver, OwnMessage, OwnMessages, OwnReceiver } from "./Message.ts"
+import { createLimits, degradedOf, type Runtime, sendMethodOf, type Wide } from "./Ops.ts"
 
 /** What a DM handle's methods close over. */
 interface DirectCore {
@@ -50,17 +50,18 @@ const dmSend = (core: DirectCore): SendMethod =>
       .pipe(Effect.map((message) => ({ message: ownDirect(core, message), degraded: degradedOf(payload, message) })))
   })
 
-const dmEdit = (core: DirectCore, id: Schemas.Message["id"]): EditOwnMethod<"dm"> => {
-  function edit<const P extends EditMessage>(
+const dmEdit = (core: DirectCore, id: Schemas.Message["id"]): EditOwnMethod => {
+  function edit<M extends OwnReceiver, const P extends EditMessage>(
+    this: M,
     patch: EditArg<P>
   ): Effect.Effect<
-    OwnMessage<"dm">,
-    | OpErrors<never>["message.edit.channel"]
+    OwnMessages<KindOf<M>>,
+    | OpErrors<never>[EditOp<KindOf<M>>]
     | ContentTooLongIn<P>
     | EditEmbedTooLargeIn<P>
     | EditMessageEmptyIn<P>
   >
-  function edit(patch: EditMessage): Effect.Effect<OwnMessage<"dm">, WideError> {
+  function edit<M extends OwnReceiver>(this: M, patch: EditMessage): Effect.Effect<unknown, Wide<OpErrors<never>[EditOp<KindOf<M>>]>> {
     const [local] = Limits.checkEdit(patch, localCause(messageRoute))
     if (local !== undefined) return Effect.fail(local)
     return core.runtime.api
@@ -82,9 +83,9 @@ const dmEdit = (core: DirectCore, id: Schemas.Message["id"]): EditOwnMethod<"dm"
   return edit
 }
 
-const dmDelete = <Op extends "message.deleteOwn" | "message.deleteForeign">(core: DirectCore, id: Schemas.Message["id"], op: Op) => {
-  function deleteMessage(): Effect.Effect<void, OpErrors<never>[Op]>
-  function deleteMessage(): Effect.Effect<void, Wide<OpErrors<never>[Op]>> {
+const dmDelete = (core: DirectCore, id: Schemas.Message["id"], op: "message.deleteOwn" | "message.deleteForeign"): DeleteMethod => {
+  function deleteMessage<M extends MessageReceiver>(this: M): Effect.Effect<void, OpErrors<never>[DeleteOp<M>]>
+  function deleteMessage<M extends MessageReceiver>(this: M): Effect.Effect<void, Wide<OpErrors<never>[DeleteOp<M>]>> {
     return core.runtime.api.executeDirect({
       op,
       args: { payload: [] },

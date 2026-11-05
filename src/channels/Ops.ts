@@ -92,15 +92,20 @@ import type {
 import type {
   AnyMessage,
   CreateThreadFromMessage,
-  DeleteForeignOp,
-  DeleteOwnOp,
+  CrosspostMethod,
+  CrosspostOp,
+  DeleteMethod,
+  DeleteOp,
   EditOp,
   EditOwnMethod,
   ForeignMessages,
-  OwnMessage,
+  KindOf,
+  MessageReceiver,
   OwnMessages,
+  OwnReceiver,
+  Pinnable,
   PinOp,
-  ReactFlags,
+  ReactErrors,
   ReactMethod,
   ReactOp,
   ThreadFrom,
@@ -731,9 +736,13 @@ const reactOps: { readonly [K in GuildMessageKind]: ReactOp<K> } = {
   "announcement-thread": "message.react.thread"
 }
 
-const reactMethod = <K extends GuildMessageKind>(core: MessageCore & { readonly kind: K }): ReactMethod<K> => {
-  function react<const E extends Emoji>(emoji: E): Effect.Effect<void, OpPermissionErrors[ReactOp<K>][ReactFlags<K, E>] | OpTags[ReactOp<K>] | Transient>
-  function react(emoji: Emoji): Effect.Effect<void, WideError> {
+// Each message method is its shared method type (`Message.ts`) over a wide implementation that ignores `this` and
+// runs for the handle it closes over (rule 7 of §2.12; the implementation's error type carries the overload's term,
+// `Wide<...>`, so tsc relates the two by identity).
+
+const reactMethod = (core: MessageCore): ReactMethod => {
+  function react<M extends MessageReceiver, const E extends Emoji>(this: M, emoji: E): Effect.Effect<void, ReactErrors<M, E> | Transient>
+  function react<M extends MessageReceiver, const E extends Emoji>(this: M, emoji: E): Effect.Effect<void, Wide<ReactErrors<M, E> | Transient>> {
     const key = emojiKeyOf(emoji)
     const known = core.reactions
     const reaction = known === undefined ? "unknown" : known.some((existing) => sameKey(existing, key)) ? "existing" : "new"
@@ -758,23 +767,26 @@ const reactMethod = <K extends GuildMessageKind>(core: MessageCore & { readonly 
   return react
 }
 
-const pinMethods = <K extends GuildMessageKind>(core: MessageCore & { readonly kind: K }, ops: { readonly pin: PinOp<K>; readonly unpin: UnpinOp<K> }) => {
+const pinMethods = (core: MessageCore, ops: { readonly pin: OpName; readonly unpin: OpName }): Pinnable => {
   const route = "/channels/{channel.id}/messages/pins/{message.id}"
-  function pin(): Effect.Effect<void, OpErrors<never>[PinOp<K>]>
-  function pin(): Effect.Effect<void, Wide<OpErrors<never>[PinOp<K>]>> {
+  function pin<M extends MessageReceiver>(this: M): Effect.Effect<void, OpErrors<never>[PinOp<KindOf<M>>]>
+  function pin<M extends MessageReceiver>(this: M): Effect.Effect<void, Wide<OpErrors<never>[PinOp<KindOf<M>>]>> {
     return plainMessageOp(core, "discord.message.pin", ops.pin, { method: "PUT", template: route }, (rest) => rest.createPin(core.channelId, core.id), Schema.Void)
   }
-  function unpin(): Effect.Effect<void, OpErrors<never>[UnpinOp<K>]>
-  function unpin(): Effect.Effect<void, Wide<OpErrors<never>[UnpinOp<K>]>> {
+  function unpin<M extends MessageReceiver>(this: M): Effect.Effect<void, OpErrors<never>[UnpinOp<KindOf<M>>]>
+  function unpin<M extends MessageReceiver>(this: M): Effect.Effect<void, Wide<OpErrors<never>[UnpinOp<KindOf<M>>]>> {
     return plainMessageOp(core, "discord.message.unpin", ops.unpin, { method: "DELETE", template: route }, (rest) => rest.deletePin(core.channelId, core.id), Schema.Void)
   }
   return { pin, unpin }
 }
 
-const createThreadFromMessage = <K extends "text" | "announcement">(core: MessageCore & { readonly kind: K }): CreateThreadFromMessage<K> => {
+const createThreadFromMessage = (core: MessageCore): CreateThreadFromMessage => {
   const route = `${messageRoute}/threads`
-  function createThread<const T extends { readonly name: string }>(thread: T): Effect.Effect<ChannelKinds<never>[ThreadFrom<K>], OpErrors<never>["channel.createThread.public"] | NameTooLongIn<T["name"]>>
-  function createThread(thread: { readonly name: string }): Effect.Effect<GuildChannel, WideError> {
+  function createThread<M extends MessageReceiver, const T extends { readonly name: string }>(
+    this: M,
+    thread: T
+  ): Effect.Effect<ChannelKinds<never>[ThreadFrom<KindOf<M>>], OpErrors<never>["channel.createThread.public"] | NameTooLongIn<T["name"]>>
+  function createThread(this: MessageReceiver, thread: { readonly name: string }): Effect.Effect<GuildChannel, WideError> {
     const target = messageTarget(core, "channel.createThread.public", noPayload)
     return perform(core.runtime, {
       span: "discord.message.createThread",
@@ -793,9 +805,9 @@ const createThreadFromMessage = <K extends "text" | "announcement">(core: Messag
   return createThread
 }
 
-const crosspostMethod = <Op extends "message.crosspostOwn" | "message.crosspostForeign">(core: MessageCore, op: Op) => {
-  function crosspost(): Effect.Effect<void, OpErrors<never>[Op]>
-  function crosspost(): Effect.Effect<void, Wide<OpErrors<never>[Op]>> {
+const crosspostMethod = (core: MessageCore, op: "message.crosspostOwn" | "message.crosspostForeign"): CrosspostMethod => {
+  function crosspost<M extends MessageReceiver>(this: M): Effect.Effect<void, OpErrors<never>[CrosspostOp<M>]>
+  function crosspost<M extends MessageReceiver>(this: M): Effect.Effect<void, Wide<OpErrors<never>[CrosspostOp<M>]>> {
     return plainMessageOp(core, "discord.message.crosspost", op, { method: "POST", template: `${messageRoute}/crosspost` }, (rest) => rest.crosspostMessage(core.channelId, core.id), Schemas.Message).pipe(Effect.asVoid)
   }
   return crosspost
@@ -803,17 +815,18 @@ const crosspostMethod = <Op extends "message.crosspostOwn" | "message.crosspostF
 
 const byKind = <K extends GuildMessageKind, A, B, C>(kind: K, rows: { readonly channel: A; readonly thread: B; readonly voice: C }): A | B | C => (isThreadKind(kind) ? rows.thread : isVoiceKind(kind) ? rows.voice : rows.channel)
 
-const editOwnMethod = <K extends GuildMessageKind>(core: MessageCore & { readonly kind: K }): EditOwnMethod<K> => {
-  function edit<const P extends EditMessage>(
+const editOwnMethod = (core: MessageCore): EditOwnMethod => {
+  function edit<M extends OwnReceiver, const P extends EditMessage>(
+    this: M,
     patch: EditArg<P>
   ): Effect.Effect<
-    OwnMessage<K>,
-    | OpErrors<never>[EditOp<K>]
+    OwnMessages<KindOf<M>>,
+    | OpErrors<never>[EditOp<KindOf<M>>]
     | ContentTooLongIn<P>
     | EditEmbedTooLargeIn<P>
     | EditMessageEmptyIn<P>
   >
-  function edit(patch: EditMessage): Effect.Effect<unknown, Wide<OpErrors<never>[EditOp<K>]>> {
+  function edit<M extends OwnReceiver>(this: M, patch: EditMessage): Effect.Effect<unknown, Wide<OpErrors<never>[EditOp<KindOf<M>>]>> {
     const op = byKind(core.kind, { channel: "message.edit.channel", thread: "message.edit.thread", voice: "message.edit.voice" } as const)
     const target = messageTarget(core, op, noPayload)
     return perform(core.runtime, {
@@ -833,9 +846,9 @@ const editOwnMethod = <K extends GuildMessageKind>(core: MessageCore & { readonl
   return edit
 }
 
-const deleteMethod = <Op extends OpName>(core: MessageCore, op: Op) => {
-  function deleteMessage(): Effect.Effect<void, OpErrors<never>[Op]>
-  function deleteMessage(): Effect.Effect<void, Wide<OpErrors<never>[Op]>> {
+const deleteMethod = (core: MessageCore, op: OpName): DeleteMethod => {
+  function deleteMessage<M extends MessageReceiver>(this: M): Effect.Effect<void, OpErrors<never>[DeleteOp<M>]>
+  function deleteMessage<M extends MessageReceiver>(this: M): Effect.Effect<void, Wide<OpErrors<never>[DeleteOp<M>]>> {
     return plainMessageOp(core, "discord.message.delete", op, { method: "DELETE", template: messageRoute }, (rest) => rest.deleteMessage(core.channelId, core.id), Schema.Void)
   }
   return deleteMessage
@@ -855,87 +868,56 @@ const deleteOwnOps = { channel: "message.deleteOwn", thread: "message.deleteOwn.
 const deleteForeignOps = { channel: "message.deleteForeign", thread: "message.deleteForeign.thread", voice: "message.deleteForeign.voice" } as const
 
 const ownHandle = (core: MessageCore): OwnMessages<GuildMessageKind> => {
-  const shared = { id: core.id, channelId: core.channelId, guildId: core.guildId, author: "self" as const }
+  const shared = { id: core.id, channelId: core.channelId, guildId: core.guildId, author: "self" as const, react: reactMethod(core), edit: editOwnMethod(core) }
   switch (core.kind) {
-    case "text": {
-      const typed = { ...core, kind: "text" as const }
-      return { ...shared, channelKind: "text", react: reactMethod<"text">(typed), ...pinMethods<"text">(typed, pinOps.channel), createThread: createThreadFromMessage<"text">(typed), edit: editOwnMethod<"text">(typed), delete: deleteMethod(typed, deleteOwnOps.channel) }
-    }
-    case "announcement": {
-      const typed = { ...core, kind: "announcement" as const }
+    case "text":
+      return { ...shared, channelKind: "text", ...pinMethods(core, pinOps.channel), createThread: createThreadFromMessage(core), delete: deleteMethod(core, deleteOwnOps.channel) }
+    case "announcement":
       return {
         ...shared,
         channelKind: "announcement",
-        react: reactMethod<"announcement">(typed),
-        ...pinMethods<"announcement">(typed, pinOps.channel),
-        createThread: createThreadFromMessage<"announcement">(typed),
-        crosspost: crosspostMethod(typed, "message.crosspostOwn"),
-        edit: editOwnMethod<"announcement">(typed),
-        delete: deleteMethod(typed, deleteOwnOps.channel)
+        ...pinMethods(core, pinOps.channel),
+        createThread: createThreadFromMessage(core),
+        crosspost: crosspostMethod(core, "message.crosspostOwn"),
+        delete: deleteMethod(core, deleteOwnOps.channel)
       }
-    }
-    case "voice": {
-      const typed = { ...core, kind: "voice" as const }
-      return { ...shared, channelKind: "voice", react: reactMethod<"voice">(typed), edit: editOwnMethod<"voice">(typed), delete: deleteMethod(typed, deleteOwnOps.voice) }
-    }
-    case "stage": {
-      const typed = { ...core, kind: "stage" as const }
-      return { ...shared, channelKind: "stage", react: reactMethod<"stage">(typed), edit: editOwnMethod<"stage">(typed), delete: deleteMethod(typed, deleteOwnOps.voice) }
-    }
-    case "public-thread": {
-      const typed = { ...core, kind: "public-thread" as const }
-      return { ...shared, channelKind: "public-thread", react: reactMethod<"public-thread">(typed), ...pinMethods<"public-thread">(typed, pinOps.thread), edit: editOwnMethod<"public-thread">(typed), delete: deleteMethod(typed, deleteOwnOps.thread) }
-    }
-    case "private-thread": {
-      const typed = { ...core, kind: "private-thread" as const }
-      return { ...shared, channelKind: "private-thread", react: reactMethod<"private-thread">(typed), ...pinMethods<"private-thread">(typed, pinOps.thread), edit: editOwnMethod<"private-thread">(typed), delete: deleteMethod(typed, deleteOwnOps.thread) }
-    }
-    case "announcement-thread": {
-      const typed = { ...core, kind: "announcement-thread" as const }
-      return { ...shared, channelKind: "announcement-thread", react: reactMethod<"announcement-thread">(typed), ...pinMethods<"announcement-thread">(typed, pinOps.thread), edit: editOwnMethod<"announcement-thread">(typed), delete: deleteMethod(typed, deleteOwnOps.thread) }
-    }
+    case "voice":
+      return { ...shared, channelKind: "voice", delete: deleteMethod(core, deleteOwnOps.voice) }
+    case "stage":
+      return { ...shared, channelKind: "stage", delete: deleteMethod(core, deleteOwnOps.voice) }
+    case "public-thread":
+      return { ...shared, channelKind: "public-thread", ...pinMethods(core, pinOps.thread), delete: deleteMethod(core, deleteOwnOps.thread) }
+    case "private-thread":
+      return { ...shared, channelKind: "private-thread", ...pinMethods(core, pinOps.thread), delete: deleteMethod(core, deleteOwnOps.thread) }
+    case "announcement-thread":
+      return { ...shared, channelKind: "announcement-thread", ...pinMethods(core, pinOps.thread), delete: deleteMethod(core, deleteOwnOps.thread) }
   }
 }
 
 const foreignHandle = (core: MessageCore, authorId: UserId, authorIsBot: boolean): ForeignMessages<GuildMessageKind> => {
-  const shared = { id: core.id, channelId: core.channelId, guildId: core.guildId, author: "other" as const, authorId, authorIsBot }
+  const shared = { id: core.id, channelId: core.channelId, guildId: core.guildId, author: "other" as const, authorId, authorIsBot, react: reactMethod(core) }
   switch (core.kind) {
-    case "text": {
-      const typed = { ...core, kind: "text" as const }
-      return { ...shared, channelKind: "text", react: reactMethod<"text">(typed), ...pinMethods<"text">(typed, pinOps.channel), createThread: createThreadFromMessage<"text">(typed), delete: deleteMethod(typed, deleteForeignOps.channel) }
-    }
-    case "announcement": {
-      const typed = { ...core, kind: "announcement" as const }
+    case "text":
+      return { ...shared, channelKind: "text", ...pinMethods(core, pinOps.channel), createThread: createThreadFromMessage(core), delete: deleteMethod(core, deleteForeignOps.channel) }
+    case "announcement":
       return {
         ...shared,
         channelKind: "announcement",
-        react: reactMethod<"announcement">(typed),
-        ...pinMethods<"announcement">(typed, pinOps.channel),
-        createThread: createThreadFromMessage<"announcement">(typed),
-        crosspost: crosspostMethod(typed, "message.crosspostForeign"),
-        delete: deleteMethod(typed, deleteForeignOps.channel)
+        ...pinMethods(core, pinOps.channel),
+        createThread: createThreadFromMessage(core),
+        crosspost: crosspostMethod(core, "message.crosspostForeign"),
+        delete: deleteMethod(core, deleteForeignOps.channel)
       }
-    }
-    case "voice": {
-      const typed = { ...core, kind: "voice" as const }
-      return { ...shared, channelKind: "voice", react: reactMethod<"voice">(typed), delete: deleteMethod(typed, deleteForeignOps.voice) }
-    }
-    case "stage": {
-      const typed = { ...core, kind: "stage" as const }
-      return { ...shared, channelKind: "stage", react: reactMethod<"stage">(typed), delete: deleteMethod(typed, deleteForeignOps.voice) }
-    }
-    case "public-thread": {
-      const typed = { ...core, kind: "public-thread" as const }
-      return { ...shared, channelKind: "public-thread", react: reactMethod<"public-thread">(typed), ...pinMethods<"public-thread">(typed, pinOps.thread), delete: deleteMethod(typed, deleteForeignOps.thread) }
-    }
-    case "private-thread": {
-      const typed = { ...core, kind: "private-thread" as const }
-      return { ...shared, channelKind: "private-thread", react: reactMethod<"private-thread">(typed), ...pinMethods<"private-thread">(typed, pinOps.thread), delete: deleteMethod(typed, deleteForeignOps.thread) }
-    }
-    case "announcement-thread": {
-      const typed = { ...core, kind: "announcement-thread" as const }
-      return { ...shared, channelKind: "announcement-thread", react: reactMethod<"announcement-thread">(typed), ...pinMethods<"announcement-thread">(typed, pinOps.thread), delete: deleteMethod(typed, deleteForeignOps.thread) }
-    }
+    case "voice":
+      return { ...shared, channelKind: "voice", delete: deleteMethod(core, deleteForeignOps.voice) }
+    case "stage":
+      return { ...shared, channelKind: "stage", delete: deleteMethod(core, deleteForeignOps.voice) }
+    case "public-thread":
+      return { ...shared, channelKind: "public-thread", ...pinMethods(core, pinOps.thread), delete: deleteMethod(core, deleteForeignOps.thread) }
+    case "private-thread":
+      return { ...shared, channelKind: "private-thread", ...pinMethods(core, pinOps.thread), delete: deleteMethod(core, deleteForeignOps.thread) }
+    case "announcement-thread":
+      return { ...shared, channelKind: "announcement-thread", ...pinMethods(core, pinOps.thread), delete: deleteMethod(core, deleteForeignOps.thread) }
   }
 }
 

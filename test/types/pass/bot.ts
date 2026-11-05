@@ -8,12 +8,14 @@ import { expectTypeOf } from "vitest"
 import { Bot, type BotRuntime } from "../../../src/bot/Bot.ts"
 import type { Handled, UnhandledErrors } from "../../../src/bot/Handler.ts"
 import type { StartupFailed } from "../../../src/bot/Startup.ts"
-import type { DMChannel, GuildChannel, MessageChannel } from "../../../src/channels/Channel.ts"
+import type { DMChannel, GuildChannel, GuildMessageKind, MessageChannel } from "../../../src/channels/Channel.ts"
+import type { OwnMessages } from "../../../src/channels/Message.ts"
 import { isMessageChannel } from "../../../src/channels/Channel.ts"
 import { catchCategory, withCategory } from "../../../src/errors/Category.ts"
 import type { DiscordUnavailable } from "../../../src/errors/Transient.ts"
 import type { ContentUnavailable, DirectMessageCreate, GuildMessageCreate, ReactionEmoji } from "../../../src/gateway/Events.ts"
 import { type EventIntents, type Intent, Intents } from "../../../src/gateway/Intents.ts"
+import type { OpErrors } from "../../../src/permissions/Operations.ts"
 import type { GuildId, MessageId, UserId } from "../../../src/Snowflake.ts"
 
 const withContent = Bot.make({ intents: ["Guilds", "GuildMessages", "MessageContent"] })
@@ -119,3 +121,37 @@ expectTypeOf(r10).toEqualTypeOf<Effect.Effect<void, never, BotRuntime | Scope.Sc
 const config = { token: Config.Redacted("DISCORD_SUBJECT_TOKEN") }
 expectTypeOf(Bot.layerWith(withContent, config)).toEqualTypeOf<Layer.Layer<BotRuntime, StartupFailed | Config.ConfigError, HttpClient.HttpClient | Socket.WebSocketConstructor>>()
 expectTypeOf(Bot.layer(withContent, config)).toEqualTypeOf<Layer.Layer<BotRuntime, StartupFailed | Config.ConfigError, never>>()
+
+// 12. every message method is one method type with a generic `this` (after the final audit), so a call on a received
+// message of a union kind is one Effect a combinator pipes onto, its errors the union of the kinds' rows
+declare const received: GuildMessageCreate<true>["message"]
+if (received.author === "self") {
+  const deleted = received.delete()
+  expectTypeOf<Effect.Error<typeof deleted>>().toEqualTypeOf<OpErrors<never>["message.deleteOwn" | "message.deleteOwn.thread" | "message.deleteOwn.voice"]>()
+  const edited = received.edit({ content: "x" })
+  expectTypeOf<Effect.Error<typeof edited>>().toEqualTypeOf<OpErrors<never>["message.edit.channel" | "message.edit.thread" | "message.edit.voice"]>()
+  expectTypeOf<Effect.Success<typeof edited>>().toEqualTypeOf<OwnMessages<GuildMessageKind>>()
+} else {
+  const deleted = received.delete()
+  expectTypeOf<Effect.Error<typeof deleted>>().toEqualTypeOf<OpErrors<never>["message.deleteForeign" | "message.deleteForeign.thread" | "message.deleteForeign.voice"]>()
+}
+const reacted = received.react({ origin: "unicode", name: "x" })
+expectTypeOf<Effect.Error<typeof reacted>>().toEqualTypeOf<OpErrors<never>["message.react.channel" | "message.react.thread" | "message.react.voice"]>()
+export const r12 = [
+  withContent.on("MESSAGE_CREATE", (event) =>
+    event.message.author === "self" ? event.message.delete().pipe(catchCategory(["permission", "state"], () => Effect.void)) : Effect.void
+  ),
+  withContent.on("MESSAGE_CREATE", (event) => catchCategory(event.message.delete(), ["permission", "state"], () => Effect.void)),
+  withContent.on("MESSAGE_CREATE", (event) => event.message.react({ origin: "unicode", name: "x" }).pipe(Effect.catch(() => Effect.void))),
+  withContent.on("MESSAGE_CREATE", (event) => Effect.suspend(() => event.message.delete()).pipe(catchCategory(["permission", "state"], () => Effect.void))),
+  withContent.on("MESSAGE_CREATE", (event) =>
+    event.channel.send({ content: "x" }).pipe(
+      Effect.flatMap((sent) => sent.message.delete()),
+      catchCategory(["permission", "state"], () => Effect.void)
+    )
+  ),
+  withContent.on("MESSAGE_CREATE", (event) =>
+    event.message.channelKind === "announcement" ? event.message.crosspost().pipe(catchCategory(["permission", "state"], () => Effect.void)) : Effect.void
+  )
+]
+expectTypeOf(r12).toEqualTypeOf<Array<Effect.Effect<void, never, BotRuntime | Scope.Scope>>>()
