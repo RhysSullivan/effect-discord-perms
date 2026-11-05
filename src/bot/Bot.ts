@@ -37,6 +37,7 @@ import type * as HttpClient from "effect/http/HttpClient"
 import type * as Socket from "effect/socket/Socket"
 import { type AnyEvent, decode, Dropped, type EventPayloads } from "../gateway/Events.ts"
 import type { EventName, Intent, IntentCheck } from "../gateway/Intents.ts"
+import type { Invalid } from "../payload/Components.ts"
 import { type Handled, handledEffect } from "./Handler.ts"
 import { BotInternals } from "./Internals.ts"
 import { type BotConfig, BotRuntime } from "./Runtime.ts"
@@ -111,10 +112,26 @@ const makeBot = <I extends Intent>(intents: ReadonlyArray<I>): Bot<I> => {
   return { intents, on }
 }
 
+/**
+ * The declared intents must be written as a list (after the final audit): the types read them off the list's type, so
+ * an array typed `ReadonlyArray<Intent>` would let every event (and `content: string`) compile while the bot identifies
+ * with fewer intents. A list whose type is not a tuple is an error on the list. An element typed as a union of intents
+ * (`[cond ? "GuildMessages" : "GuildMembers"]`) is not caught: the types then assume every member is declared (DESIGN
+ * §2.7 records this; checking each element cost the reference bot's compile about 90 types).
+ */
+export type LiteralIntents<I extends ReadonlyArray<Intent>> = number extends I["length"] ? Invalid<"intents must be written as a literal list: Bot.make({ intents: [...] })"> : unknown
+
+/**
+ * A bot whose intents are a run-time value (internal, not in the public barrel: the harness's intent sessions). Its
+ * types follow every intent, so they hold only for a caller that reads each event as the widest payload
+ * (`EventPayloads<Intent>`), as the sessions do; `bot.on`'s registration check still dies if the build lacks an intent.
+ */
+export const botWithRuntimeIntents = (intents: ReadonlyArray<Intent>): Bot<Intent> => makeBot(intents)
+
 /** The bot constructors and layers (§2.7, §4.2). */
 export const Bot = {
-  /** A bot that identifies with exactly `intents`. */
-  make: <const I extends ReadonlyArray<Intent>>(config: { readonly intents: I }): Bot<I[number]> => makeBot(config.intents),
+  /** A bot that identifies with exactly `intents`, written as a list of literals ({@link LiteralIntents}). */
+  make: <const I extends ReadonlyArray<Intent>>(config: { readonly intents: I & LiteralIntents<I> }): Bot<I[number]> => makeBot(config.intents),
   /**
    * The bot's runtime: startup checks 1-3 (§4.4), the guild state, the REST wrapper and the gateway (with the
    * capabilities codec), waiting for the configured guild's GUILD_CREATE (check 4). The base `HttpClient` and the

@@ -511,10 +511,11 @@ export const rules: ReadonlyArray<Rule> = [
   },
   {
     id: "R-intent-guild-members",
-    statement: "bot.on(\"GUILD_MEMBER_UPDATE\") compiles only with GuildMembers; an update about another member arrives only with GuildMembers",
+    statement:
+      "bot.on(\"GUILD_MEMBER_UPDATE\") compiles only with GuildMembers, declared as a literal list (a widened list is an error); an update about another member arrives only with GuildMembers",
     pass: "test/types/pass/bot.ts",
     fail: "test/types/fail/bot.ts",
-    claims: ["GuildMembers"],
+    claims: ["GuildMembers", "intents must be written as a literal list"],
     live: intentPair("guild-members", "GUILD_MEMBER_UPDATE", "CHANNEL_UPDATE")
   },
   {
@@ -674,10 +675,10 @@ export const rules: ReadonlyArray<Rule> = [
   {
     id: "R-handler-boundary",
     statement:
-      "a handler registered with bot.on compiles only if every error it can still fail with is purely transient: a permission, payload, access or state error, or an uncategorised one, names what to handle",
+      "a handler registered with bot.on compiles only if every error it can still fail with is purely transient: a permission, payload, access or state error, an uncategorised one, or one widened to a categorised supertype, names what to handle; a handler that returns no Effect says so",
     pass: "test/types/pass/bot.ts",
     fail: "test/types/fail/bot.ts",
-    claims: ["permission", "state", "payload", "Oops"],
+    claims: ["permission", "state", "payload", "Oops", "a widened categorised type", "MustReturnEffect", "a handler must return an Effect"],
     live: { kind: "not-live", reason: "pure-typing" }
   },
   {

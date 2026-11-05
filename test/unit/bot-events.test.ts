@@ -3,7 +3,7 @@ import { ApplicationFlags } from "discord-api-types/v10"
 import { Config, Deferred, Effect, Exit, Layer, Redacted, Ref, Tracer } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
-import { Bot, BotRuntime } from "../../src/bot/Bot.ts"
+import { Bot, BotRuntime, botWithRuntimeIntents } from "../../src/bot/Bot.ts"
 import { DiscordUnavailable } from "../../src/errors/Transient.ts"
 import { DiscordResponse } from "../../src/errors/Cause.ts"
 import type { Intent } from "../../src/gateway/Intents.ts"
@@ -58,7 +58,8 @@ const withBot = <A, E>(intents: ReadonlyArray<Intent>, body: (gateway: Effect.Su
       })
     )
     const gateway = yield* makeFakeGateway({ userFor: () => ids.bot, guildsFor: () => [guildCreate] }, () => 0)
-    const bot = Bot.make({ intents })
+    // the build only: each test registers on its own Bot.make
+    const bot = botWithRuntimeIntents(intents)
     const layer = Bot.layerWith(bot, { token: Config.succeed(Redacted.make("fake-token")), guildId }).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(HttpClient.HttpClient, client), gateway.layer)))
     return yield* body(gateway, posted).pipe(Effect.provide(layer))
   })

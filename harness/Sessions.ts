@@ -25,7 +25,7 @@
  */
 import type { DiscordRestService } from "dfx/DiscordREST"
 import { Clock, Duration, Effect, Option, Ref, Schema } from "effect"
-import { Bot, BotRuntime } from "../src/bot/Bot.ts"
+import { BotRuntime, botWithRuntimeIntents } from "../src/bot/Bot.ts"
 import { SubjectRaw } from "../src/bot/Internals.ts"
 import type { EventPayloads } from "../src/gateway/Events.ts"
 import { type EventName, type Intent, intentBits } from "../src/gateway/Intents.ts"
@@ -196,7 +196,7 @@ export const run = (name: SessionName, context: ProbeContext): Effect.Effect<Pro
           .open(spec.intents, (event, data) => Ref.update(log, (all) => [...all, { event, data }]))
           .pipe(Effect.catch((error) => Effect.die(new Error(`infrastructure abort: session ${name} did not start: ${error._tag} ${"reason" in error ? error.reason : ""}`))))
         // the library's handler for the observed event, through the session's own runtime
-        yield* Bot.make({ intents: spec.intents })
+        yield* botWithRuntimeIntents(spec.intents)
           .on(spec.event, (event: AnyEvent) => Ref.update(received, (all) => [...all, event]))
           .pipe(Effect.provideService(BotRuntime, session.runtime))
         const ready = yield* awaitDispatch(log, "READY", () => true, readyWithin)

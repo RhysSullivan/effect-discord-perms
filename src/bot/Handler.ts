@@ -9,16 +9,27 @@
  * Opting out is explicit and greppable: `catchCategory`, `catchTag`, or `Effect.orDie`.
  */
 import { Effect } from "effect"
-import type { Categories, CategoryMarker } from "../errors/Category.ts"
+import type { Categories, CategoryMarker, CategoryTypeId } from "../errors/Category.ts"
 
 /** The categories a handler must not leave unhandled. */
 export type NonTransient = "permission" | "payload" | "access" | "state"
 
-/** D6 as researched: the members with any non-transient category, and those with no category at all. */
-export type Unhandled<E> = Extract<E, CategoryMarker<NonTransient>> | Exclude<E, CategoryMarker<string>>
+/**
+ * D6: everything that is not in `transient`, plus anything in a non-transient category (an error in both is not
+ * purely transient). It is defined from `transient`, not by subtracting "some category", so an error type widened to
+ * a categorised supertype (`Categorized<never>`, `Categorized<string>`), which carries no category the boundary can
+ * read, stays unhandled (after the final audit: subtracting `CategoryMarker<string>` let both through).
+ */
+export type Unhandled<E> = Exclude<E, CategoryMarker<"transient">> | Extract<E, CategoryMarker<NonTransient>>
 
-/** An uncategorised error's tag, for the boundary's message. */
-export type TagOf<E> = unknown extends E ? "unknown (fix the errors above first)" : E extends { readonly _tag: infer T extends string } ? T : "<untagged>"
+/** The tag of an error the boundary cannot place in a non-transient category, for its message. */
+export type TagOf<E> = unknown extends E
+  ? "unknown (fix the errors above first)"
+  : E extends { readonly _tag: infer T extends string }
+    ? T
+    : E extends { readonly [CategoryTypeId]: unknown }
+      ? "a widened categorised type (keep each error's own class)"
+      : "<untagged>"
 
 /**
  * Shown instead of the handler's Effect when errors other than purely transient ones escape it: what to handle,
@@ -28,10 +39,24 @@ export interface UnhandledErrors<What extends string> {
   readonly "unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie": What
 }
 
-/** A handler's result: its Effect when only transient errors remain, else the {@link UnhandledErrors} message. */
+/** Shown instead of a handler's result when it is not an Effect at all (a plain value, a Promise). */
+export interface MustReturnEffect {
+  readonly "a handler must return an Effect": true
+}
+
+/**
+ * A handler's result: its Effect when only transient errors remain, else the {@link UnhandledErrors} message. A result
+ * tsc infers nothing from (every parameter `unknown`: a number, a Promise) is {@link MustReturnEffect}.
+ */
 export type Handled<A, E, R> = [Unhandled<E>] extends [never]
   ? Effect.Effect<A, E, R>
-  : UnhandledErrors<Extract<Categories<Unhandled<E>>, NonTransient> | TagOf<Exclude<E, CategoryMarker<string>>>>
+  : unknown extends E
+    ? unknown extends A
+      ? unknown extends R
+        ? MustReturnEffect
+        : UnhandledErrors<"unknown (fix the errors above first)">
+      : UnhandledErrors<"unknown (fix the errors above first)">
+    : UnhandledErrors<Extract<Categories<Unhandled<E>>, NonTransient> | TagOf<Exclude<Unhandled<E>, CategoryMarker<NonTransient>>>>
 
 /**
  * A handler's checked result as the Effect it is at run time (internal: `bot.on` and the interaction runner).
@@ -42,6 +67,6 @@ export type Handled<A, E, R> = [Unhandled<E>] extends [never]
 export function handledEffect<A, E, R>(value: Handled<A, E, R>, what: string): Effect.Effect<A, E, R>
 // SAFETY: the wide implementation only passes the value through. `Handled<A, E, R>` resolves to `Effect<A, E, R>`
 // in every program that compiles, and `UnhandledErrors` is a type with no runtime value, so the value is that Effect.
-export function handledEffect(value: Effect.Effect<unknown, unknown, unknown> | UnhandledErrors<string>, what: string): Effect.Effect<unknown, unknown, unknown> {
+export function handledEffect(value: Effect.Effect<unknown, unknown, unknown> | UnhandledErrors<string> | MustReturnEffect, what: string): Effect.Effect<unknown, unknown, unknown> {
   return Effect.isEffect(value) ? value : Effect.die(new Error(`${what}: a handler returned no Effect`))
 }
