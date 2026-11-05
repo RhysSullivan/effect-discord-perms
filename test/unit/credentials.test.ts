@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { onTestFinished } from "vitest"
 import { Cause, Effect, Exit, Layer, Option, Redacted, Scope } from "effect"
 import * as fs from "node:fs"
 import * as os from "node:os"
@@ -23,6 +24,7 @@ const values = {
 
 const sources = (dotEnv: Readonly<Record<string, string>> | undefined) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "edp-credentials-"))
+  onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }))
   const dotEnvPath = path.join(dir, ".env")
   if (dotEnv !== undefined) fs.writeFileSync(dotEnvPath, Object.entries(dotEnv).map(([key, value]) => `${key}=${value}\n`).join(""))
   return { dotEnvPath, lockPath: path.join(dir, "live.lock") }

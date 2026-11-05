@@ -1,5 +1,6 @@
 import { BunFileSystem } from "@effect/platform-bun"
 import { describe, expect, it } from "@effect/vitest"
+import { onTestFinished } from "vitest"
 import { Effect, Exit, FileSystem, Scope } from "effect"
 import * as fs from "node:fs"
 import * as os from "node:os"
@@ -13,7 +14,13 @@ import { acquire, type Holder, LockHeld } from "../../harness/Lock.ts"
  */
 const me: Holder = { hostname: "host-a", pid: 1000, command: "harness smoke" }
 const other: Holder = { hostname: "host-a", pid: 2000, command: "harness reset" }
-const tempLock = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "edp-lock-")), "live.lock")
+/** A fresh temporary directory, removed when the current test finishes. */
+const tempDir = (prefix: string): string => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+  onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }))
+  return dir
+}
+const tempLock = () => path.join(tempDir("edp-lock-"), "live.lock")
 const read = (file: string): unknown => JSON.parse(fs.readFileSync(file, "utf8"))
 const withLock = (file: string, owner: Holder, alive: ReadonlyArray<number>) =>
   acquire({ path: file, owner, isAlive: (pid) => alive.includes(pid) })

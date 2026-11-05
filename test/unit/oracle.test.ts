@@ -1,5 +1,6 @@
 import { BunFileSystem } from "@effect/platform-bun"
 import { describe, expect, it } from "@effect/vitest"
+import { onTestFinished } from "vitest"
 import { Duration, Effect, Exit, Layer } from "effect"
 import * as fs from "node:fs"
 import * as os from "node:os"
@@ -64,7 +65,12 @@ describe("the permission oracle", () => {
 
 describe("the lab state file", () => {
   const guild = GuildId.make("100000000000000000")
-  const temp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "edp-state-")), "state.json")
+  /** A fresh temporary file path, its directory removed when the current test finishes. */
+  const temp = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "edp-state-"))
+    onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }))
+    return path.join(dir, "state.json")
+  }
 
   it.effect("is empty when missing, round-trips, and refuses another guild's file", () =>
     Effect.gen(function* () {
