@@ -293,14 +293,14 @@ export const respond = <A, E, R>(session: Session, mode: DeferMode, handler: Eff
     const plan = planFor(exit.value)
     if (plan === undefined) return yield* Effect.logError(`discord.interaction ${session.label}: the handler returned no response`)
     // Discord is answered once, with the response returned; one the handler made and dropped is a bug in it
-    const made = yield* Ref.get(session.made)
-    yield* logDropped(session, made.filter((response) => response !== exit.value), `the handler made {n} it did not return; only the returned ${plan.kind} is posted`)
+    const byHandler = yield* Ref.get(session.made)
+    yield* logDropped(session, byHandler.filter((response) => response !== exit.value), `the handler made {n} it did not return; only the returned ${plan.kind} is posted`)
     const posted = deferredBy === undefined ? yield* postCallback(session, plan.callback, `the ${plan.kind}`) : deferred && (yield* deliverAfterDeferral(session, deferredBy, plan))
     if (!posted || plan.continuation === undefined) return
     const finished = yield* plan.continuation(answeredFor(session)).pipe(Effect.timeoutOption(continuationDeadline))
     if (Option.isNone(finished)) yield* Effect.logWarning(`discord.interaction ${session.label}: the continuation passed ${Duration.format(continuationDeadline)}; the token lasts 15 minutes`)
     // a continuation cannot answer again: anything it made is never posted (follow-ups are `answered.followUp`)
-    yield* logDropped(session, (yield* Ref.get(session.made)).slice(made.length), "the continuation made {n}, which are never posted: the interaction was already answered (use answered.followUp)")
+    yield* logDropped(session, (yield* Ref.get(session.made)).slice(byHandler.length), "the continuation made {n}, which are never posted: the interaction was already answered (use answered.followUp)")
   })
 
 /** Logs, at Error, responses a handler made that the runner does not post (`{n}` in `what` names them). */
