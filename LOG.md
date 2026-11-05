@@ -1477,7 +1477,7 @@ Rules with an escalated remainder, shown by `verify:live` as unmet Done criteria
   (67 for its setups, plus resets); `run` checks the bucket at start and says how long to wait. Two full runs
   need about 1.8 hours between them. The reset self-test and smoke make a few each. (M7: the 512-scenario catalog
   needs 88, 80 for its role states plus the margin; a full run takes 42 to 48 minutes, so the bucket is the pace:
-  about 1.2 hours between full runs. Never wrap a wait for the bucket and a run in one shell command with a time
+  about 1.2 hours between full runs. Before M9, at 10 requests a second, a 542-scenario run takes about 43 minutes. Never wrap a wait for the bucket and a run in one shell command with a time
   limit: M7 lost a run at row 472 that way.)
 - **Command creates are budgeted** (M8). Discord allows 200 application-command creates per guild a day (H-205); the
   shared client counts every name a POST or PUT to the guild commands may create, refused or not, in a rolling 24-hour
@@ -2310,3 +2310,38 @@ Live, in order (each alone under the lock, on minisforum):
   Mutation checks (each applied, the named tests failed, reverted): interrupting the handler after the deferral (4
   runner tests), the ephemeral deferral without EPHEMERAL (1), the reply after a deferral posted as a callback (3), no
   expired-control reply (1), `giveUp` logging below Info (1).
+- Live (each alone under the lock, on minisforum): `record-commands` with the fourth sample ("Live findings"; 4 creates,
+  60 in the ledger's 24 hours); then `bun --no-env-file harness/main.ts run --compare` in a fresh process on `a44052e`
+  (the pacing change) as the first full run of the new pacing: it stopped before any scenario on the role budget (53
+  left, 88 needed, "start again in about 51 minutes"; the M8 verifier's two full runs had used the bucket that
+  afternoon). **The validation run**, after the refill, on `b22d278` (the pacing commit plus M9's library, harness and
+  documents; nothing the matrix runs changed but the concurrent reads, and the guard's new admissions are never used by
+  it): `bun --no-env-file harness/main.ts run --compare` in a fresh process exited 0: role budget 89 left (88 needed),
+  542 scenarios in **2,570 s**, 9,272 requests, 2,742 writes, **600 invalid** (401/403/429), 429s retried by dfx on 9
+  reactions (6 unicode, 3 custom), one channel edit, two command POSTs and two command PUTs, no lab step retried, oracle
+  available, **0 mismatches**, `compare: identical to the previous table`, `run ok`; it printed the six unmet Done
+  criteria by question (Q-17, Q-18, Q-22). The lock was gone afterwards. Against M8 (601 invalid; 429s on 11 reactions,
+  one channel edit, one command POST and two command PUTs): the invalid count and the reaction 429s are no worse; one
+  more command POST answered 429 (`retry-after` 18 s, the commands bucket of M8's "Live findings"), which dfx waited out.
+- **Run time before and after the pacing change (the orchestrator's decision, §5.11).** Before: M8's runs took 2,904
+  to 2,989 s, the M8 verifier's last 542-scenario run log (`/tmp/effect-discord-perms-live-1793846398548.log`) profiled
+  per row as Converge 1,297 ms (4.96 requests), fixtures 187 ms, the wait 1,162 ms (3.67), steps (a) to (d) 1,375 ms
+  (5.45), cleanup 765 ms (2.68), a rule probe 2,990 ms (3.12). After (`/tmp/effect-discord-perms-live-1793853431778.log`):
+  Converge 1,005 ms, fixtures 162 ms, the wait 1,003 ms, steps 1,277 ms, cleanup 719 ms, a probe 3,270 ms, with the same
+  request counts: 2,570 s in all, 11 to 14% faster. **The 30-minute target is still missed, by 13 minutes.** The profile
+  says why: at 10/s the bucket's floor for 9,272 requests is 927 s, so the bucket no longer sets the pace; Discord's
+  latency does, through the requests that must follow one another (steps (a) to (d) are about 235 ms a request, cleanup
+  about 270 ms, each waiting for the answer before the next, and their order is the scenario's), and through the waits
+  for the subject's gateway events. The 30 registration and route rows took 307 s, nearly all dfx waiting out Discord's
+  command buckets, and the 15 intent sessions 126 s; the other 497 rows average 4.2 s. Meeting 30 minutes would need
+  overlap beyond independent reads (running scenarios, or steps, concurrently), which the decision did not cover and
+  this run does not attempt; the 60-minute abort has 17 minutes of headroom.
+- **Exit checks** (on the commit after `b22d278`, LOG.md and DESIGN.md only since): `bun run test --
+  test/unit/interactions-runner.test.ts` passed its 15 tests (a slow handler not interrupted and its reply delivered; the
+  deferral 5, 5 with flags 64, or 6, each request's route and body asserted; the reply after a 5 and the update after a 6
+  as `PATCH .../messages/@original`; continuations after posting; `giveUp` completing and logging at Info; the
+  expired-control reply); `bun run verify:offline` exited 0 (gen:errors up to date; typecheck; 1,544 tests in 59 files;
+  test:types 12 pass and 13 fail fixtures, 109 diagnostics, largest gated 617 characters; hover 6 files, 22 markers;
+  `rules ok 70 rule(s) (55 live pair, 0 escalated, 5 pure-typing, 10 other not-live), 13 fail fixture(s)`; budget: the
+  per-command row 381.2 types and 2,162.3 instantiations, within its new baseline). The phase-3 checklist was not run
+  ("Waiting for Rhys").

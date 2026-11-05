@@ -3099,7 +3099,10 @@ since dfx waits the bucket out.)
   together (`Converge.readView`, `Converge.rereadWritten`), so the cap is used.
   dfx's route buckets, the role-budget check, the invalid-request abort at 1,500
   and the 60-minute abort are unchanged, and no row was dropped. LOG.md has the
-  timings before and after.)
+  timings before and after: 2,904 to 2,989 s before, 2,570 s after, 600 invalid
+  requests, 0 mismatches and an identical table. The 30-minute target is still
+  missed: at 10/s the floor is 927 s, and Discord's latency on the requests that
+  must follow one another, and the waits for gateway events, now set the pace.)
 - Name and topic edits: at most one per lab channel per run (H-162), enforced
   by Safety.
 - 401, 403 and 429 responses are counted per run. The run aborts at **1,500**,
