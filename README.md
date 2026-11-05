@@ -14,8 +14,8 @@ either by tag or category or by an explicit, greppable `Effect.orDie`.
 
 ## A small bot
 
-From the reference bot, [`examples/reference-bot/bot.ts`](examples/reference-bot/bot.ts), which uses no `orDie` and
-no `die`:
+From the reference bot, [`examples/reference-bot/bot.ts`](examples/reference-bot/bot.ts), which turns no library
+error into a defect (no `orDie`, no `die`):
 
 ```ts
 const bot = Bot.make({ intents: ["Guilds", "GuildMessages", "MessageContent"] })
@@ -31,20 +31,39 @@ const poll = Command.chatInput({
 const vote = ComponentRoute.make("vote", Schema.Struct({ poll: Schema.Int, choice: Schema.Literals(["yes", "no"]) }))
 
 const onMessage = bot.on("MESSAGE_CREATE", (event) =>
-  event.message.content !== "!ping"
+  event.message.author === "self" || event.message.authorIsBot || event.message.content !== "!ping"
     ? Effect.void
-    : event.channel.send({ content: "pong" }).pipe(catchCategory(["permission", "state"], (error) => Effect.logWarning(error._tag))))
+    : event.channel.send({ content: "pong" }).pipe(catchCategory(["permission", "state"], (error) => Effect.logWarning(`cannot answer !ping: ${error._tag}`)))
+)
+
+// `Polls` (the bot's in-memory poll store, a service) and `pollEmbed` are in bot.ts too
 
 const onPoll = Interactions.command(poll, "ephemeral", (ix) =>
   Effect.gen(function* () {
-    const { question, where } = ix.invocation.options          // question: string; where?: TextChannel | AnnouncementChannel
+    const { question, where } = ix.invocation.options // question: string; where?: TextChannel | AnnouncementChannel
+    // optional: checked up front, so a poll the bot cannot post is never opened
     const channel = yield* Permissions.require(where ?? ix.channel, ["SendMessages", "EmbedLinks"])
-    // ... build the buttons' custom_ids with vote.customId(...), then channel.send({ embeds, components })
-    return yield* ix.reply({ content: "Posted.", ephemeral: true })
+    const polls = yield* Polls
+    const n = yield* polls.open(question)
+    const yes = yield* vote.customId({ poll: n, choice: "yes" })
+    const no = yield* vote.customId({ poll: n, choice: "no" })
+    const sent = yield* channel.send({
+      embeds: [pollEmbed({ question, votes: new Map() })],
+      components: [
+        row([
+          { kind: "button", style: "success", label: "Yes", customId: yes },
+          { kind: "button", style: "danger", label: "No", customId: no }
+        ])
+      ]
+    })
+    return yield* ix.reply({ content: `Posted poll ${n} (message ${sent.message.id}).`, ephemeral: true })
   }).pipe(
-    catchCategory(["permission", "state"], (error) => ix.reply({ content: `I can't post there (${error._tag}).`, ephemeral: true })),
+    // first: a missing flag (EmbedLinks is a permission and a payload error: the poll needs its embed) or a state
+    catchCategory(["permission", "state"], (error) => ix.reply({ content: `I can't post the poll there (${error._tag}).`, ephemeral: true })),
+    // then what is left of payload: a question too long for the embed's title, or a reply too long
     catchCategory("payload", () => ix.reply({ content: "That poll does not fit in a message.", ephemeral: true }))
-  ))
+  )
+)
 ```
 
 Leave a dynamic reply's limits unhandled and the program no longer compiles (snapshot text, as `tsc` prints it):
