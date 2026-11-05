@@ -2279,7 +2279,34 @@ Live, in order (each alone under the lock, on minisforum):
 
 ### M9 Interactions (phase 3)
 
+- Before M9, the M7 and M8 verifiers' fourteen minor findings (commit `a44052e`; "Design deviations", "Before M9"), and
+  the live `record-commands` with the fourth sample ("Live findings").
+- The library (`src/interactions/`): `Interaction.ts` (the payloads, the modes, the nominal `Response<R>` and
+  `Completed`, `Answered`, `Replies<M>`, `Updates`, `OpensModal`, the six interaction types, `MustRespond`,
+  `MustComplete`, `HandledIx`, the `Interactions` interface with arity overloads), `Runner.ts` (the four entry points,
+  routing, the auto-defer by fork and timed await, posting, delivery after a deferral, continuations within 14 minutes,
+  `giveUp`, the expired-control reply, local validation of every response), `Wire.ts` (INTERACTION_CREATE decoding and the
+  invocation decoded against the command's definition), `Checklist.ts` (the `/checklist` command and its prompts); the
+  app-permissions preflight (`Resolver.fromAppPermissions`, `Recompute.Target.appPermissions`), `DiscordApi.sendJson`,
+  `Dispatches.DispatchName`, and the barrel's exports. The harness: `harness/ChecklistRun.ts` (`harness/main.ts
+  checklist`, Rhys's), and the lab guard's admission of the subject's interaction answers.
 - Registry (eight rules, `phase-3-offline` by the orchestrator's decision, each with its pass and fail fixtures in
   `test/types/{pass,fail}/interactions.ts`): `R-modal-before-answer`, `R-no-modal-from-modal`, `R-followup-after-answer`,
   `R-autocomplete-choices`, `R-must-respond`, `R-deferred-must-complete`, `R-ephemeral-matches-mode` and
   `R-reply-nonempty`. The human checklist that would see them live is under "Waiting for Rhys".
+- Type fixtures: pass `test/types/pass/interactions.ts` (every entry in the arrow and the `Effect.fn` spelling, with
+  `expectTypeOf` on each `ix` and each registration: `Effect<void, never, BotRuntime | Scope>`, a continuation's service
+  in the requirement, a literal reply's `never` error and a dynamic one's `ContentTooLong | MessageEmpty`); fail
+  `test/types/fail/interactions.ts` (16 directives, every diagnostic of §2.10's table, each one line); hover
+  `test/hover/interactions.ts` (`ix` as `CommandInteraction<{ readonly options: {...} }, "ephemeral">`, a registration,
+  `Answered`).
+- Unit tests: `interactions-runner.test.ts` (15, under `TestClock`, over the real `DiscordApi` and route check and a
+  recording fake: the exit criteria below, plus a fast reply's callback 4 with its flags, a fast update's 7, a modal's 9
+  posted only when a manual handler answers, an autocomplete's 8, a modal submit's fields, routing by name and prefix,
+  a malformed invocation logged and nothing posted, and the app-permissions preflight), `interactions-wire.test.ts`
+  (every option type, subcommands and groups, a channel option's handle on the app-permissions basis, nine malformed
+  payloads), `checklist.test.ts` (the prompts within Discord's limits, `/checklist`'s decoded options and prompts, each
+  mode's prompt routed, verdicts recorded, the DM-event recording and the summary), and `lab-guard.test.ts`'s new case.
+  Mutation checks (each applied, the named tests failed, reverted): interrupting the handler after the deferral (4
+  runner tests), the ephemeral deferral without EPHEMERAL (1), the reply after a deferral posted as a callback (3), no
+  expired-control reply (1), `giveUp` logging below Info (1).
