@@ -111,3 +111,30 @@ export {
   type ValueOption
 } from "./commands/Command.ts"
 export { DiscordApiConfig } from "./rest/DiscordApi.ts"
+export { Interactions } from "./interactions/Runner.ts"
+export type {
+  Answered,
+  AutocompleteInteraction,
+  CommandInteraction,
+  CommandIx,
+  CommandMode,
+  Completed,
+  ComponentIx,
+  ComponentMode,
+  HandledCompletion,
+  HandledIx,
+  InteractionContext,
+  ManualCommandInteraction,
+  ManualComponentInteraction,
+  Modal,
+  ModalMode,
+  ModalSubmitInteraction,
+  MustComplete,
+  MustRespond,
+  ReplyComponentInteraction,
+  ReplyPayload,
+  RequirementOf,
+  Response,
+  TextInput,
+  UpdateComponentInteraction
+} from "./interactions/Interaction.ts"

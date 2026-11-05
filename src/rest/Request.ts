@@ -88,7 +88,7 @@ const answeredFromResponse = (route: string, method: HttpMethod, response: HttpC
   })
 
 /**
- * Sends `method path` (under the route template `route`) with the JSON `body` through `rest.httpClient`, within
+ * Sends `method path` (under the route template `route`) with the JSON `body` (none when `undefined`) through `rest.httpClient`, within
  * `deadline`, and classifies the answer as {@link send} does: a 2xx is `Ok` with its JSON body (`null` when it has
  * none); a 4xx with Discord's JSON error body is `Rejected`; a 5xx or a 4xx without one is `DiscordUnavailable`; a
  * transport failure `NetworkError`; the deadline `RequestTimedOut`. dfx's client waits out and retries an uncoded
@@ -99,7 +99,7 @@ export const sendJson = (
   route: string,
   method: HttpMethod,
   path: string,
-  body: Schema.Json | undefined,
+  body: unknown,
   deadline: Duration.Duration
 ): Effect.Effect<Answered<Schema.Json>, Transient> =>
   Effect.gen(function* () {

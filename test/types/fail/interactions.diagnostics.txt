@@ -1,0 +1,48 @@
+L17:56 TS2339
+Property 'showModal' does not exist on type 'CommandInteraction<{ readonly options: { readonly user: ResolvedUser; }; }, "public">'.
+
+L19:108 TS2339
+Property 'showModal' does not exist on type 'CommandInteraction<{ readonly options: { readonly user: ResolvedUser; }; }, "ephemeral">'.
+
+L21:80 TS2339
+Property 'thisDoesNotExist' does not exist on type 'CommandInteraction<{ readonly options: { readonly user: ResolvedUser; }; }, "public">'.
+
+L25:55 TS2339
+Property 'showModal' does not exist on type 'ModalSubmitInteraction<{ readonly poll: number; readonly choice: "no" | "yes"; }, "public">'.
+
+L29:56 TS2339
+Property 'followUp' does not exist on type 'CommandInteraction<{ readonly options: { readonly user: ResolvedUser; }; }, "public">'.
+
+L33:61 TS2339
+Property 'reply' does not exist on type 'AutocompleteInteraction<string | number>'.
+
+L37:51 TS2741
+Property '"interaction handlers must return ix.reply, ix.defer, ix.update or ix.showModal"' is missing in type 'Effect<void, never, never>' but required in type 'MustRespond'.
+
+L39:51 TS2741
+Property '"interaction handlers must return ix.reply, ix.defer, ix.update or ix.showModal"' is missing in type 'Effect<{ _tag: "Response"; kind: "reply"; }, never, never>' but required in type 'MustRespond'.
+
+L43:102 TS2741
+Property '"a deferred interaction must finish with deferred.editOriginal(...) or deferred.giveUp(...)"' is missing in type 'Effect<void, never, never>' but required in type 'MustComplete'.
+
+L45:77 TS2741
+Property '"a deferred interaction must finish with deferred.editOriginal(...) or deferred.giveUp(...)"' is missing in type 'Effect<{ completed: boolean; }, never, never>' but required in type 'MustComplete'.
+
+L49:62 TS2741
+Property '"a message needs content, embeds, files, stickers, a poll or components"' is missing in type '{}' but required in type '{ readonly "a message needs content, embeds, files, stickers, a poll or components": never; }'.
+
+L51:113 TS2741
+Property '"a message needs content, embeds, files, stickers, a poll or components"' is missing in type '{}' but required in type '{ readonly "a message needs content, embeds, files, stickers, a poll or components": never; }'.
+
+L53:53 TS2741
+Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<Response<never>, ContentTooLong | MessageEmpty, never>' but required in type 'UnhandledErrors<"payload">'.
+
+L57:79 TS2322
+Type 'true' is not assignable to type 'true & Invalid<"ephemeral must match the registration mode public">'.
+  Type 'boolean' is not assignable to type 'Invalid<"ephemeral must match the registration mode public">'.
+
+L59:64 TS2322
+Type 'true' is not assignable to type 'false'.
+
+L61:59 TS2339
+Property 'reply' does not exist on type 'UpdateComponentInteraction<{ readonly poll: number; readonly choice: "no" | "yes"; }>'.

@@ -1,0 +1,13 @@
+const interaction = ix
+const interaction: CommandInteraction<{
+    readonly options: {
+        readonly reason?: "abuse" | "spam";
+        readonly user: ResolvedUser;
+    };
+}, "ephemeral">
+
+export const registered = onBan
+const registered: Effect.Effect<void, never, BotRuntime | Scope>
+
+const later = answered
+const later: Answered

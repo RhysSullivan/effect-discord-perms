@@ -28,6 +28,7 @@ import * as Identities from "./Identities.ts"
 import * as IdentityCheck from "./IdentityCheck.ts"
 import { LabCheckFailed } from "./Lab.ts"
 import { Pacing, defaults as pacingDefaults } from "./Pacing.ts"
+import * as ChecklistRun from "./ChecklistRun.ts"
 import * as CommandBudget from "./CommandBudget.ts"
 import * as Provision from "./Provision.ts"
 import * as RecordCommands from "./RecordCommands.ts"
@@ -37,9 +38,9 @@ import * as SelfTest from "./SelfTest.ts"
 import * as Smoke from "./Smoke.ts"
 
 /** Every live command is an infrastructure abort after this long; the matrix gets 60 minutes (§5.11). */
-const commandDeadline = (name: string) => (name === "run" ? Duration.minutes(60) : Duration.minutes(30))
+const commandDeadline = (name: string) => (name === "run" || name === "checklist" ? Duration.minutes(60) : Duration.minutes(30))
 
-const usage = "usage: bun harness/main.ts reset | smoke | selftest | inventory | record-commands | run [--repeat N] [--only glob] [--write] [--compare]"
+const usage = "usage: bun harness/main.ts reset | smoke | selftest | inventory | record-commands | checklist | run [--repeat N] [--only glob] [--write] [--compare]"
 
 const printIdentities = (report: IdentityCheck.IdentityReport) => {
   console.log(`identities: harness ${report.harness.userId} (${report.harness.username}), subject ${report.subject.userId} (${report.subject.username}), target ${report.target.userId} (${report.target.username})`)
@@ -141,6 +142,14 @@ const command = (name: string, args: ReadonlyArray<string>) =>
         console.log(`written: ${RecordCommands.fixturePath}`)
         const budget = yield* (yield* CommandBudget.CommandBudget).stats
         console.log(`command creates counted: ${budget.thisProcess} now, ${budget.last24h} in the last 24 hours (cap ${CommandBudget.dailyCap})`)
+        return
+      }
+      case "checklist": {
+        // Rhys's: it waits for a human in Perms Lab (LOG.md "Waiting for Rhys")
+        const report = yield* IdentityCheck.run
+        printIdentities(report)
+        const result = yield* ChecklistRun.run(report)
+        console.log(["checklist results:", ...ChecklistRun.summary(result)].join("\n"))
         return
       }
       case "inventory": {

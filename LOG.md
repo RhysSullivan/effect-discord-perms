@@ -2219,3 +2219,10 @@ Live, in order (each alone under the lock, on minisforum):
   (the bulk overwrite's allows about one PUT every 30 s; the group sends 9). The 30-minute target of §5.11 stays
   missed, as recorded since M6; the 60-minute abort has about 10 minutes of headroom, which M9 (offline) does not use
   and M10's single run will.
+
+### M9 Interactions (phase 3)
+
+- Registry (eight rules, `phase-3-offline` by the orchestrator's decision, each with its pass and fail fixtures in
+  `test/types/{pass,fail}/interactions.ts`): `R-modal-before-answer`, `R-no-modal-from-modal`, `R-followup-after-answer`,
+  `R-autocomplete-choices`, `R-must-respond`, `R-deferred-must-complete`, `R-ephemeral-matches-mode` and
+  `R-reply-nonempty`. The human checklist that would see them live is under "Waiting for Rhys".

@@ -38,7 +38,8 @@ export const allowedMentions = (mentions: Mentions | undefined): MessageAllowedM
   ...(mentions?.repliedUser === true ? { replied_user: true } : {})
 })
 
-const embed = (input: Embed): RichEmbed => ({
+/** An embed as Discord's embed object. */
+export const embedRequest = (input: Embed): RichEmbed => ({
   ...(input.title === undefined ? {} : { title: input.title }),
   ...(input.description === undefined ? {} : { description: input.description }),
   ...(input.url === undefined ? {} : { url: input.url }),
@@ -91,7 +92,7 @@ export const createRequest = (payload: MessagePayload): WireCreate => {
     request: {
       ...shared,
       ...(legacy.content === undefined ? {} : { content: legacy.content }),
-      ...(legacy.embeds === undefined ? {} : { embeds: legacy.embeds.map(embed) }),
+      ...(legacy.embeds === undefined ? {} : { embeds: legacy.embeds.map(embedRequest) }),
       ...(legacy.stickers === undefined ? {} : { sticker_ids: legacy.stickers.map((sticker) => sticker.id) }),
       ...(legacy.poll === undefined
         ? {}
@@ -115,7 +116,7 @@ export const createRequest = (payload: MessagePayload): WireCreate => {
 export const editRequest = (patch: EditMessage): MessageEditRequestPartial => ({
   allowed_mentions: allowedMentions(patch.mentions),
   ...(patch.content === undefined ? {} : { content: patch.content }),
-  ...(patch.embeds === undefined ? {} : { embeds: patch.embeds.map(embed) }),
+  ...(patch.embeds === undefined ? {} : { embeds: patch.embeds.map(embedRequest) }),
   ...(patch.components === undefined ? {} : { components: patch.components.map(actionRow) }),
   ...(patch.suppressEmbeds === undefined ? {} : { flags: patch.suppressEmbeds ? MessageFlags.SuppressEmbeds : 0 })
 })

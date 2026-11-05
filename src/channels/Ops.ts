@@ -39,7 +39,7 @@ import * as Flags from "../permissions/Flags.ts"
 import { errorFor, type OpErrors, type OpFlags, type OpName, type OpPermissionErrors, type OpTags, type Revoked } from "../permissions/Operations.ts"
 import * as Preflight from "../permissions/Preflight.ts"
 import type * as Recompute from "../permissions/Recompute.ts"
-import { type FromSnapshot, guildInputFromSnapshot, inputFromSnapshot, type MemberInput, type Resolution, resolve } from "../permissions/Resolver.ts"
+import { type FromSnapshot, fromAppPermissions, guildInputFromSnapshot, inputFromSnapshot, type MemberInput, type Resolution, resolve } from "../permissions/Resolver.ts"
 import * as Limits from "../payload/Limits.ts"
 import type { CreateArg, EditArg, EditMessage, Emoji, MessagePayload } from "../payload/Message.ts"
 import { isV2 } from "../payload/Message.ts"
@@ -158,10 +158,19 @@ export type Decided =
   | { readonly _tag: "Undecidable"; readonly reason: string }
 
 /** Preflight's decision for a plan over the current state (see {@link Decided}). */
-export const decisionOf = <A>(runtime: Runtime, plan: Pick<Plan<A>, "target" | "targetMember">): Effect.Effect<Decided, Transient> =>
+export const decisionOf = <A>(runtime: Runtime, plan: Pick<Plan<A>, "target" | "targetMember"> & { readonly kind?: string }): Effect.Effect<Decided, Transient> =>
   Effect.gen(function* () {
     const { target } = plan
     const input = yield* resolverInput(runtime, target)
+    const app = target.appPermissions
+    if (app !== undefined) {
+      // an interaction's channel: Discord's app_permissions, with the state's timeout and thread facts when it has them
+      const state = input._tag === "NeedsRefresh" ? undefined : resolve(input.input)
+      const voice = plan.kind === "voice" || plan.kind === "stage"
+      const resolution = fromAppPermissions(app, state, voice)
+      const args = Preflight.stateArgs(target.op, target.args, resolution, undefined)
+      return { _tag: "Decided", resolution, decision: Preflight.decide(target.op, resolution, args) }
+    }
     if (input._tag === "NeedsRefresh") return { _tag: "Undecidable", reason: input.reason }
     const resolution = resolve(input.input)
     const role = target.completion._tag === "Member" ? target.completion.role : undefined
@@ -179,7 +188,7 @@ export const perform = <A>(runtime: Runtime, plan: Plan<A>): Effect.Effect<A, Wi
       if (decided._tag === "Undecidable") yield* Effect.logWarning(`preflight: ${plan.target.op}: the state cannot resolve the request even after a refresh (${decided.reason}); sending it unchecked`)
       const [first] = decided._tag === "Decided" ? decided.decision.failures : []
       if (first !== undefined) {
-        const cause = new PreflightDecision({ route: plan.request.route.template, basis: "gateway-state" })
+        const cause = new PreflightDecision({ route: plan.request.route.template, basis: plan.target.appPermissions === undefined ? "gateway-state" : "app-permissions" })
         return yield* Effect.fail(Preflight.toHandleError(plan.target.op, first, plan.target.granted, cause))
       }
     }
@@ -205,7 +214,8 @@ const channelTarget = (core: ChannelCore, op: OpName, args: Preflight.DecideArgs
   scope: { _tag: "Channel", channelId: core.id },
   granted: core.granted,
   args,
-  completion
+  completion,
+  ...(core.appPermissions === undefined ? {} : { appPermissions: core.appPermissions })
 })
 
 const noPayload: Preflight.DecideArgs = { payload: [] }
@@ -233,6 +243,8 @@ export interface ChannelCore {
   readonly kind: GuildChannelKind
   readonly granted: ReadonlyArray<PermissionFlag>
   readonly basis: Basis
+  /** The interaction's `app_permissions` for this channel, exactly when `basis` is `"app-permissions"`. */
+  readonly appPermissions: Flags.PermissionSet | undefined
 }
 
 /** A reaction already on a message, as the message object names it. */
@@ -631,9 +643,9 @@ export interface ChannelInfo<K extends GuildChannelKind> {
  * operations from Discord's answers, and the harness from the lab's own records). `granted` is what a
  * `Permissions.require` checked (D8).
  */
-export function channelHandle<K extends GuildChannelKind, G extends PermissionFlag = never>(runtime: Runtime, info: ChannelInfo<K>, granted?: ReadonlyArray<G>, basis?: Basis): ChannelKinds<G>[K]
-export function channelHandle(runtime: Runtime, info: ChannelInfo<GuildChannelKind>, granted: ReadonlyArray<PermissionFlag> = [], basis: Basis = "gateway-state"): ChannelKinds<PermissionFlag>[GuildChannelKind] {
-  const core: ChannelCore = { runtime, guildId: info.guildId, id: info.id, kind: info.kind, granted, basis }
+export function channelHandle<K extends GuildChannelKind, G extends PermissionFlag = never>(runtime: Runtime, info: ChannelInfo<K>, granted?: ReadonlyArray<G>, appPermissions?: Flags.PermissionSet): ChannelKinds<G>[K]
+export function channelHandle(runtime: Runtime, info: ChannelInfo<GuildChannelKind>, granted: ReadonlyArray<PermissionFlag> = [], appPermissions?: Flags.PermissionSet): ChannelKinds<PermissionFlag>[GuildChannelKind] {
+  const core: ChannelCore = { runtime, guildId: info.guildId, id: info.id, kind: info.kind, granted, basis: appPermissions === undefined ? "gateway-state" : "app-permissions", appPermissions }
   const handle = buildHandle(core, granted)
   cores.set(handle, core)
   return handle

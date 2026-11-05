@@ -11,6 +11,12 @@
 import { Context, Effect, Layer, PubSub, Scope } from "effect"
 import type { EventName } from "./Intents.ts"
 
+/**
+ * A dispatch a subscriber can name: an event `bot.on` supports, or INTERACTION_CREATE, which needs no intent and which
+ * the interaction runner (`interactions/Runner.ts`, phase 3) subscribes to.
+ */
+export type DispatchName = EventName | "INTERACTION_CREATE"
+
 /** One dispatch: its event name and Discord's payload. */
 export interface Dispatch {
   readonly event: string
@@ -25,7 +31,7 @@ export interface Interface {
    * Runs `handle` in its own fiber for every dispatch named `name` published from now until the scope closes (see
    * the module comment). Returns once subscribed.
    */
-  readonly subscribe: <R>(name: EventName, handle: (data: unknown) => Effect.Effect<void, never, R>) => Effect.Effect<void, never, R | Scope.Scope>
+  readonly subscribe: <R>(name: DispatchName, handle: (data: unknown) => Effect.Effect<void, never, R>) => Effect.Effect<void, never, R | Scope.Scope>
 }
 
 /** The dispatch stream of one bot build (internal; `bot.on` reads it through `BotRuntime.events`). */
@@ -36,7 +42,7 @@ export const layer: Layer.Layer<Dispatches> = Layer.effect(
   Dispatches,
   Effect.gen(function* () {
     const hub = yield* Effect.acquireRelease(PubSub.unbounded<Dispatch>(), PubSub.shutdown)
-    const subscribe = <R>(name: EventName, handle: (data: unknown) => Effect.Effect<void, never, R>): Effect.Effect<void, never, R | Scope.Scope> =>
+    const subscribe = <R>(name: DispatchName, handle: (data: unknown) => Effect.Effect<void, never, R>): Effect.Effect<void, never, R | Scope.Scope> =>
       Effect.gen(function* () {
         const scope = yield* Scope.Scope
         const subscription = yield* PubSub.subscribe(hub)

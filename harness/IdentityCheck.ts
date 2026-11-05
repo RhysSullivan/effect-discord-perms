@@ -121,7 +121,13 @@ export const run: Effect.Effect<
   }
 
   const guard = yield* LabGuard
-  yield* guard.arm({ harnessUserId: harness.userId, subjectUserId: subject.userId, targetUserId: target.userId, protectedChannels: new Set(protectedChannels.map((channel) => channel.id)) })
+  yield* guard.arm({
+    harnessUserId: harness.userId,
+    subjectUserId: subject.userId,
+    targetUserId: target.userId,
+    protectedChannels: new Set(protectedChannels.map((channel) => channel.id)),
+    subjectApplicationId: subject.applicationId
+  })
 
   return {
     guild,

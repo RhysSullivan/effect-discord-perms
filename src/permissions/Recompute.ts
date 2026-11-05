@@ -65,6 +65,11 @@ export interface Target {
   /** The request's static arguments (the payload's features, a post's tag, a known reaction state). */
   readonly args: DecideArgs
   readonly completion: Completion
+  /**
+   * The interaction's `app_permissions` for the channel, when the handle came from an interaction (basis
+   * `"app-permissions"`, §4.7): preflight reads them instead of the gateway state's overwrites.
+   */
+  readonly appPermissions?: Flags.PermissionSet
 }
 
 /** What the recompute can attribute a refusal to. */

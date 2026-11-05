@@ -23,7 +23,7 @@ import type { Transient } from "../errors/Transient.ts"
 import * as Recompute from "../permissions/Recompute.ts"
 import type * as GuildState from "../state/GuildState.ts"
 import { type CodeError, type LimitFacts, mapResponse, UnmappedDiscordError, undeclarableFields } from "./ErrorMap.ts"
-import { send } from "./Request.ts"
+import { type Answered, send, sendJson as sendJsonRequest } from "./Request.ts"
 
 /** The wrapper's settings. */
 export interface Config {
@@ -76,6 +76,13 @@ export interface Interface {
    * 50013, `PermissionDeniedUnattributed`), never a guess.
    */
   readonly executeDirect: <A>(request: DirectRequest<A>) => Effect.Effect<A, ApiError>
+  /**
+   * A JSON request outside the operation table (phase 3: an interaction's callback and its webhook calls), bounded by
+   * the deadline, made under its declared route, in a `discord.rest` span. Discord's answer is returned (`Ok` or
+   * `Rejected`) for the caller to map; no answer is a `Transient`. `path` may hold the interaction token, so only the
+   * route template reaches spans and causes.
+   */
+  readonly sendJson: (route: Route, path: string, body: unknown) => Effect.Effect<Answered<Schema.Json>, Transient>
 }
 
 /** One request outside any guild (a DM's send, edit or delete). */
@@ -186,5 +193,10 @@ export const make = (rest: DiscordRestService, guildState: GuildState.Interface)
         })
       )
 
-    return DiscordApi.of({ execute, read, executeDirect })
+    const sendJson = (route: Route, path: string, body: unknown): Effect.Effect<Answered<Schema.Json>, Transient> =>
+      sendJsonRequest(rest, route.template, route.method, path, body, config.requestDeadline).pipe(
+        Effect.withSpan("discord.rest", { attributes: { "discord.route": route.template, "discord.method": route.method } })
+      )
+
+    return DiscordApi.of({ execute, read, executeDirect, sendJson })
   })

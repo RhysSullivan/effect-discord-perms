@@ -48,6 +48,23 @@ describe("the guard's verdict", () => {
     expect(decide("GET", `/applications/1/guilds/${otherGuild}/commands`)).toBe("Refuse")
   })
 
+  it("allows an interaction's callback and the subject application's interaction webhook only (M9, the checklist)", () => {
+    const subjectApp = "100000000000000002"
+    const withApp: GuardState = { ...armed, armed: Option.map(armed.armed, (value) => ({ ...value, subjectApplicationId: subjectApp })) }
+    expect(decide("POST", "/interactions/900000000000000001/token/callback", undefined, withApp)).toBe("Allow")
+    expect(decide("PATCH", "/interactions/900000000000000001/token/callback", undefined, withApp)).toBe("Refuse")
+    expect(decide("POST", "/interactions/900000000000000001/token", undefined, withApp)).toBe("Refuse")
+    expect(decide("POST", `/webhooks/${subjectApp}/token`, undefined, withApp)).toBe("Allow")
+    expect(decide("PATCH", `/webhooks/${subjectApp}/token/messages/@original`, undefined, withApp)).toBe("Allow")
+    expect(decide("DELETE", `/webhooks/${subjectApp}/token/messages/@original`, undefined, withApp)).toBe("Allow")
+    // another application's webhook, another message, the webhook itself, or no application armed: refused
+    expect(decide("POST", "/webhooks/100000000000000003/token", undefined, withApp)).toBe("Refuse")
+    expect(decide("PATCH", `/webhooks/${subjectApp}/token/messages/500000000000000001`, undefined, withApp)).toBe("Refuse")
+    expect(decide("DELETE", `/webhooks/${subjectApp}/token`, undefined, withApp)).toBe("Refuse")
+    expect(decide("POST", `/webhooks/${subjectApp}/token`)).toBe("Refuse")
+    expect(decide("POST", "/interactions/900000000000000001/token/callback")).toBe("Refuse")
+  })
+
   it("refuses every write before it is armed", () => {
     const unarmed: GuardState = { ...armed, armed: Option.none() }
     expect(decide("POST", `/channels/${labChannel}/messages`, undefined, unarmed)).toBe("Refuse")

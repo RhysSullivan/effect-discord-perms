@@ -299,3 +299,27 @@ export const inputFromSnapshot = (snapshot: Snapshot, guildId: GuildId, channelI
   if (parent === undefined) return { _tag: "NeedsRefresh", reason: `thread ${channelId}'s parent ${parentId} is not in the state` }
   return ready({ _tag: "Known", channel, parent, threadMember: botIsThreadMember(guild, channelId) })
 }
+
+/**
+ * The resolution of a channel whose permissions came with an interaction (`app_permissions`, basis `"app-permissions"`,
+ * §4.7): Discord's own computation for the bot in that channel, so it stands for every stage up to the timeout, and no
+ * blind mask applies (Discord knows what the bot can see). The state's resolution of the same channel, when the guild
+ * state holds it, still gives the timeout, the thread's state, voice and the required tag; without it they are
+ * unknown, so preflight checks the flags alone. Whether `app_permissions` already reflects a timeout is open question
+ * 8 (H-026): when the state shows one, the timeout mask applies on top, which can only rank `CommunicationDisabled`
+ * first, as for a gateway handle.
+ */
+export const fromAppPermissions = (app: Flags.PermissionSet, state: Resolution | undefined, voice: boolean): Resolution => {
+  const timeout = state?.timeout
+  return {
+    base: app,
+    afterOverwrites: app,
+    beforeTimeout: app,
+    effective: timeout === undefined ? app : Flags.intersect(app, Flags.fromFlags(ResolverRules.timeoutKeeps.value)),
+    masks: timeout === undefined ? [] : ["timeout"],
+    timeout,
+    thread: state?.thread,
+    voice: state?.voice ?? voice,
+    requireTag: state?.requireTag ?? false
+  }
+}

@@ -8,7 +8,7 @@
  *
  * Opting out is explicit and greppable: `catchCategory`, `catchTag`, or `Effect.orDie`.
  */
-import type { Effect } from "effect"
+import { Effect } from "effect"
 import type { Categories, CategoryMarker } from "../errors/Category.ts"
 
 /** The categories a handler must not leave unhandled. */
@@ -32,3 +32,16 @@ export interface UnhandledErrors<What extends string> {
 export type Handled<A, E, R> = [Unhandled<E>] extends [never]
   ? Effect.Effect<A, E, R>
   : UnhandledErrors<Extract<Categories<Unhandled<E>>, NonTransient> | TagOf<Exclude<E, CategoryMarker<string>>>>
+
+/**
+ * A handler's checked result as the Effect it is at run time (internal: `bot.on` and the interaction runner).
+ * `Handled<A, E, R>` is the Effect itself whenever the program compiles (the boundary's message type has no runtime
+ * value), so the overload attaches the precise type to the wide implementation (rule 7 of §2.12); anything else is a
+ * defect naming `what`.
+ */
+export function handledEffect<A, E, R>(value: Handled<A, E, R>, what: string): Effect.Effect<A, E, R>
+// SAFETY: the wide implementation only passes the value through. `Handled<A, E, R>` resolves to `Effect<A, E, R>`
+// in every program that compiles, and `UnhandledErrors` is a type with no runtime value, so the value is that Effect.
+export function handledEffect(value: Effect.Effect<unknown, unknown, unknown> | UnhandledErrors<string>, what: string): Effect.Effect<unknown, unknown, unknown> {
+  return Effect.isEffect(value) ? value : Effect.die(new Error(`${what}: a handler returned no Effect`))
+}

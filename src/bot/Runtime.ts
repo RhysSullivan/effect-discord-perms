@@ -6,7 +6,8 @@
  */
 import { type Config, Context, type Effect, type Redacted, type Scope } from "effect"
 import type { AnyChatInputCommand } from "../commands/Command.ts"
-import type { EventName, Intent } from "../gateway/Intents.ts"
+import type { DispatchName } from "../gateway/Dispatches.ts"
+import type { Intent } from "../gateway/Intents.ts"
 import type * as DiscordApi from "../rest/DiscordApi.ts"
 import type { GuildId } from "../Snowflake.ts"
 import type * as GuildState from "../state/GuildState.ts"
@@ -47,7 +48,7 @@ export interface BotDefinition {
  * closes. `handle` never fails; `data` is Discord's payload, decoded by the caller.
  */
 export interface EventSource {
-  readonly subscribe: <R>(name: EventName, handle: (data: unknown) => Effect.Effect<void, never, R>) => Effect.Effect<void, never, R | Scope.Scope>
+  readonly subscribe: <R>(name: DispatchName, handle: (data: unknown) => Effect.Effect<void, never, R>) => Effect.Effect<void, never, R | Scope.Scope>
 }
 
 /** A running bot: who it is, its declared intents, the guild state its operations read, and its events. */

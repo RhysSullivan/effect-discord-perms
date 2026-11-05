@@ -35,7 +35,10 @@
  *   or ban, and a second use of a permit, is refused;
  * - a channel PATCH that renames a channel gives it a lab name; a new guild emoji has a `lab_` name, and emoji
  *   are never edited or deleted;
- * - nothing creates or writes to a DM channel, leaves the guild, edits global commands, webhooks or invites.
+ * - nothing creates or writes to a DM channel, leaves the guild, edits global commands, webhooks or invites, except
+ *   an interaction's answers (M9, the checklist Rhys runs): its callback, and the follow-ups and original-response edits
+ *   of the subject application's interaction webhook (`/webhooks/{subject's application}/{token}`). An interaction can
+ *   only come from where the subject's commands and buttons are, and they are registered and posted in the lab only.
  *
  * A lab object is admitted after the harness has read it from Discord (or created it) and checked its name and
  * guild, so the stored IDs in `.lab-state.json` are never trusted on their own.
@@ -53,6 +56,8 @@ export interface Armed {
   readonly targetUserId: UserId
   /** `#rules`, `#mod-updates` and the guild's rules and public-updates channels: never admitted. */
   readonly protectedChannels: ReadonlySet<string>
+  /** The subject's application ID, whose interaction webhooks the checklist answers through (M9); none, none allowed. */
+  readonly subjectApplicationId?: string
 }
 
 /** The guard's state: the lab guild, whether it is armed, and the admitted lab objects. */
@@ -286,6 +291,17 @@ export const verdict = (state: GuardState, method: string, url: string, body: Re
       return channelWrite(state, armed, upper, route, id, rest, body)
     case "applications":
       return rest[0] === "guilds" ? allow : refuse(`${route}: only guild commands in the lab guild`)
+    case "interactions":
+      // an interaction's callback, `POST /interactions/{interaction.id}/{interaction.token}/callback`, once the subject's
+      // application is armed (the interactions it answers are the subject's)
+      return armed.subjectApplicationId !== undefined && upper === "POST" && rest.length === 2 && rest[1] === "callback" ? allow : refuse(`${route}: only an interaction's callback`)
+    case "webhooks": {
+      // the subject application's interaction webhook: a follow-up, or the original response's edit or delete
+      const ours = armed.subjectApplicationId !== undefined && id === armed.subjectApplicationId
+      const followUp = upper === "POST" && rest.length === 1
+      const original = (upper === "PATCH" || upper === "DELETE") && rest.length === 3 && rest[1] === "messages" && rest[2] === "@original"
+      return ours && (followUp || original) ? allow : refuse(`${route}: only the subject's interaction webhooks`)
+    }
     default:
       return refuse(`${route}: write not allowed`)
   }

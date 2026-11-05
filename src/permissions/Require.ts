@@ -55,9 +55,10 @@ function requireFlags(channel: GuildChannel, flags: ReadonlyArray<PermissionFlag
       scope: { _tag: "Channel" as const, channelId: core.id },
       granted: [],
       args: { payload: [], extraFlags: flags },
-      completion: { _tag: "Static" as const }
+      completion: { _tag: "Static" as const },
+      ...(core.appPermissions === undefined ? {} : { appPermissions: core.appPermissions })
     }
-    const decided = yield* decisionOf(core.runtime, { target })
+    const decided = yield* decisionOf(core.runtime, { target, kind: core.kind })
     const cause = new PreflightDecision({ route, basis: core.basis })
     if (decided._tag === "Undecidable") {
       yield* Effect.logWarning(`Permissions.require: the state cannot resolve the channel even after a refresh (${decided.reason}); nothing was checked`)
@@ -70,7 +71,7 @@ function requireFlags(channel: GuildChannel, flags: ReadonlyArray<PermissionFlag
     })
     const [first] = failures
     if (first !== undefined) return yield* Effect.fail(toError("permissions.require", first, cause))
-    return channelHandle(core.runtime, { guildId: core.guildId, id: core.id, kind: core.kind }, [...new Set([...core.granted, ...flags])], core.basis)
+    return channelHandle(core.runtime, { guildId: core.guildId, id: core.id, kind: core.kind }, [...new Set([...core.granted, ...flags])], core.appPermissions)
   }).pipe(Effect.withSpan("discord.permissions.require", { attributes: { "discord.channel_kind": channel.kind, "discord.guild_id": channel.guildId, "discord.required_flags": [...flags].sort().join(",") } }))
 }
 

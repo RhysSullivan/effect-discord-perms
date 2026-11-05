@@ -689,4 +689,72 @@ export const rules: ReadonlyArray<Rule> = [
     claims: ['UnhandledErrors<"state">'],
     live: { kind: "not-live", reason: "pure-typing" }
   }
+  ,
+  // ---- the interaction state machine (§2.10, phase 3, M9): offline by the orchestrator's decision; the human checklist
+  // is in LOG.md "Waiting for Rhys" ----
+  {
+    id: "R-modal-before-answer",
+    statement:
+      "showModal exists only on an interaction not yet answered with auto-defer off (\"manual\"); under auto-defer it does not exist, and ix stays typed under Effect.fn",
+    pass: "test/types/pass/interactions.ts",
+    fail: "test/types/fail/interactions.ts",
+    claims: ["showModal", "thisDoesNotExist"],
+    live: { kind: "not-live", reason: "phase-3-offline" }
+  },
+  {
+    id: "R-no-modal-from-modal",
+    statement: "a modal submit cannot open another modal",
+    pass: "test/types/pass/interactions.ts",
+    fail: "test/types/fail/interactions.ts",
+    claims: ["ModalSubmitInteraction"],
+    live: { kind: "not-live", reason: "phase-3-offline" }
+  },
+  {
+    id: "R-followup-after-answer",
+    statement: "follow-ups exist only in the continuation that receives the answered interaction, so following up before answering, or answering twice, cannot be written",
+    pass: "test/types/pass/interactions.ts",
+    fail: "test/types/fail/interactions.ts",
+    claims: ["followUp"],
+    live: { kind: "not-live", reason: "phase-3-offline" }
+  },
+  {
+    id: "R-autocomplete-choices",
+    statement: "an autocomplete handler can only respond with choices",
+    pass: "test/types/pass/interactions.ts",
+    fail: "test/types/fail/interactions.ts",
+    claims: ["AutocompleteInteraction"],
+    live: { kind: "not-live", reason: "phase-3-offline" }
+  },
+  {
+    id: "R-must-respond",
+    statement: "an interaction handler must return a response, which only the interaction's own methods make (an object literal is none)",
+    pass: "test/types/pass/interactions.ts",
+    fail: "test/types/fail/interactions.ts",
+    claims: ["must return"],
+    live: { kind: "not-live", reason: "phase-3-offline" }
+  },
+  {
+    id: "R-deferred-must-complete",
+    statement: "a deferral's continuation must finish with deferred.editOriginal(...) or deferred.giveUp(...), the only producers of the nominal Completed",
+    pass: "test/types/pass/interactions.ts",
+    fail: "test/types/fail/interactions.ts",
+    claims: ["editOriginal"],
+    live: { kind: "not-live", reason: "phase-3-offline" }
+  },
+  {
+    id: "R-ephemeral-matches-mode",
+    statement: "the registration mode fixes the response: a reply's and a deferral's ephemeral state match it (H-227), and \"update\" offers only update and deferUpdate",
+    pass: "test/types/pass/interactions.ts",
+    fail: "test/types/fail/interactions.ts",
+    claims: ["ephemeral must match the registration mode public", "Type 'true' is not assignable to type 'false'", "Property 'reply' does not exist on type 'UpdateComponentInteraction"],
+    live: { kind: "not-live", reason: "phase-3-offline" }
+  },
+  {
+    id: "R-reply-nonempty",
+    statement: "a reply or follow-up needs a body, and a dynamic reply's limit errors (too long, empty) are typed and must be handled",
+    pass: "test/types/pass/interactions.ts",
+    fail: "test/types/fail/interactions.ts",
+    claims: ["a message needs", 'UnhandledErrors<"payload">'],
+    live: { kind: "not-live", reason: "phase-3-offline" }
+  }
 ]
