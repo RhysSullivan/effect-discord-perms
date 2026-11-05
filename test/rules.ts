@@ -423,7 +423,7 @@ export const rules: ReadonlyArray<Rule> = [
   // ---- limits (§2.3, §2.4, §2.6), each sent at exactly `Limits` and one over ----
   {
     id: "R-content-length",
-    statement: "non-literal content may be too long (ContentTooLong); a literal cannot",
+    statement: "non-literal content may be too long (ContentTooLong), and so may a literal over the limit; a literal within it cannot",
     pass: "test/types/pass/payload.ts",
     fail: "test/types/fail/limits.ts",
     claims: ["ContentTooLong"],

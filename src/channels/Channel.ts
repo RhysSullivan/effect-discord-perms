@@ -59,7 +59,14 @@ export interface SendOpByKind {
   readonly dm: "dm.send"
 }
 
-/** Anything `send` can be called on: a kind and the flags `require` checked (structural, so `require`'s handles fit). */
+/**
+ * Anything `send` can be called on: a kind and the flags `require` checked (structural, so `require`'s handles fit).
+ * The implementation closes over its handle and ignores `this`, so the error type is the one of the handle's real kind
+ * only while `this` is a library handle; a value deliberately re-typed around a handle's `send` (an object literal
+ * claiming `kind: "dm"`) gets the type of the kind it claims. That is a trust assumption, not a check: no cast is
+ * needed to write one, but nothing in the library or an ordinary bot does (after the final audit; `MessageReceiver`
+ * is the same).
+ */
 export interface SendReceiver {
   readonly kind: MessageKind
   readonly granted: ReadonlyArray<PermissionFlag>
