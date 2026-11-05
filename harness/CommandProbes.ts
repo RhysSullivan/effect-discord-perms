@@ -23,6 +23,7 @@
  *
  * A transient failure (no answer, a 5xx) is an infrastructure abort, never an observation.
  */
+import { ChannelType } from "discord-api-types/v10"
 import { Effect, Option, Schema } from "effect"
 import { SubjectRaw } from "../src/bot/Internals.ts"
 import type { StartupFailed } from "../src/bot/Startup.ts"
@@ -30,8 +31,8 @@ import { StoredCommand } from "../src/commands/Canonical.ts"
 import type { AnyChatInputCommand, OptionLike } from "../src/commands/Command.ts"
 import * as Registration from "../src/commands/Registration.ts"
 import { DiscordResponse } from "../src/errors/Cause.ts"
-import { channelTypes } from "../src/state/Snapshot.ts"
 import type { Transient } from "../src/errors/Transient.ts"
+import type { ChannelKind } from "../src/state/Snapshot.ts"
 import { type Answered, sendJson } from "../src/rest/Request.ts"
 import { labStepDeadline } from "./Lab.ts"
 import * as Outcome from "./Outcome.ts"
@@ -132,10 +133,29 @@ const storedKinds = (option: Schema.JsonObject): ReadonlyArray<number> => {
 }
 
 /**
+ * Discord's documented number for each channel kind, from discord-api-types' `ChannelType` (the research's Appendix A.1
+ * checked its values against Discord's docs), not from the library's `Snapshot.channelTypes`, which `Canonical.toDiscord`
+ * writes with: a wrong entry there must not agree with itself in the readback (M7 and M8 minors, item 10; the M9
+ * verifier).
+ */
+export const documentedChannelTypes: { readonly [K in ChannelKind]: number } = {
+  text: ChannelType.GuildText,
+  voice: ChannelType.GuildVoice,
+  category: ChannelType.GuildCategory,
+  announcement: ChannelType.GuildAnnouncement,
+  "announcement-thread": ChannelType.AnnouncementThread,
+  "public-thread": ChannelType.PublicThread,
+  "private-thread": ChannelType.PrivateThread,
+  stage: ChannelType.GuildStageVoice,
+  forum: ChannelType.GuildForum,
+  media: ChannelType.GuildMedia
+}
+
+/**
  * Whether `stored` (a command as Discord's GET returns it) holds each of `options` as written: an option of the same
  * name, `required: true` exactly when the definition says so, the same choices (names and values, in order) and the
- * same channel types as a set (Discord's documented numbers, `Snapshot.channelTypes`). Read straight from the stored
- * JSON, independent of `Canonical.ts` (R-options-typed's valid side).
+ * same channel types as a set ({@link documentedChannelTypes}). Read straight from the stored JSON, independent of
+ * `Canonical.ts` and the library's channel-type table (R-options-typed's valid side).
  */
 export const storedAsDefined = (options: ReadonlyArray<OptionLike>, stored: Schema.JsonObject): boolean => {
   const listed = stored["options"]
@@ -148,7 +168,7 @@ export const storedAsDefined = (options: ReadonlyArray<OptionLike>, stored: Sche
     if ((match["required"] === true) !== required) return false
     const choices = "choices" in option && option.choices !== undefined ? option.choices.map((choice) => `${choice.name}=${JSON.stringify(choice.value)}`) : []
     if (storedChoices(match).join("\n") !== choices.join("\n")) return false
-    const kinds = option.type === "channel" && option.channelTypes !== undefined ? [...new Set(option.channelTypes.map((kind) => channelTypes[kind]))].sort((a, b) => a - b) : []
+    const kinds = option.type === "channel" && option.channelTypes !== undefined ? [...new Set(option.channelTypes.map((kind) => documentedChannelTypes[kind]))].sort((a, b) => a - b) : []
     return storedKinds(match).join() === kinds.join()
   })
 }

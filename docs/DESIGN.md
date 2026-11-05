@@ -2432,7 +2432,8 @@ an optional one, `BASE_TYPE_MAX_LENGTH` on `options` past 25, `UNION_TYPE_CHOICE
 subcommand and for a value option in a group, `APPLICATION_COMMAND_OPTIONS_TYPE_INVALID` for a subcommand after a value
 option at the top level (H-197 confirmed). `R-options-typed` is `Applied options` (the stored choices, required options
 and channel types equal the definition's; before M9 compared field by field with the definition as written,
-`CommandProbes.storedAsDefined`, not canonically) against a string choice with a number value
+`CommandProbes.storedAsDefined`, not canonically; after the M9 verifier its channel numbers are discord-api-types'
+`ChannelType`, not the library's `Snapshot.channelTypes` that the definition is written with) against a string choice with a number value
 (`STRING_TYPE_CONVERT`); `R-registration-diff` is `Writes 0` for the identical sync against `Writes 1` for six mutations
 (description, then as `also` the name, channel types, choices, an option's name and an option's required), counted at
 the base client less its 429s; `R-custom-id-routing` is an ID built at 100 characters, stored and read back through the

@@ -1368,7 +1368,8 @@ the same commit.
   - **R-options-typed's valid side compared canonically** (§5.5 updated): `typed-register-choices` now reads the stored
     command and compares it with the definition as written, field by field (`CommandProbes.storedAsDefined`: an option of
     each name, `required: true` exactly when defined, the same choices in order, the same channel types as a set through
-    `Snapshot.channelTypes`), never through `Canonical.ts`, so `Ignored` is observable. `test/unit/command-probes.test.ts`
+    `Snapshot.channelTypes`, the table `Canonical.toDiscord` writes with, until the M9 verifier: now discord-api-types'
+    `ChannelType`, `CommandProbes.documentedChannelTypes`), never through `Canonical.ts`, so `Ignored` is observable. `test/unit/command-probes.test.ts`
     accepts the recorded storage and refuses each changed field.
   - **The canonicaliser's defaults beyond `required: false`** (live, `record-commands`; §4.14 and §2.8 updated): the
     recording's fourth sample, `lab-record-defaults`, sends `autocomplete: false`, `choices: []` and `channel_types: []`
