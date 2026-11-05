@@ -1,7 +1,8 @@
 /**
  * The handler boundary (DESIGN §2.7, D1 with a change, D6; `[sd:src/bot.ts]`). A handler registered with
  * `Bot.on` compiles only if every error it can still fail with is purely `transient`. Anything else, an error in
- * a non-transient category (even if it is also transient) or an uncategorised user error, turns the handler's
+ * a non-transient category (even if it is also transient), an uncategorised user error, or an error type widened to
+ * a categorised supertype (`Categorized<"transient">` included, see {@link Unhandled}), turns the handler's
  * result type into {@link UnhandledErrors}, whose one property names what is left: the non-transient
  * categories (at most four, so the message never truncates) and the tags of the uncategorised errors. The
  * handler's own hover still lists every tag.
@@ -15,21 +16,37 @@ import type { Categories, CategoryMarker, CategoryTypeId } from "../errors/Categ
 export type NonTransient = "permission" | "payload" | "access" | "state"
 
 /**
- * D6: everything that is not in `transient`, plus anything in a non-transient category (an error in both is not
- * purely transient). It is defined from `transient`, not by subtracting "some category", so an error type widened to
- * a categorised supertype (`Categorized<never>`, `Categorized<string>`), which carries no category the boundary can
- * read, stays unhandled (after the final audit: subtracting `CategoryMarker<string>` let both through).
+ * D6: the members of `E` that are not purely transient. A member is unhandled when it is not in `transient`, when it
+ * is also in a non-transient category, or when it is in `transient` only as a widened type, one with no literal
+ * `_tag` (`Categorized<"transient">`, or a `_tag` typed `string`): such a type may stand for an error that is
+ * transient and state, which D6 says must be handled, so only a concrete error class passes as transient.
+ *
+ * It is defined from `transient`, not by subtracting "some category", so an error type widened to a categorised
+ * supertype (`Categorized<never>`, `Categorized<string>`), which carries no category the boundary can read, stays
+ * unhandled (after the final audit: subtracting `CategoryMarker<string>` let both through; round 2: subtracting
+ * `CategoryMarker<"transient">` let `Categorized<"transient">` through).
  */
-export type Unhandled<E> = Exclude<E, CategoryMarker<"transient">> | Extract<E, CategoryMarker<NonTransient>>
+export type Unhandled<E> = E extends CategoryMarker<"transient">
+  ? E extends CategoryMarker<NonTransient>
+    ? E
+    : E extends { readonly _tag: infer T extends string }
+      ? string extends T
+        ? E
+        : never
+      : E
+  : E
 
 /** The tag of an error the boundary cannot place in a non-transient category, for its message. */
 export type TagOf<E> = unknown extends E
   ? "unknown (fix the errors above first)"
   : E extends { readonly _tag: infer T extends string }
-    ? T
-    : E extends { readonly [CategoryTypeId]: unknown }
-      ? "a widened categorised type (keep each error's own class)"
-      : "<untagged>"
+    ? string extends T
+      ? WidenedType<E>
+      : T
+    : WidenedType<E>
+
+/** What the message calls an error type with no literal tag. */
+type WidenedType<E> = E extends { readonly [CategoryTypeId]: unknown } ? "a widened categorised type (keep each error's own class)" : "<untagged>"
 
 /**
  * Shown instead of the handler's Effect when errors other than purely transient ones escape it: what to handle,

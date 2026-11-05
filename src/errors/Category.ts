@@ -14,7 +14,7 @@
  * `transient` has no other category.
  */
 import { type Cause, Effect, Function, Predicate, Schema } from "effect"
-import type { Invalid } from "../payload/Components.ts"
+import type { Invalid, IsUnion } from "../payload/Components.ts"
 
 /** The prototype key that holds an error class's category marker. */
 export const CategoryTypeId: unique symbol = Symbol.for("effect-discord-perms/ErrorCategory")
@@ -123,8 +123,6 @@ export function CategorizedError(): (tag: string, fields: Schema.Struct.Fields, 
   return (tag, fields, categories) => mixCategories(Schema.TaggedError<unknown>()(tag, fields), categories)
 }
 
-type IsUnion<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never
-
 /** One category or a non-empty list of them (any-of), as `catchCategory` and `hasCategory` take them. */
 export type CategoryArg<K extends string> = K | Readonly<[K, ...Array<K>]>
 
@@ -139,10 +137,13 @@ export type Listed<C> = C extends ReadonlyArray<infer K extends string> ? K : C 
 
 /**
  * The categories must be written as literals (after the final audit). The type removes every category the argument's
- * type names, while the run time catches only those its value holds, so an argument typed as a union (`category: Cat`)
- * or as a non-tuple list would remove categories that still fail. A single category typed as a union, a list whose type
- * is not a tuple, and a list element typed as a union are each an error that says so. (`Effect.catchTag` has the same
- * property for a tag typed as a union; DESIGN §2.2.)
+ * type names, while the run time catches only those its value holds, so an argument typed as a union (`category: Cat`,
+ * or `cond ? ["permission"] as const : ["state"] as const`) or as a non-tuple list would remove categories that still
+ * fail. A single category typed as a union, a list whose type is not a tuple, a list typed as a union of tuples (round 2)
+ * and a list element typed as a union are each an error that says so. Not caught: a union of a category and a list
+ * (`cond ? "state" : ["access"] as const`), which has the shape tsc gives `C` when it falls back to the constraint after
+ * an argument it rejects, where the message would be wrong. (`Effect.catchTag` has the same property for a tag typed
+ * as a union; DESIGN §2.2.)
  */
 export type LiteralCategories<C> = [C] extends [string]
   ? true extends IsUnion<C>
@@ -151,9 +152,11 @@ export type LiteralCategories<C> = [C] extends [string]
   : [C] extends [ReadonlyArray<string>]
     ? number extends C["length"]
       ? Invalid<"catchCategory needs the categories as a literal list">
-      : true extends { readonly [I in keyof C]: IsUnion<C[I]> }[number]
+      : true extends IsUnion<C>
         ? Invalid<"catchCategory needs each category as a literal, not a union">
-        : unknown
+        : { readonly [I in keyof C]: IsUnion<C[I]> } extends ReadonlyArray<false>
+          ? unknown
+          : Invalid<"catchCategory needs each category as a literal, not a union">
     : unknown
 
 /** The category names a `catchCategory` or `hasCategory` argument holds at run time. */

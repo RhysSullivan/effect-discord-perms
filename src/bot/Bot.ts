@@ -37,7 +37,7 @@ import type * as HttpClient from "effect/http/HttpClient"
 import type * as Socket from "effect/socket/Socket"
 import { type AnyEvent, decode, Dropped, type EventPayloads } from "../gateway/Events.ts"
 import type { EventName, Intent, IntentCheck } from "../gateway/Intents.ts"
-import type { Invalid } from "../payload/Components.ts"
+import type { Invalid, IsUnion } from "../payload/Components.ts"
 import { type Handled, handledEffect } from "./Handler.ts"
 import { BotInternals } from "./Internals.ts"
 import { type BotConfig, BotRuntime } from "./Runtime.ts"
@@ -113,13 +113,25 @@ const makeBot = <I extends Intent>(intents: ReadonlyArray<I>): Bot<I> => {
 }
 
 /**
- * The declared intents must be written as a list (after the final audit): the types read them off the list's type, so
- * an array typed `ReadonlyArray<Intent>` would let every event (and `content: string`) compile while the bot identifies
- * with fewer intents. A list whose type is not a tuple is an error on the list. An element typed as a union of intents
- * (`[cond ? "GuildMessages" : "GuildMembers"]`) is not caught: the types then assume every member is declared (DESIGN
- * §2.7 records this; checking each element cost the reference bot's compile about 90 types).
+ * The declared intents must be written as a list of literals (after the final audit, and round 2): the types read
+ * them off the list's type (`I[number]`), so a type wider than the value would let events (and `content: string`)
+ * compile that the bot, identifying with fewer intents, never receives. Each such list is an error on `Bot.make`'s
+ * argument that names the rule:
+ *
+ * - a list whose type is not a tuple (`ReadonlyArray<Intent>`);
+ * - an element typed as a union of intents (`[cond ? "GuildMembers" : "GuildMessages"]`, `[one]` with `one: Intent`);
+ * - a list typed as a union of tuples (`[...(cond ? ["MessageContent"] as const : [] as const)]`).
+ *
+ * It is intersected onto the whole argument, not onto the list, so tsc does not elaborate a union of tuples element by
+ * element (which named no rule). An intent chosen at run time is a choice between two `Bot`s, each with a literal list.
  */
-export type LiteralIntents<I extends ReadonlyArray<Intent>> = number extends I["length"] ? Invalid<"intents must be written as a literal list: Bot.make({ intents: [...] })"> : unknown
+export type LiteralIntents<I extends ReadonlyArray<Intent>> = number extends I["length"]
+  ? Invalid<"intents must be written as a literal list: Bot.make({ intents: [...] })">
+  : true extends IsUnion<I>
+    ? Invalid<"each intent must be a literal, not a union or a conditional spread">
+    : { readonly [K in keyof I]: IsUnion<I[K]> } extends ReadonlyArray<false>
+      ? unknown
+      : Invalid<"each intent must be a literal, not a union or a conditional spread">
 
 /**
  * A bot whose intents are a run-time value (internal, not in the public barrel: the harness's intent sessions). Its
@@ -131,7 +143,7 @@ export const botWithRuntimeIntents = (intents: ReadonlyArray<Intent>): Bot<Inten
 /** The bot constructors and layers (§2.7, §4.2). */
 export const Bot = {
   /** A bot that identifies with exactly `intents`, written as a list of literals ({@link LiteralIntents}). */
-  make: <const I extends ReadonlyArray<Intent>>(config: { readonly intents: I & LiteralIntents<I> }): Bot<I[number]> => makeBot(config.intents),
+  make: <const I extends ReadonlyArray<Intent>>(config: { readonly intents: I } & LiteralIntents<I>): Bot<I[number]> => makeBot(config.intents),
   /**
    * The bot's runtime: startup checks 1-3 (§4.4), the guild state, the REST wrapper and the gateway (with the
    * capabilities codec), waiting for the configured guild's GUILD_CREATE (check 4). The base `HttpClient` and the

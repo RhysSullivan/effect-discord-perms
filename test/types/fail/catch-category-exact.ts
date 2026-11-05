@@ -23,6 +23,7 @@ type Cat = "access" | "state"
 declare const oneOf: Cat
 declare const listed: readonly [Cat, ...Array<Cat>]
 declare const pong: Effect.Effect<string>
+declare const strict: boolean
 
 // @valid
 export const literalList = accessOrState.pipe(catchCategory(["access"], () => Effect.succeed("")), catchCategory("state", () => Effect.succeed("")))
@@ -38,6 +39,13 @@ export const unionElement = accessOrState.pipe(catchCategory(["permission", oneO
 
 // @expect-error TS2345 catchCategory needs each category as a literal, not a union
 export const unionDataFirst = catchCategory(accessOrState, oneOf, () => Effect.succeed(""))
+
+// a union of literal lists (round 2): the type would remove "state", which the run time catches only when strict is false
+// @expect-error TS2345 catchCategory needs each category as a literal, not a union
+export const unionOfLists = accessOrState.pipe(catchCategory(strict ? (["access"] as const) : (["access", "state"] as const), () => Effect.succeed("")))
+
+// @expect-error TS2345 catchCategory needs each category as a literal, not a union
+export const unionOfListsDataFirst = catchCategory(accessOrState, strict ? (["access"] as const) : (["access", "state"] as const), () => Effect.succeed(""))
 
 // @expect-error TS2345 this effect cannot fail with any category
 export const deadCatch = pong.pipe(catchCategory("payload", () => Effect.succeed("")))

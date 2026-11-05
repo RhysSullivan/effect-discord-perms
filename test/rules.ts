@@ -117,7 +117,7 @@ export const rules: ReadonlyArray<Rule> = [
   {
     id: "R-catch-category-exact",
     statement:
-      "catchCategory removes exactly the members of the categories it names, written as literals (a category typed as a union, or a list typed wider than a tuple of literals, does not compile); catching a category the effect cannot fail with does not compile",
+      "catchCategory removes exactly the members of the categories it names, written as literals (a category typed as a union, or a list typed wider than a tuple of literals, a union of such tuples among them, does not compile); catching a category the effect cannot fail with does not compile",
     pass: "test/types/pass/catch-category-exact.ts",
     fail: "test/types/fail/catch-category-exact.ts",
     claims: [
@@ -519,10 +519,10 @@ export const rules: ReadonlyArray<Rule> = [
   {
     id: "R-intent-guild-members",
     statement:
-      "bot.on(\"GUILD_MEMBER_UPDATE\") compiles only with GuildMembers, declared as a literal list (a widened list is an error); an update about another member arrives only with GuildMembers",
+      "bot.on(\"GUILD_MEMBER_UPDATE\") compiles only with GuildMembers, declared as a literal list of literals (a widened list, an element typed as a union and a conditional spread are errors); an update about another member arrives only with GuildMembers",
     pass: "test/types/pass/bot.ts",
     fail: "test/types/fail/bot.ts",
-    claims: ["GuildMembers", "intents must be written as a literal list"],
+    claims: ["GuildMembers", "intents must be written as a literal list", "each intent must be a literal"],
     live: intentPair("guild-members", "GUILD_MEMBER_UPDATE", "CHANNEL_UPDATE")
   },
   {
@@ -691,7 +691,7 @@ export const rules: ReadonlyArray<Rule> = [
   {
     id: "R-handler-boundary",
     statement:
-      "a handler registered with bot.on compiles only if every error it can still fail with is purely transient: a permission, payload, access or state error, an uncategorised one, or one widened to a categorised supertype, names what to handle; a handler that returns no Effect says so",
+      "a handler registered with bot.on compiles only if every error it can still fail with is purely transient: a permission, payload, access or state error, an uncategorised one, or one widened to a categorised supertype (Categorized<\"transient\"> included), names what to handle; a handler that returns no Effect says so",
     pass: "test/types/pass/bot.ts",
     fail: "test/types/fail/bot.ts",
     claims: ["permission", "state", "payload", "Oops", "a widened categorised type", "MustReturnEffect", "a handler must return an Effect"],
@@ -699,11 +699,11 @@ export const rules: ReadonlyArray<Rule> = [
   },
   {
     id: "R-transient-only-escapes",
-    statement: "only a purely transient error may escape a handler; one that is transient and also state must be handled (D6)",
+    statement: "only a purely transient error may escape a handler; one that is transient and also state must be handled (D6), also once its type is widened to Categorized<\"transient\">",
     pass: "test/types/pass/bot.ts",
     fail: "test/types/fail/bot.ts",
     // the category the boundary names, not the error's name, which tsc prints in the effect's type anyway (M7 verifier)
-    claims: ['UnhandledErrors<"state">'],
+    claims: ['UnhandledErrors<"state">', "a widened categorised type"],
     live: { kind: "not-live", reason: "pure-typing" }
   }
   ,

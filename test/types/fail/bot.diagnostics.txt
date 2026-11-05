@@ -1,59 +1,77 @@
-L32:36 TS2345
+L43:36 TS2345
 Argument of type '"GUILD_MEMBER_UPDATE"' is not assignable to parameter of type '"GUILD_MEMBER_UPDATE" & MissingIntent<"GuildMembers">'.
   Type 'string' is not assignable to type 'MissingIntent<"GuildMembers">'.
 
-L34:32 TS2345
+L45:32 TS2345
 Argument of type '"MESSAGE_REACTION_ADD"' is not assignable to parameter of type '"MESSAGE_REACTION_ADD" & MissingIntent<"DirectMessageReactions" | "GuildMessageReactions">'.
   Type 'string' is not assignable to type 'MissingIntent<"DirectMessageReactions" | "GuildMessageReactions">'.
 
-L36:30 TS2345
+L47:30 TS2345
 Argument of type '"TYPING_START"' is not assignable to parameter of type '"TYPING_START" & MissingIntent<"DirectMessageTyping" | "GuildMessageTyping">'.
   Type 'string' is not assignable to type 'MissingIntent<"DirectMessageTyping" | "GuildMessageTyping">'.
 
-L38:33 TS2345
+L49:33 TS2345
 Argument of type '"MESSAGE_CREATE"' is not assignable to parameter of type '"MESSAGE_CREATE" & MissingIntent<"DirectMessages" | "GuildMessages">'.
   Type 'string' is not assignable to type 'MissingIntent<"DirectMessages" | "GuildMessages">'.
 
-L40:39 TS2345
+L51:39 TS2345
 Argument of type '"CHANNEL_UPDATE"' is not assignable to parameter of type '"CHANNEL_UPDATE" & MissingIntent<"Guilds">'.
   Type 'string' is not assignable to type 'MissingIntent<"Guilds">'.
 
-L42:93 TS2339
+L53:93 TS2339
 Property 'toUpperCase' does not exist on type 'string | ContentUnavailable'.
   Property 'toUpperCase' does not exist on type 'ContentUnavailable'.
 
-L44:59 TS2741
+L55:59 TS2741
 Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<void | Sent<"announcement" | "announcement-thread" | "private-thread" | "public-thread" | "stage" | "text" | "voice">, MissingConnect | MissingSendMessages | ... 4 more ... | Transient, never>' but required in type 'UnhandledErrors<"access" | "permission">'.
 
-L46:58 TS2741
+L57:58 TS2741
 Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<void | Sent<"announcement" | "announcement-thread" | "private-thread" | "public-thread" | "stage" | "text" | "voice">, CommunicationDisabled | RateLimited | ThreadLocked | UnknownChannel | Transient, never>' but required in type 'UnhandledErrors<"state">'.
 
-L48:52 TS2741
+L59:52 TS2741
 Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<never, Oops, never>' but required in type 'UnhandledErrors<"Oops">'.
 
-L52:3 TS2345
+L63:3 TS2345
 Argument of type '(event: GuildMessageCreate<false>) => Effect<void, EmbedTooLarge | MissingConnect | MissingEmbedLinks | ... 5 more ... | Transient, never>' is not assignable to parameter of type '(event: GuildMessageCreate<false>) => UnhandledErrors<"access" | "payload" | "permission">'.
   Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<void, EmbedTooLarge | MissingConnect | MissingEmbedLinks | MissingSendMessages | MissingSendMessagesInThreads | MissingViewChannel | PermissionDeniedUnattributed | RateLimited | Transient, never>' but required in type 'UnhandledErrors<"access" | "payload" | "permission">'.
 
-L57:53 TS2741
+L68:53 TS2741
 Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<never, Flaky, never>' but required in type 'UnhandledErrors<"state">'.
 
-L59:60 TS2741
+L70:60 TS2741
 Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<SentDegradable<"announcement" | "announcement-thread" | "private-thread" | "public-thread" | "stage" | "text" | "voice", "MentionEveryone" | "SendTTSMessages" | "UseExternalEmojis">, CommunicationDisabled | ... 17 more ... | Transient, never>' but required in type 'UnhandledErrors<"access" | "payload" | "permission" | "state">'.
 
-L61:65 TS2741
+L72:65 TS2741
 Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<unknown, Categorized<never>, never>' but required in type 'UnhandledErrors<"a widened categorised type (keep each error's own class)">'.
 
-L63:66 TS2741
+L74:66 TS2741
 Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<unknown, Categorized<string>, never>' but required in type 'UnhandledErrors<"a widened categorised type (keep each error's own class)">'.
 
-L65:49 TS2322
+L76:49 TS2322
 Type 'number' is not assignable to type 'MustReturnEffect'.
 
-L67:40 TS2345
+L78:40 TS2345
 Argument of type '() => Promise<void>' is not assignable to parameter of type '(event: Ready) => MustReturnEffect'.
   Property '"a handler must return an Effect"' is missing in type 'Promise<void>' but required in type 'MustReturnEffect'.
 
-L69:38 TS2322
-Type 'readonly ("AutoModerationConfiguration" | "AutoModerationExecution" | "DirectMessagePolls" | "DirectMessageReactions" | "DirectMessageTyping" | "DirectMessages" | "GuildExpressions" | ... 13 more ... | "MessageContent")[]' is not assignable to type 'readonly ("AutoModerationConfiguration" | "AutoModerationExecution" | "DirectMessagePolls" | "DirectMessageReactions" | "DirectMessageTyping" | "DirectMessages" | "GuildExpressions" | ... 13 more ... | "MessageContent")[] & Invalid<...>'.
-  Property '[InvalidId]' is missing in type 'readonly ("AutoModerationConfiguration" | "AutoModerationExecution" | "DirectMessagePolls" | "DirectMessageReactions" | "DirectMessageTyping" | "DirectMessages" | "GuildExpressions" | ... 13 more ... | "MessageContent")[]' but required in type 'Invalid<"intents must be written as a literal list: Bot.make({ intents: [...] })">'.
+L80:71 TS2741
+Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<void, Categorized<"transient">, never>' but required in type 'UnhandledErrors<"a widened categorised type (keep each error's own class)">'.
+
+L82:57 TS2741
+Property '"unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie"' is missing in type 'Effect<void, Categorized<"transient"> & { readonly _tag: string; }, never>' but required in type 'UnhandledErrors<"a widened categorised type (keep each error's own class)">'.
+
+L84:36 TS2345
+Argument of type '{ intents: readonly ("AutoModerationConfiguration" | "AutoModerationExecution" | "DirectMessagePolls" | "DirectMessageReactions" | "DirectMessageTyping" | "DirectMessages" | "GuildExpressions" | ... 13 more ... | "MessageContent")[]; }' is not assignable to parameter of type '{ readonly intents: readonly ("AutoModerationConfiguration" | "AutoModerationExecution" | "DirectMessagePolls" | "DirectMessageReactions" | "DirectMessageTyping" | "DirectMessages" | "GuildExpressions" | ... 13 more ... | "MessageContent")[]; } & Invalid<...>'.
+  Property '[InvalidId]' is missing in type '{ intents: readonly ("AutoModerationConfiguration" | "AutoModerationExecution" | "DirectMessagePolls" | "DirectMessageReactions" | "DirectMessageTyping" | "DirectMessages" | "GuildExpressions" | ... 13 more ... | "MessageContent")[]; }' but required in type 'Invalid<"intents must be written as a literal list: Bot.make({ intents: [...] })">'.
+
+L86:39 TS2345
+Argument of type '{ intents: ["Guilds", "GuildMembers" | "GuildMessages"]; }' is not assignable to parameter of type '{ readonly intents: readonly ["Guilds", "GuildMembers" | "GuildMessages"]; } & Invalid<"each intent must be a literal, not a union or a conditional spread">'.
+  Property '[InvalidId]' is missing in type '{ intents: ["Guilds", "GuildMembers" | "GuildMessages"]; }' but required in type 'Invalid<"each intent must be a literal, not a union or a conditional spread">'.
+
+L88:35 TS2345
+Argument of type '{ intents: ["AutoModerationConfiguration" | "AutoModerationExecution" | "DirectMessagePolls" | "DirectMessageReactions" | "DirectMessageTyping" | "DirectMessages" | "GuildExpressions" | ... 13 more ... | "MessageContent"]; }' is not assignable to parameter of type '{ readonly intents: readonly ["AutoModerationConfiguration" | "AutoModerationExecution" | "DirectMessagePolls" | "DirectMessageReactions" | "DirectMessageTyping" | "DirectMessages" | "GuildExpressions" | ... 13 more ... | "MessageContent"]; } & Invalid<...>'.
+  Property '[InvalidId]' is missing in type '{ intents: ["AutoModerationConfiguration" | "AutoModerationExecution" | "DirectMessagePolls" | "DirectMessageReactions" | "DirectMessageTyping" | "DirectMessages" | "GuildExpressions" | ... 13 more ... | "MessageContent"]; }' but required in type 'Invalid<"each intent must be a literal, not a union or a conditional spread">'.
+
+L90:38 TS2345
+Argument of type '{ intents: ["Guilds", "GuildMessages"] | ["Guilds", "GuildMessages", "MessageContent"]; }' is not assignable to parameter of type '{ readonly intents: readonly ["Guilds", "GuildMessages"] | readonly ["Guilds", "GuildMessages", "MessageContent"]; } & Invalid<"each intent must be a literal, not a union or a conditional spread">'.
+  Property '[InvalidId]' is missing in type '{ intents: ["Guilds", "GuildMessages"] | ["Guilds", "GuildMessages", "MessageContent"]; }' but required in type 'Invalid<"each intent must be a literal, not a union or a conditional spread">'.

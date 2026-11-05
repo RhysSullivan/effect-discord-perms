@@ -11,7 +11,7 @@ import type { StartupFailed } from "../../../src/bot/Startup.ts"
 import type { DMChannel, GuildChannel, GuildMessageKind, MessageChannel } from "../../../src/channels/Channel.ts"
 import type { OwnMessages } from "../../../src/channels/Message.ts"
 import { isMessageChannel } from "../../../src/channels/Channel.ts"
-import { catchCategory, withCategory } from "../../../src/errors/Category.ts"
+import { type Categorized, catchCategory, withCategory } from "../../../src/errors/Category.ts"
 import type { DiscordUnavailable } from "../../../src/errors/Transient.ts"
 import type { ContentUnavailable, DirectMessageCreate, GuildMessageCreate, ReactionEmoji } from "../../../src/gateway/Events.ts"
 import { type EventIntents, type Intent, Intents } from "../../../src/gateway/Intents.ts"
@@ -21,6 +21,11 @@ import type { GuildId, MessageId, UserId } from "../../../src/Snowflake.ts"
 const withContent = Bot.make({ intents: ["Guilds", "GuildMessages", "MessageContent"] })
 const noContent = Bot.make({ intents: ["Guilds", "GuildMessages"] })
 const withDMs = Bot.make({ intents: ["Guilds", "GuildMessages", "DirectMessages"] })
+
+// the declared intents are exactly the literal list's (round 2: the check on each element keeps the inference)
+expectTypeOf(noContent.intents).toEqualTypeOf<ReadonlyArray<"Guilds" | "GuildMessages">>()
+expectTypeOf(Bot.make({ intents: [] }).intents).toEqualTypeOf<ReadonlyArray<never>>()
+expectTypeOf(Bot.make({ intents: ["Guilds", "GuildMembers"] as const }).intents).toEqualTypeOf<ReadonlyArray<"Guilds" | "GuildMembers">>()
 
 // the intent names are exactly dfx's (and Discord's)
 expectTypeOf<Intent>().toEqualTypeOf<keyof typeof Discord.GatewayIntentBits>()
@@ -111,6 +116,14 @@ class Oops extends Schema.TaggedError<Oops>()("Oops", {}) {}
 expectTypeOf<Handled<void, Flaky, never>>().toEqualTypeOf<UnhandledErrors<"state">>()
 expectTypeOf<Handled<void, DiscordUnavailable, never>>().toEqualTypeOf<Effect.Effect<void, DiscordUnavailable, never>>()
 expectTypeOf<Handled<void, Oops | DiscordUnavailable, never>>().toEqualTypeOf<UnhandledErrors<"Oops">>()
+// round 2: the transient marker alone, or a string tag, may stand for Flaky, so it must be handled; a concrete purely
+// transient class of the user's may escape
+class Blip extends Schema.TaggedError<Blip>()("Blip", {}).pipe(withCategory("transient")) {}
+expectTypeOf<Handled<void, Categorized<"transient">, never>>().toEqualTypeOf<UnhandledErrors<"a widened categorised type (keep each error's own class)">>()
+expectTypeOf<Handled<void, Categorized<"transient"> & { readonly _tag: string }, never>>().toEqualTypeOf<
+  UnhandledErrors<"a widened categorised type (keep each error's own class)">
+>()
+expectTypeOf<Handled<void, Blip | DiscordUnavailable, never>>().toEqualTypeOf<Effect.Effect<void, Blip | DiscordUnavailable, never>>()
 // a handler that leaves only a transient error compiles, and the registration keeps no error
 export const r10 = noContent.on("MESSAGE_CREATE", (event) =>
   event.channel.send({ content: "pong" }).pipe(catchCategory(["permission", "access", "state"], () => Effect.void))

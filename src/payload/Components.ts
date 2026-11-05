@@ -27,6 +27,9 @@ export interface Invalid<Msg extends string> {
   readonly [InvalidId]: Msg
 }
 
+/** `true` when `T` is a union of two or more types (`"a" | "b"`, `boolean`), else `false`. */
+export type IsUnion<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never
+
 /** A component's `custom_id`, at most 100 characters (H-130). Only a `ComponentRoute` builds one (§2.9). */
 export const CustomId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)).pipe(Schema.brand("CustomId"))
 /** A component's `custom_id`. */
