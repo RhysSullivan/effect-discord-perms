@@ -1,7 +1,7 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { describe, expect, it } from "vitest"
-import { type CoverageRow, coverageProblems, escalatedRules, eventProblems, openQuestionsOf, type PairRowView, registryProblems, type RepositoryView, type SessionView, waitingForRhys } from "../../scripts/lib/rules.ts"
+import { type CoverageRow, coverageProblems, escalatedRules, unmetDoneCriteria, eventProblems, openQuestionsOf, type PairRowView, registryProblems, type RepositoryView, type SessionView, waitingForRhys } from "../../scripts/lib/rules.ts"
 import type { Rule } from "../rules.ts"
 
 const failSource = ["import { x } from 'y'", "// @valid", "x.ok()", "// @expect-error TS2345 Beta", "x.bad()"].join("\n")
@@ -209,6 +209,18 @@ describe("escalatedRules", () => {
       { rule: "R-message-content", part: "remainder", question: "Q-17" },
       { rule: "R-options-typed", part: "live", question: "Q-18" }
     ])
+  })
+
+  it("groups them by question, in question order, as verify:live prints the unmet Done criteria", () => {
+    expect(
+      unmetDoneCriteria([
+        { rule: "R-intent-typing", part: "remainder", question: "Q-22" },
+        { rule: "R-message-content", part: "remainder", question: "Q-17" },
+        { rule: "R-options-typed", part: "remainder", question: "Q-18" },
+        { rule: "R-custom-id-routing", part: "remainder", question: "Q-18" }
+      ])
+    ).toEqual(["Q-17: R-message-content (remainder)", "Q-18: R-options-typed (remainder), R-custom-id-routing (remainder)", "Q-22: R-intent-typing (remainder)"])
+    expect(unmetDoneCriteria([])).toEqual([])
   })
 })
 

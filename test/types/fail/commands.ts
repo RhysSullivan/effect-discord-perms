@@ -43,6 +43,12 @@ export const spaced = Command.chatInput({ name: "ban user", description: "d" })
 export const spacedSub = Command.withSubcommands({ name: "mod", description: "d", subcommands: [{ type: "subcommand", name: "lab sub", description: "d" }] })
 // @expect-error TS2322 names are 1 to 32 characters
 export const long = Command.chatInput({ name: "abcdefghijklmnopqrstuvwxyzabcdefg", description: "d" })
+// @expect-error TS2322 names must be lowercase: role
+export const upperGroup = Command.withSubcommands({ name: "mod", description: "d", subcommands: [{ type: "group", name: "Role", description: "d", subcommands: [{ type: "subcommand", name: "add", description: "d" }] }] })
+// @expect-error TS2322 names cannot contain spaces: ro le
+export const spacedGroup = Command.withSubcommands({ name: "mod", description: "d", subcommands: [{ type: "group", name: "ro le", description: "d", subcommands: [{ type: "subcommand", name: "add", description: "d" }] }] })
+// @expect-error TS2322 names are 1 to 32 characters
+export const longGroup = Command.withSubcommands({ name: "mod", description: "d", subcommands: [{ type: "group", name: "abcdefghijklmnopqrstuvwxyzabcdefg", description: "d", subcommands: [{ type: "subcommand", name: "add", description: "d" }] }] })
 // @expect-error TS2322 names are 1 to 32 characters
 export const longSub = Command.withSubcommands({ name: "mod", description: "d", subcommands: [{ type: "subcommand", name: "abcdefghijklmnopqrstuvwxyzabcdefg", description: "d" }] })
 
@@ -129,6 +135,10 @@ export const optional = options.days.toFixed()
 export const notAChoice = options.reason === "other"
 // @expect-error TS2339 Property 'createPost' does not exist
 export const narrowed = options.log?.createPost({ name: "lab-post", message: { content: "x" } })
+
+// ---- commands are registered in a guild only: no commands without a guildId (D18) ----
+// @expect-error TS2322 guildId
+export const noGuild: BotConfig = { token: Config.succeed(Redacted.make("token")), commands: [] }
 
 // ---- only built commands are registered ----
 // @expect-error TS2322 InvocationType

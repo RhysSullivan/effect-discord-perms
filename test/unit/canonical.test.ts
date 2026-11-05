@@ -3,6 +3,7 @@ import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { CommandsFixture, fixturePath, placeholders } from "../../harness/RecordCommands.ts"
 import { recordingSamples } from "../../harness/scenario/catalog/commands.ts"
+import { Command } from "../../src/commands/Command.ts"
 import { canonical, choiceDefaults, commandDefaults, differences, jsonText, optionDefaults, sameJson, serverAssigned, toDiscord } from "../../src/commands/Canonical.ts"
 
 /**
@@ -92,8 +93,25 @@ describe("the canonicaliser, against the recorded storage (fixtures/commands-can
         checked++
       }
     }
-    // every leaf of the three samples (80): a recording with fewer fields would test fewer
-    expect(checked).toBe(80)
+    // every leaf of the four samples (106): a recording with fewer fields would test fewer
+    expect(checked).toBe(106)
+  })
+
+  it("sends autocomplete on string, integer and number options alike (the M8 verifier: integer and number were untested)", () => {
+    const command = Command.chatInput({
+      name: "x",
+      description: "d",
+      options: [
+        { type: "string", name: "s", description: "d", autocomplete: true },
+        { type: "integer", name: "i", description: "d", autocomplete: true },
+        { type: "number", name: "n", description: "d", autocomplete: true }
+      ]
+    })
+    expect(toDiscord(command.definition)["options"]).toStrictEqual([
+      { type: 3, name: "s", description: "d", autocomplete: true },
+      { type: 4, name: "i", description: "d", autocomplete: true },
+      { type: 10, name: "n", description: "d", autocomplete: true }
+    ])
   })
 
   it("keeps a default field Discord holds at another value, so registration overwrites it", () => {

@@ -37,7 +37,7 @@ import * as Predict from "./Predict.ts"
 /** The cap on one scenario's wait. */
 export const cap = Duration.seconds(15)
 
-/** The pause between the two oracle reads that must agree (on top of the pacing's 200 ms between request starts). */
+/** The pause between the two oracle reads that must agree (on top of the pacing's 100 ms between request starts). */
 export const oracleGap = Duration.millis(100)
 
 /** The settle after everything agrees. */

@@ -50,7 +50,7 @@ import { send } from "../src/rest/Request.ts"
 import * as Schemas from "../src/rest/Schemas.ts"
 import { type ChannelId, type EmojiId, ForumTagId, type MessageId, type RoleId, type StickerId } from "../src/Snowflake.ts"
 import { isThreadKind } from "../src/state/Snapshot.ts"
-import { escalatedRules } from "../scripts/lib/rules.ts"
+import { escalatedRules, unmetDoneCriteria } from "../scripts/lib/rules.ts"
 import { rules } from "../test/rules.ts"
 import { agreement, flipAgreement, matrixRowAgreement, ruleAgreement } from "./Agreement.ts"
 import * as Converge from "./Converge.ts"
@@ -722,7 +722,8 @@ export const run = (report: IdentityReport, options: Options) =>
       `oracle: ${result.table.env.oracle}`,
       `mismatches: ${result.mismatches.length}`,
       ...result.mismatches.map(([id, kind]) => `  ${kind}: ${id}`),
-      `escalated rules (unmet Done criteria): ${escalated.length === 0 ? "none" : escalated.map((entry) => `${entry.rule} (${entry.part}, ${entry.question})`).join(", ")}`
+      `unmet Done criteria (escalated rules, waiting for Rhys; LOG.md "Waiting for Rhys" has each question's checklist): ${escalated.length === 0 ? "none" : escalated.length}`,
+      ...unmetDoneCriteria(escalated).map((line) => `  ${line}`)
     ]
     let identical = true
     for (const [index, earlier] of results.slice(0, -1).entries()) {

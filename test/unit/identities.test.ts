@@ -3,11 +3,13 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit, Option } from "effect"
 import * as Headers from "effect/http/Headers"
 import { HarnessRest, TargetRest, compose } from "../../harness/Identities.ts"
+import { LabGuard } from "../../harness/Lab.ts"
 import { Pacing } from "../../harness/Pacing.ts"
 import { BotRuntime } from "../../src/bot/Bot.ts"
 import { SubjectRaw } from "../../src/bot/Internals.ts"
+import { UserId } from "../../src/Snowflake.ts"
 import { channelObfuscation } from "../../src/gateway/Codec.ts"
-import { type Answer, fakeCredentials, fakeSubjectGateway, fakeSubjectUserId, makeRecordingClient, subjectStartupAnswer } from "../support/fakeDiscord.ts"
+import { type Answer, fakeCredentials, fakeGuildId, fakeSubjectGateway, fakeSubjectUserId, makeRecordingClient, subjectStartupAnswer } from "../support/fakeDiscord.ts"
 
 /**
  * The identity test (DESIGN §4.2, G1): the harness wiring, built from the exported `compose` with only the base
@@ -111,6 +113,31 @@ describe("harness identities", () => {
       expect(exit._tag).toBe("Failure")
       expect(String(exit)).toContain("no writes before the identity checks arm the guard")
       expect(sent).toBe(0)
+    })
+  )
+
+  it.live("count a guild command write of any identity against the create budget, and abort one past the cap before sending it (M8)", () =>
+    Effect.gen(function* () {
+      const client = yield* makeRecordingClient(withStartup((request) => ({ status: 200, body: request.method === "POST" ? { id: "400000000000000001", name: "x" } : [] })))
+      const gateway = yield* fakeSubjectGateway()
+      // the ledger other processes left: one create short of the cap
+      const now = Date.now()
+      const layer = compose(client.layer, gateway.layer, fakeCredentials, pacing, CommandBudget.layerMemory({ entries: [{ at: now, scope: `100000000000000002/${fakeGuildId}`, creates: CommandBudget.dailyCap - 1 }] }))
+      const commands = `/applications/100000000000000002/guilds/${fakeGuildId}/commands`
+      const { first, second, stats, sent } = yield* Effect.gen(function* () {
+        yield* (yield* LabGuard).arm({ harnessUserId: UserId.make("200000000000000000"), subjectUserId: UserId.make(fakeSubjectUserId), targetUserId: UserId.make("200000000000000002"), protectedChannels: new Set() })
+        const subject = yield* SubjectRaw
+        const startup = (yield* client.recorded).length
+        const first = yield* Effect.exit(subject.createGuildApplicationCommand("100000000000000002", fakeGuildId, { name: "one", description: "d" }))
+        const second = yield* Effect.exit(subject.createGuildApplicationCommand("100000000000000002", fakeGuildId, { name: "two", description: "d" }))
+        return { first, second, stats: yield* (yield* CommandBudget.CommandBudget).stats, sent: (yield* client.recorded).slice(startup) }
+      }).pipe(Effect.provide(layer))
+      expect(Exit.isSuccess(first)).toBe(true)
+      expect(Exit.isFailure(second) && !Exit.hasFails(second)).toBe(true)
+      expect(String(second)).toContain("command-create budget")
+      expect(stats).toEqual({ last24h: CommandBudget.dailyCap, thisProcess: 1 })
+      // the refused write was never sent
+      expect(sent.map((entry) => `${entry.method} ${new URL(entry.url).pathname}`)).toEqual([`POST /api/v10${commands}`])
     })
   )
 })

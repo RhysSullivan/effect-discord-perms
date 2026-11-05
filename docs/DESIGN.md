@@ -1046,7 +1046,8 @@ missing` (`R-registration-diff`'s fail directive), and every command a bot regis
 passed the definition checks. The constructors are overloads over a wide
 implementation (rule 7 of §2.12): the name is `N` whenever the program compiles, and the
 phantom's value is `undefined`, never read. Number options take `minValue`/`maxValue`
-too. `BotConfig` is a union: `commands` (an array of built commands) exists only with
+too. Empty `choices` or `channelTypes` restrict nothing (before M9: Discord drops them, recorded), so the option's
+value is its type's (it was `unknown` for empty choices and `never` for empty kinds). `BotConfig` is a union: `commands` (an array of built commands) exists only with
 `guildId`, because commands are registered in a guild only (check 5 of §4.4,
 `Registration.sync` after GUILD_CREATE); absent, the guild's commands are left alone,
 and `[]` removes them.
@@ -1461,7 +1462,8 @@ when they are built, so their methods have `R = never`.
 4. After the gateway starts, `GuildState.awaitGuild(guild)` must see
    GUILD_CREATE within 30 s, else `guild-not-ready`.
 5. Command registration (§4.14); 50035 or 30034 gives
-   `command-rejected`/`daily-command-limit`.
+   `command-rejected`/`daily-command-limit`. (M8: only when `BotConfig.commands`
+   is given; absent leaves the guild's commands alone, and `[]` removes them.)
 
 **Harness identity checks** (`harness/IdentityCheck.ts`), run by
 `harness:smoke` and `verify:live` before any write; any difference aborts:
@@ -2001,7 +2003,9 @@ orchestrator sets that flag, and §4.4 reads it back.
   `rest.httpClient`, `Request.sendJson`, because dfx's `ChannelTypes` lacks GuildMedia 16;
   the canonical form drops the server-assigned `id`, `application_id`, `guild_id` and
   `version`, drops `default_member_permissions: null`, `nsfw: false` and an option's
-  `required: false` only at exactly those values (the recording's defaults), sorts
+  `required: false` only at exactly those values (the recording's defaults; before M9 the
+  recording's fourth sample added an option's `autocomplete: false`, `choices: []` and
+  `channel_types: []`, which Discord drops too), sorts
   `channel_types` (a set: Discord stored `[5, 0, 11]` as `[0, 11, 5]`), and keeps any
   other field, so a field Discord stores that the tables do not name forces a write and
   then fails the check after it, a defect naming the field. 50035 and 30032 are
@@ -2355,8 +2359,8 @@ canary CHANNEL_UPDATE; `R-message-content` is `Applied`/`Ignored` `content`, wit
 sides; all sixteen sides are `rule/text-messages/session-*` rows. `R-handler-boundary` and
 `R-transient-only-escapes` are pure-typing, on `test/types/fail/bot.ts`.)
 | command-name-lowercase, -name-length, -name-spaces, option-order, option-count, option-name-lowercase, subcommand-nesting, subcommand-mixing (each at top level and nested) | typed registration / raw registration: Rejected 50035 with the field path (single command name, H-205) |
-| options-typed | register a command with choices, a required option and channel_types; GET it back and compare canonically: Applied / raw registration with a choice value of the wrong type: Rejected 50035; remainder: delivered option values escalated (Q-18) |
-| registration-diff | sync identical: Writes 0 / after each canonical-field mutation: Writes 1, counted at the base HttpClient (§5.10) |
+| options-typed | register a command with choices, a required option and channel_types; GET it back and compare the stored JSON with the definition as written (before M9: choices, required flags and channel types as a set, never through the canonicaliser, whose equality the sync's check after writing already requires): Applied / raw registration with a choice value of the wrong type: Rejected 50035; remainder: delivered option values escalated (Q-18) |
+| registration-diff | sync identical: Writes 0 / after each mutated definition: Writes 1, counted at the base HttpClient (§5.10). (Before M9, the M8 verifier: live, each mutation row syncs over the previous row's definition, which differs from it in one or more fields, so the live rows show one write per changed definition; that each single canonical field is detected is held offline, `test/unit/registration.test.ts`'s eleven mutations and `test/unit/canonical.test.ts`'s every leaf of the recording.) |
 
 (M8, as built: eleven rules on `catalog/rules.ts`'s `commands` setup (`text-send`'s role state, so no role edit), all
 sides `rule/commands/<probe>` run by `harness/CommandProbes.ts` and, for the two route probes, `harness/Probes.ts`. The
@@ -2371,13 +2375,17 @@ expectations: `APPLICATION_COMMAND_INVALID_NAME` for uppercase, `STRING_TYPE_REG
 an optional one, `BASE_TYPE_MAX_LENGTH` on `options` past 25, `UNION_TYPE_CHOICES` for a group in a group or a
 subcommand and for a value option in a group, `APPLICATION_COMMAND_OPTIONS_TYPE_INVALID` for a subcommand after a value
 option at the top level (H-197 confirmed). `R-options-typed` is `Applied options` (the stored choices, required options
-and channel types equal the definition's canonically) against a string choice with a number value
+and channel types equal the definition's; before M9 compared field by field with the definition as written,
+`CommandProbes.storedAsDefined`, not canonically) against a string choice with a number value
 (`STRING_TYPE_CONVERT`); `R-registration-diff` is `Writes 0` for the identical sync against `Writes 1` for six mutations
 (description, then as `also` the name, channel types, choices, an option's name and an option's required), counted at
 the base client less its 429s; `R-custom-id-routing` is an ID built at 100 characters, stored and read back through the
 harness and decoded to the same data, against 101 (`BASE_TYPE_BAD_LENGTH` on the button's `custom_id`). The last two
 rules' handler side is escalated (Q-18). Only `R-registration-diff`'s fail directive is a type rule of its own: a
-forged command literal is no `ChatInputCommand`, so only built, checked definitions are registered.)
+forged command literal is no `ChatInputCommand`, so only built, checked definitions are registered. Before M9 (the M8
+verifier): the name rules' live sides are the command's and a subcommand's name; a group's own name (uppercase, a space,
+33 characters) has its own fail directives, which the rules claim, and `R-registration-diff` also claims the fail
+directive of `commands` without a `guildId`.)
 | must-respond, modal-before-answer, followup-after-answer, autocomplete-choices, no-modal-from-modal, deferred-must-complete, ephemeral-matches-mode, reply-nonempty | phase-3-offline |
 | handler-boundary, catch-tag-exact, catch-category-exact, require-narrows, transient-only-escapes | pure-typing |
 
@@ -3026,9 +3034,18 @@ since dfx waits the bucket out.)
 ### 5.11 Pacing and invalid-request budget
 
 - `Pacing.ts` keeps a global token bucket in the shared `HttpClient`, across
-  identities: 5 requests/s by default, configurable lower. dfx's per-route
-  buckets still apply. Because the client is outside every `Layer.fresh`
-  (§4.2), the bucket and counters see all three identities.
+  identities: 10 requests/s by default (5 until M9), configurable lower, a fifth
+  of one bot's global limit of 50/s and still shared by all three identities.
+  dfx's per-route buckets still apply. Because the client is outside every
+  `Layer.fresh` (§4.2), the bucket and counters see all three identities.
+  (Before M9, **the orchestrator's decision** on the question M6 and M7 left
+  open: the bucket, not Discord's latency, set the run's pace, since about 9,270
+  requests at 5/s cost at least 31 minutes before any wait. The cap rose to 10/s,
+  and Converge's read and the wait's read-back make their independent reads
+  together (`Converge.readView`, `Converge.rereadWritten`), so the cap is used.
+  dfx's route buckets, the role-budget check, the invalid-request abort at 1,500
+  and the 60-minute abort are unchanged, and no row was dropped. LOG.md has the
+  timings before and after.)
 - Name and topic edits: at most one per lab channel per run (H-162), enforced
   by Safety.
 - 401, 403 and 429 responses are counted per run. The run aborts at **1,500**,

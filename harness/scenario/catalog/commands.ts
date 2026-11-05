@@ -54,7 +54,20 @@ export const recordingSamples: ReadonlyArray<AnyChatInputCommand> = [
       }
     ]
   }),
-  Command.chatInput({ name: "lab-record-plain", description: "Perms Lab: no options" })
+  Command.chatInput({ name: "lab-record-plain", description: "Perms Lab: no options" }),
+  // before M9 (the M8 verifier): the false and empty values the types accept, and autocomplete on integer and number
+  Command.chatInput({
+    name: "lab-record-defaults",
+    description: "Perms Lab: false and empty values",
+    options: [
+      { type: "string", name: "text", description: "a string", autocomplete: false, choices: [] },
+      { type: "integer", name: "count", description: "an integer", autocomplete: true },
+      { type: "number", name: "ratio", description: "a number", autocomplete: false, choices: [] },
+      { type: "integer", name: "pick", description: "an integer", autocomplete: false },
+      { type: "number", name: "share", description: "a number", autocomplete: true },
+      { type: "channel", name: "where", description: "a channel", channelTypes: [] }
+    ]
+  })
 ]
 
 /** The name of a subcommand at the limit, 32 characters (the nested side of the name rules). */

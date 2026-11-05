@@ -23,13 +23,18 @@ const deadline = Duration.seconds(5)
 type Json = Schema.Json
 const isObject = (value: Json): value is Schema.JsonObject => typeof value === "object" && value !== null && !Array.isArray(value)
 
-/** An option as Discord stores it: no `required: false`, `channel_types` in Discord's own order (reversed here). */
+/**
+ * An option as Discord stores it: no `required: false`, `autocomplete: false`, `choices: []` or `channel_types: []`, and
+ * `channel_types` in Discord's own order (reversed here).
+ */
 const storedOption = (option: Schema.JsonObject): Schema.JsonObject => {
-  const { required, channel_types, options, ...rest } = option
+  const { required, autocomplete, choices, channel_types, options, ...rest } = option
   return {
     ...rest,
     ...(required === true ? { required } : {}),
-    ...(Array.isArray(channel_types) ? { channel_types: [...channel_types].reverse() } : {}),
+    ...(autocomplete === true ? { autocomplete } : {}),
+    ...(Array.isArray(choices) && choices.length > 0 ? { choices } : {}),
+    ...(Array.isArray(channel_types) && channel_types.length > 0 ? { channel_types: [...channel_types].reverse() } : {}),
     ...(Array.isArray(options) ? { options: options.filter(isObject).map(storedOption) } : {})
   }
 }
@@ -54,7 +59,13 @@ interface Store {
  * A fake command store. `onPut` answers a bulk overwrite instead of storing it (a refusal), and `tamper` changes what is
  * stored after a write (a field the canonicaliser does not model).
  */
-const makeStore = (options: { readonly onPut?: { readonly status: number; readonly body: Json }; readonly tamper?: (stored: Schema.JsonObject) => Schema.JsonObject } = {}) =>
+const makeStore = (
+  options: {
+    readonly onGet?: { readonly status: number; readonly body: Json }
+    readonly onPut?: { readonly status: number; readonly body: Json }
+    readonly tamper?: (stored: Schema.JsonObject) => Schema.JsonObject
+  } = {}
+) =>
   Effect.gen(function* () {
     const stored = yield* Ref.make<ReadonlyArray<Schema.JsonObject>>([])
     const log = yield* Ref.make<ReadonlyArray<string>>([])
@@ -64,7 +75,7 @@ const makeStore = (options: { readonly onPut?: { readonly status: number; readon
         yield* Ref.update(log, (all) => [...all, `${request.method} ${path}`])
         const answer = (status: number, json: Json) => HttpClientResponse.fromWeb(request, new Response(JSON.stringify(json), { status, headers: { "content-type": "application/json" } }))
         if (path !== `/applications/${target.applicationId}/guilds/${target.guildId}/commands`) return answer(404, { message: "404: Not Found", code: 0 })
-        if (request.method === "GET") return answer(200, yield* Ref.get(stored))
+        if (request.method === "GET") return options.onGet === undefined ? answer(200, yield* Ref.get(stored)) : answer(options.onGet.status, options.onGet.body)
         if (request.method !== "PUT" || request.body._tag !== "Uint8Array") return answer(405, { message: "405: Method Not Allowed", code: 0 })
         if (options.onPut !== undefined) return answer(options.onPut.status, options.onPut.body)
         const body = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.JsonObject)))(new TextDecoder().decode(request.body.body)).pipe(Effect.orDie)
@@ -186,6 +197,33 @@ describe("command registration", () => {
       expect((yield* reasonOf({ status: 400, body: { code: 30034, message: "Max number of daily application command creates has been reached (200)" } }))?.[0]).toBe("daily-command-limit")
       expect((yield* reasonOf({ status: 400, body: { code: 30032, message: "Maximum number of application commands reached" } }))?.[0]).toBe("command-rejected")
       expect((yield* reasonOf({ status: 503, body: { message: "unavailable", code: 0 } }))?.[0]).toBe("discord-unavailable")
+    }))
+
+  it.effect("only reads after registering a definition with false and empty values, which Discord drops (the recording)", () =>
+    Effect.gen(function* () {
+      const store = yield* makeStore()
+      const defaults = Command.chatInput({
+        name: "lab-defaults",
+        description: "d",
+        options: [
+          { type: "string", name: "text", description: "d", autocomplete: false, choices: [] },
+          { type: "integer", name: "count", description: "d", autocomplete: true },
+          { type: "channel", name: "where", description: "d", channelTypes: [] }
+        ]
+      })
+      expect((yield* syncWith(store, [defaults])).wrote).toBe(true)
+      expect(yield* syncWith(store, [defaults])).toStrictEqual({ wrote: false, differences: [] })
+    }))
+
+  it.effect("fails a 401 on the listing or on the overwrite with invalid-token, writing nothing after a refused listing", () =>
+    Effect.gen(function* () {
+      const unauthorized = { status: 401, body: { code: 0, message: "401: Unauthorized" } }
+      for (const options of [{ onGet: unauthorized }, { onPut: unauthorized }]) {
+        const store = yield* makeStore(options)
+        const failure = failureOf(yield* Effect.exit(syncWith(store, [base])))
+        expect(failure?._tag === "Fail" && failure.error instanceof StartupFailed ? failure.error.reason : undefined).toBe("invalid-token")
+        expect(yield* store.writes).toBe("onGet" in options ? 0 : 1)
+      }
     }))
 
   it.effect("dies on an answer the route does not expect (an unmapped code)", () =>

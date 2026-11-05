@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit, Fiber } from "effect"
 import { TestClock } from "effect/testing"
-import { make, routeKey } from "../../harness/Pacing.ts"
+import { defaults, make, maxRequestsPerSecond, routeKey } from "../../harness/Pacing.ts"
 
 /**
  * Global pacing and counters (DESIGN §5.11): request starts are spaced across all callers, writes are counted
@@ -67,10 +67,25 @@ describe("pacing", () => {
     })
   )
 
-  it.effect("refuses a rate above 5 per second", () =>
+  it.effect("refuses a rate above 10 per second, and defaults to 10 (§5.11)", () =>
     Effect.gen(function* () {
-      const exit = yield* Effect.exit(make({ requestsPerSecond: 6, invalidCap: 1500 }))
+      expect(maxRequestsPerSecond).toBe(10)
+      expect(defaults).toStrictEqual({ requestsPerSecond: 10, invalidCap: 1500 })
+      const exit = yield* Effect.exit(make({ requestsPerSecond: 11, invalidCap: 1500 }))
       expect(Exit.isFailure(exit)).toBe(true)
+      expect(Exit.isSuccess(yield* Effect.exit(make({ requestsPerSecond: 10, invalidCap: 1500 })))).toBe(true)
+    })
+  )
+
+  it.effect("spaces the default rate's request starts 100 ms apart", () =>
+    Effect.gen(function* () {
+      const pacing = yield* make(defaults)
+      yield* pacing.take("GET", url("/users/@me"))
+      const second = yield* Effect.forkChild(pacing.take("GET", url("/users/@me")))
+      yield* TestClock.adjust("99 millis")
+      expect(second.pollUnsafe()).toBeUndefined()
+      yield* TestClock.adjust("1 millis")
+      yield* Fiber.join(second)
     })
   )
 

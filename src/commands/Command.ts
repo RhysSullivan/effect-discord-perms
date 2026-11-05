@@ -209,10 +209,18 @@ interface ValueByType {
   readonly role: ResolvedRole
   readonly channel: ChannelKinds<never>[GuildChannelKind]
 }
+/**
+ * An option's value. Empty `choices` or `channelTypes` restrict nothing: Discord drops them (recorded before M9), so the
+ * value is the option type's (an empty choice list infers no value, `unknown`; an empty kind list none, `never`).
+ */
 type ValueOf<P extends ValueOption> = P extends { readonly choices: ReadonlyArray<{ readonly value: infer V }> }
-  ? V
+  ? unknown extends V
+    ? ValueByType[P["type"]]
+    : V
   : P extends { readonly type: "channel"; readonly channelTypes: ReadonlyArray<infer K extends GuildChannelKind> }
-    ? ChannelKinds<never>[K]
+    ? [K] extends [never]
+      ? ValueByType["channel"]
+      : ChannelKinds<never>[K]
     : ValueByType[P["type"]]
 type Simplify<T> = { readonly [K in keyof T]: T[K] } & {}
 

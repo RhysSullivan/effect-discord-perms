@@ -95,8 +95,12 @@ export const serverAssigned: ReadonlyArray<string> = ["id", "application_id", "g
  */
 export const commandDefaults: Readonly<Record<string, Schema.Json>> = { default_member_permissions: null, nsfw: false }
 
-/** The option fields at their defaults. Recorded: an option sent with `required: false` comes back without the field. */
-export const optionDefaults: Readonly<Record<string, Schema.Json>> = { required: false }
+/**
+ * The option fields at their defaults. Recorded: an option sent with `required: false` comes back without the field (M8),
+ * and so does one sent with `autocomplete: false`, `choices: []` or `channel_types: []` (before M9, the M8 verifier:
+ * `fixtures/commands-canonical.json`'s `lab-record-defaults`).
+ */
+export const optionDefaults: Readonly<Record<string, Schema.Json>> = { required: false, autocomplete: false, choices: [], channel_types: [] }
 
 /** The choice fields at their defaults. Recorded: a choice comes back exactly as sent. */
 export const choiceDefaults: Readonly<Record<string, Schema.Json>> = {}

@@ -6,7 +6,9 @@
  * dfx makes after a 429 (dfx re-executes through the base client).
  *
  * - **Bucket.** Request starts are spaced at least `1000 / requestsPerSecond` ms apart across identities
- *   (5 per second by default, configurable lower). dfx's per-route buckets still apply on top.
+ *   (10 per second by default, a fifth of one bot's global limit of 50, configurable lower). dfx's per-route buckets
+ *   still apply on top. (Before M9 the cap was 5; the orchestrator raised it, with the reads Converge and the wait
+ *   make concurrently, because the bucket set the run's pace: DESIGN §5.11.)
  * - **Writes.** Every request other than GET and HEAD is counted when it is sent, per route (method plus the
  *   path with snowflakes replaced by `{id}`). `harness:reset` reports this count; a second reset must report
  *   zero (§5.7).
@@ -65,14 +67,17 @@ export class Pacing extends Context.Service<Pacing, Interface>()("harness/Pacing
 
 /** Options for {@link layer}. */
 export interface Options {
-  /** At most 5; lower values pace the run more gently. */
+  /** At most {@link maxRequestsPerSecond}; lower values pace the run more gently. */
   readonly requestsPerSecond: number
   /** The run aborts when this many 401/403/429 responses have been seen. */
   readonly invalidCap: number
 }
 
+/** The cap of §5.11: 10 requests a second, a fifth of one bot's global limit (50/s), shared by all three identities. */
+export const maxRequestsPerSecond = 10
+
 /** The defaults of §5.11. */
-export const defaults: Options = { requestsPerSecond: 5, invalidCap: 1500 }
+export const defaults: Options = { requestsPerSecond: maxRequestsPerSecond, invalidCap: 1500 }
 
 const snowflakeSegment = /^\d{17,20}$/
 
@@ -100,11 +105,11 @@ interface Counters {
   readonly retries: ReadonlyMap<string, number>
 }
 
-/** Builds the pacing service. Fails fast (a defect) on options outside 0 < rps <= 5 or a cap below 1. */
+/** Builds the pacing service. Fails fast (a defect) on options outside 0 < rps <= {@link maxRequestsPerSecond} or a cap below 1. */
 export const make = (options: Options): Effect.Effect<Interface> =>
   Effect.gen(function* () {
-    if (!(options.requestsPerSecond > 0 && options.requestsPerSecond <= 5)) {
-      return yield* Effect.die(new Error(`requestsPerSecond must be in (0, 5], got ${options.requestsPerSecond}`))
+    if (!(options.requestsPerSecond > 0 && options.requestsPerSecond <= maxRequestsPerSecond)) {
+      return yield* Effect.die(new Error(`requestsPerSecond must be in (0, ${maxRequestsPerSecond}], got ${options.requestsPerSecond}`))
     }
     if (!(Number.isInteger(options.invalidCap) && options.invalidCap >= 1)) {
       return yield* Effect.die(new Error(`invalidCap must be a positive integer, got ${options.invalidCap}`))

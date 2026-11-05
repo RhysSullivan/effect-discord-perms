@@ -414,6 +414,13 @@ M6, the whole matrix:
   localizations from a GET without `with_localizations`). An option sent with `required: false` comes back without the
   field. Choices, ranges, lengths and `autocomplete` come back as sent. **`channel_types` is a set**: `[5, 0, 11]` came
   back as `[0, 11, 5]`, neither the order sent nor ascending, so the canonicaliser sorts it.
+- **Before M9 (the M8 verifier), open question 11 again: false and empty option values.** `record-commands` with a
+  fourth sample, `lab-record-defaults`: an option sent with `autocomplete: false`, `choices: []` or `channel_types: []`
+  comes back without the field, as `required: false` does, while `autocomplete: true` on an integer and a number option
+  comes back as sent. The first three samples' storage was unchanged, byte for byte. So `Canonical.optionDefaults` holds
+  all four defaults (a definition with them registered then compared different, and its check after writing would have
+  been a defect), and an empty restriction restricts nothing (Discord stores the option as unrestricted; the types now
+  say the same). 4 creates counted (60 in the ledger's 24 hours).
 - **M8, H-190 and H-191: names.** An uppercase letter in a command, subcommand or option name is refused with 400
   50035 `APPLICATION_COMMAND_INVALID_NAME` on that name's path; a space with `STRING_TYPE_REGEX` (the name regex, not
   the lowercase check); 33 characters with `BASE_TYPE_BAD_LENGTH`, while 32 are accepted, at the top level
@@ -1305,6 +1312,71 @@ the same commit.
   its setup seldom predicts a failure (four outcomes among 109 rule rows). Every row's outcomes are still checked; the
   bound now compares with the 431 matrix rows, which is what it meant (the replay, error-map and recompute checks
   already leave the rule rows out, M6).
+
+- **Before M9 (the M7 and M8 verifiers' fourteen minor findings, `/tmp/edp-minors-M7-M8.json`).**
+  - **M7's first five were already closed before M8** (commit `bb830c0`, "Before M8" above), and I checked each against
+    the code: the wait is the obfuscation check and can fire (`Wait.CapabilitiesIgnored`, `test/unit/obfuscation.test.ts`
+    drives the wait to it); the DM-intent halves are the escalated remainder Q-22 of `R-intent-guild-messages`,
+    `R-intent-reactions` and `R-intent-typing`; `bot.on` dies at registration, when the handler layer is built at startup,
+    naming the intents the running build lacks (`Bot.ts` `subscribe`, `test/unit/bot-events.test.ts`), which is the
+    "fail at startup with a defect message" option, cleaner than threading the intents through `BotRuntime`'s type (every
+    handle closes over the runtime); `R-transient-only-escapes` claims `UnhandledErrors<"state">`; and the codec's record
+    is read back from the encoded Identify text. Nothing more to change for them.
+  - **The 30-minute run target (M7's sixth, M8's fourteenth): the orchestrator's decision** (§5.11 updated). The
+    question M6 and M7 left open was decided by the orchestrator, not by me: §5.11's shared pacing cap rises from 5 to 10
+    requests a second (still a fifth of one bot's 50/s global limit, still shared across all three identities), and the
+    independent reads in Converge (`Converge.readView`: the roles, both members, the read lab channels, the scenario
+    thread and its members) and in the wait's read-back (`Converge.rereadWritten`, and the full re-read after a
+    difference, which is `readView`) now run together under that bucket, so the cap is used. The reason: the bucket, not
+    Discord's latency, set the pace, since about 9,270 requests at 5/s cost at least 31 minutes before any wait. dfx's
+    per-route buckets, the role-budget check, the invalid-request abort at 1,500 and the 60-minute abort are unchanged,
+    and no row was dropped or skipped. `test/unit/pacing.test.ts` holds the cap and default at 10 (11 refused, 100 ms
+    spacing); `test/unit/converge-reads.test.ts` holds a fake's answers until every expected read has started, so reads
+    made one after another never finish (a `concurrency: 1` mutant fails both tests). The timings before and after are
+    in the M9 milestone below.
+  - **Group names had no fail directive** (the M8 verifier): `test/types/fail/commands.ts` now has an uppercase (`Role`),
+    a spaced (`ro le`) and a 33-character group name, and `R-command-name-lowercase` and `R-command-name-spaces` claim
+    the new mentions (the length rule's mention was already claimed). The verifier's mutant (no
+    `& Invalid<NameMessage<N>>` on the group branch of `CheckSub`) now fails `bun run test:types` with 4 problems. The
+    three name rules' statements now say what is live: the command's and a subcommand's name; a group's name is held by
+    its fail directive (adding a live group-name side would change the committed table, and Discord checks a group's
+    name on the same nested `options.N.name` path as the subcommand side's).
+  - **`BotConfig`'s union had no fail fixture**: `{ token, commands: [] }` without a `guildId` is a fail directive
+    (`TS2322 guildId`: "Property 'guildId' is missing ..."), claimed by `R-registration-diff`, whose statement now says
+    commands are registered only in a guild (D18). The verifier's mutant (`commands` allowed without a guild) fails
+    `bun run test:types`.
+  - **Runtime mutants that survived the unit suite**, each now killed (each mutant applied, the named test failed, then
+    reverted): unwiring `budget.take` from `Identities.SharedHttpClient` (`identities.test.ts`: a guild-command POST
+    through `compose` is counted against a ledger one short of the cap, the next one dies before it is sent);
+    `Registration.listStored`'s 401 not `invalid-token` (`registration.test.ts`: a 401 on the listing, and on the
+    overwrite, is `invalid-token`); dropping `autocomplete` for integer and number options in `Canonical.toDiscord`
+    (`canonical.test.ts`, and the recording's fourth sample); ignoring `retry_after` in `Request.sendJson` and dropping
+    its `DeclaredRoute` (`send-json.test.ts`: a 400 and a coded 429 keep `retry_after`; a path the template does not
+    match is a route-check defect before it is sent).
+  - **R-registration-diff's live rows show one write per changed definition, not single-field detection** (§5.5
+    updated, the registry statement too): each mutation row syncs over the row before it, which differs in one or more
+    fields. Re-ordering the rows so each mutation follows a base sync would cost six more bulk overwrites under Discord's
+    bucket of about one PUT per 30 s (some three minutes a run) and change the committed table; single-field detection
+    stays held offline (`registration.test.ts`, eleven mutations; `canonical.test.ts`, every leaf of the recording).
+  - **R-options-typed's valid side compared canonically** (§5.5 updated): `typed-register-choices` now reads the stored
+    command and compares it with the definition as written, field by field (`CommandProbes.storedAsDefined`: an option of
+    each name, `required: true` exactly when defined, the same choices in order, the same channel types as a set through
+    `Snapshot.channelTypes`), never through `Canonical.ts`, so `Ignored` is observable. `test/unit/command-probes.test.ts`
+    accepts the recorded storage and refuses each changed field.
+  - **The canonicaliser's defaults beyond `required: false`** (live, `record-commands`; §4.14 and §2.8 updated): the
+    recording's fourth sample, `lab-record-defaults`, sends `autocomplete: false`, `choices: []` and `channel_types: []`
+    and `autocomplete: true` on an integer and a number option. Discord dropped all three false or empty values, exactly
+    as it drops `required: false`, and kept `autocomplete: true` ("Live findings"). `Canonical.optionDefaults` now holds
+    them, `canonical.test.ts`' table check and every-leaf property cover the sample (106 leaves), and the registration
+    fake stores as recorded (a definition with them registers once, then only reads). The same finding showed a type
+    error: empty `choices` made the option's value `unknown` and empty `channelTypes` made it `never`; both now give the
+    option type's value (`Command.ValueOf`, a pass fixture's `Equals`), for 4 more instantiations a 25-option command
+    (2,109.1, within the per-command baseline's 2%).
+  - **§4.4 item 5 now says registration runs only when `BotConfig.commands` is given** (LOG said so in M8; the design
+    did not).
+  - **`verify:live` prints the unmet Done criteria by question** (`rules.unmetDoneCriteria`): one line per Q with the
+    rule parts waiting on it, pointing at "Waiting for Rhys", whose checklists M9 rewrites around its `checklist`
+    command.
 
 ## Escalated rules
 

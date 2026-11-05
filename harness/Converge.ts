@@ -70,30 +70,65 @@ export interface KnownView {
 export const unknownView: KnownView = { roles: undefined, subject: undefined, target: undefined }
 
 /**
+ * Independent reads run together (§5.11, before M9): each still takes its slot of the shared bucket, so they start
+ * at most 10 a second, but no read waits for another's answer. A Converge or read-back makes at most a dozen (the
+ * roles, two members, the read lab channels, the thread and its members), so the fan-out is bounded by the input.
+ */
+const together = { concurrency: "unbounded" } as const
+
+/** The roles, as the harness reads them. */
+const readRoles = (ids: Ids, step: string) =>
+  Effect.flatMap(Effect.service(HarnessRest), (rest) => rest.listGuildRoles(ids.guildId).pipe(labStep(step), Effect.flatMap(decodeArray(Wire.Role, "listGuildRoles"))))
+
+/** A member (the subject or the target), as the harness reads it. */
+const readMember = (ids: Ids, user: UserId, step: string) =>
+  Effect.flatMap(Effect.service(HarnessRest), (rest) => rest.getGuildMember(ids.guildId, user).pipe(labStep(step), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember"))))
+
+/** A channel, as the harness reads it. */
+const readChannel = (id: string, step: string) =>
+  Effect.flatMap(Effect.service(HarnessRest), (rest) => rest.getChannel(id).pipe(labStep(step), Effect.flatMap(Wire.decode(Wire.Channel, "getChannel"))))
+
+/** The scenario thread and its member user IDs, read together. */
+const readThread = (threadId: string, prefix: string, name: string) =>
+  Effect.all(
+    {
+      thread: readChannel(threadId, `${prefix}: get ${name}`),
+      threadMembers: Effect.flatMap(Effect.service(HarnessRest), (rest) =>
+        rest.listThreadMembers(threadId).pipe(
+          labStep(`${prefix}: members of ${name}`),
+          Effect.flatMap(decodeArray(Wire.ThreadMember, "listThreadMembers")),
+          Effect.map((members): ReadonlyArray<string> => members.map((member) => member.user_id))
+        )
+      )
+    },
+    together
+  )
+
+/**
  * Reads the lab objects the desired state covers: the roles, the subject, the scenario thread and its members,
  * and the lab channels in `channels`, each with `getChannel`. The runner passes the channels whose overwrites
  * may differ from baseline (the scenario's, and those an earlier scenario or cleanup wrote); every other lab
  * channel is at baseline since the run's opening reset, because only Converge and cleanup write overwrites.
  * Reading single channels instead of the guild's channel list keeps clear of that route's rate limit (M3 live:
  * `GET /guilds/{id}/channels` answered 429 several times a run). The roles, the subject and the target are read
- * unless `known` holds them current. Reads only.
+ * unless `known` holds them current. Reads only, all of them together (independent of each other).
  */
 export const readView = (state: Desired, ids: Ids, channelNames: ReadonlySet<LabIds.ChannelName>, known: KnownView = unknownView): Effect.Effect<LabView, LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {
-    const rest = yield* HarnessRest
-    const roles = known.roles ?? (yield* rest.listGuildRoles(ids.guildId).pipe(labStep("converge: list roles"), Effect.flatMap(decodeArray(Wire.Role, "listGuildRoles"))))
-    const subject = known.subject ?? (yield* rest.getGuildMember(ids.guildId, ids.subjectUserId).pipe(labStep("converge: get the subject"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember"))))
-    const target = known.target ?? (yield* rest.getGuildMember(ids.guildId, ids.targetUserId).pipe(labStep("converge: get the target"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember"))))
-    const channels: Array<Wire.Channel> = []
-    for (const name of [...channelNames].sort()) {
-      const id = yield* lookup(ids.channels, name, name)
-      channels.push(yield* rest.getChannel(id).pipe(labStep(`converge: get ${name}`), Effect.flatMap(Wire.decode(Wire.Channel, "getChannel"))))
-    }
-    if (state.thread === undefined) return { roles, subject, target, channels, thread: undefined, threadMembers: undefined }
-    const threadId = yield* lookup(ids.channels, state.thread.name, state.thread.name)
-    const thread = yield* rest.getChannel(threadId).pipe(labStep(`converge: get ${state.thread.name}`), Effect.flatMap(Wire.decode(Wire.Channel, "getChannel")))
-    const members = yield* rest.listThreadMembers(threadId).pipe(labStep(`converge: members of ${state.thread.name}`), Effect.flatMap(decodeArray(Wire.ThreadMember, "listThreadMembers")))
-    return { roles, subject, target, channels, thread, threadMembers: members.map((member) => member.user_id) }
+    const channelIds = yield* Effect.forEach([...channelNames].sort(), (name) => Effect.map(lookup(ids.channels, name, name), (id) => [name, id] as const))
+    const threadId = state.thread === undefined ? undefined : yield* lookup(ids.channels, state.thread.name, state.thread.name)
+    const threadName = state.thread?.name ?? ""
+    const read = yield* Effect.all(
+      {
+        roles: known.roles === undefined ? readRoles(ids, "converge: list roles") : Effect.succeed(known.roles),
+        subject: known.subject === undefined ? readMember(ids, ids.subjectUserId, "converge: get the subject") : Effect.succeed(known.subject),
+        target: known.target === undefined ? readMember(ids, ids.targetUserId, "converge: get the target") : Effect.succeed(known.target),
+        channels: Effect.forEach(channelIds, ([name, id]) => readChannel(id, `converge: get ${name}`), together),
+        thread: threadId === undefined ? Effect.succeed(undefined) : readThread(threadId, "converge", threadName)
+      },
+      together
+    )
+    return { roles: read.roles, subject: read.subject, target: read.target, channels: read.channels, thread: read.thread?.thread, threadMembers: read.thread?.threadMembers }
   })
 
 /**
@@ -120,27 +155,24 @@ export const withThreadWritten = (written: Written): Written => ({ ...written, t
 
 /**
  * The harness's view after `written`: `view` with exactly the written parts read again (none when nothing was
- * written, so the read-back of a setup Converge found already in place makes no request). Reads only.
+ * written, so the read-back of a setup Converge found already in place makes no request). Reads only, all of them
+ * together.
  */
 export const rereadWritten = (state: Desired, ids: Ids, view: LabView, written: Written): Effect.Effect<LabView, LabRequestFailed, HarnessRest> =>
   Effect.gen(function* () {
-    const rest = yield* HarnessRest
-    const roles = written.roles ? yield* rest.listGuildRoles(ids.guildId).pipe(labStep("read-back: list roles"), Effect.flatMap(decodeArray(Wire.Role, "listGuildRoles"))) : view.roles
-    const subject = written.subject
-      ? yield* rest.getGuildMember(ids.guildId, ids.subjectUserId).pipe(labStep("read-back: get the subject"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
-      : view.subject
-    const target = written.target
-      ? yield* rest.getGuildMember(ids.guildId, ids.targetUserId).pipe(labStep("read-back: get the target"), Effect.flatMap(Wire.decode(Wire.Member, "getGuildMember")))
-      : view.target
-    const channels: Array<Wire.Channel> = []
-    for (const channel of view.channels) {
-      channels.push(written.channels.has(channel.id) ? yield* rest.getChannel(channel.id).pipe(labStep("read-back: get a lab channel"), Effect.flatMap(Wire.decode(Wire.Channel, "getChannel"))) : channel)
-    }
-    if (state.thread === undefined || !written.thread) return { roles, subject, target, channels, thread: view.thread, threadMembers: view.threadMembers }
-    const threadId = yield* lookup(ids.channels, state.thread.name, state.thread.name)
-    const thread = yield* rest.getChannel(threadId).pipe(labStep(`read-back: get ${state.thread.name}`), Effect.flatMap(Wire.decode(Wire.Channel, "getChannel")))
-    const members = yield* rest.listThreadMembers(threadId).pipe(labStep(`read-back: members of ${state.thread.name}`), Effect.flatMap(decodeArray(Wire.ThreadMember, "listThreadMembers")))
-    return { roles, subject, target, channels, thread, threadMembers: members.map((member) => member.user_id) }
+    const threadId = state.thread === undefined || !written.thread ? undefined : yield* lookup(ids.channels, state.thread.name, state.thread.name)
+    const threadName = state.thread?.name ?? ""
+    const read = yield* Effect.all(
+      {
+        roles: written.roles ? readRoles(ids, "read-back: list roles") : Effect.succeed(view.roles),
+        subject: written.subject ? readMember(ids, ids.subjectUserId, "read-back: get the subject") : Effect.succeed(view.subject),
+        target: written.target ? readMember(ids, ids.targetUserId, "read-back: get the target") : Effect.succeed(view.target),
+        channels: Effect.forEach(view.channels, (channel) => (written.channels.has(channel.id) ? readChannel(channel.id, "read-back: get a lab channel") : Effect.succeed(channel)), together),
+        thread: threadId === undefined ? Effect.succeed({ thread: view.thread, threadMembers: view.threadMembers }) : readThread(threadId, "read-back", threadName)
+      },
+      together
+    )
+    return { roles: read.roles, subject: read.subject, target: read.target, channels: read.channels, thread: read.thread.thread, threadMembers: read.thread.threadMembers }
   })
 
 const isTimedOut = (until: string | null | undefined, now: number): boolean => until !== undefined && until !== null && Date.parse(until) > now

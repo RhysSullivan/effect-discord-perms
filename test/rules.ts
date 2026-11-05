@@ -546,23 +546,23 @@ export const rules: ReadonlyArray<Rule> = [
   // command name (H-205), at the top level and nested ----
   commandPair(
     "R-command-name-lowercase",
-    "command, subcommand and group names are lowercase (a literal name that is not fails with its lowercase form)",
-    ['\'"ban"\'', "names must be lowercase: add"],
+    "command, subcommand and group names are lowercase (a literal name that is not fails with its lowercase form); live: the command's and a subcommand's name, and a group's name has its own fail directive",
+    ['\'"ban"\'', "names must be lowercase: add", "names must be lowercase: role"],
     "upper",
     { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "name", code: "APPLICATION_COMMAND_INVALID_NAME" }] },
     { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.name", code: "APPLICATION_COMMAND_INVALID_NAME" }] }
   ),
   commandPair(
     "R-command-name-spaces",
-    "command, subcommand and group names have no spaces",
-    ["names cannot contain spaces: ban user", "names cannot contain spaces: lab sub"],
+    "command, subcommand and group names have no spaces; live: the command's and a subcommand's name, and a group's name has its own fail directive",
+    ["names cannot contain spaces: ban user", "names cannot contain spaces: lab sub", "names cannot contain spaces: ro le"],
     "space",
     { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "name", code: "STRING_TYPE_REGEX" }] },
     { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "options.0.name", code: "STRING_TYPE_REGEX" }] }
   ),
   commandPair(
     "R-command-name-length",
-    "command, subcommand and group names are 1 to 32 characters (the typed sides register 32)",
+    "command, subcommand and group names are 1 to 32 characters (the typed sides register 32); live: the command's and a subcommand's name, and a group's name has its own fail directive",
     ["names are 1 to 32 characters"],
     "33",
     { _tag: "Rejected", status: 400, code: 50035, inner: [{ path: "name", code: "BASE_TYPE_BAD_LENGTH" }] },
@@ -643,10 +643,10 @@ export const rules: ReadonlyArray<Rule> = [
   {
     id: "R-registration-diff",
     statement:
-      "a bot registers only commands Command.* built (so every definition passed its checks), and registration writes only when a canonical field changed: once per change, never for the same definitions",
+      "a bot registers only commands Command.* built (so every definition passed its checks), only in a guild (BotConfig.commands needs a guildId, D18), and registration writes only when a canonical field changed: once per changed definition, never for the same definitions (live, each mutation row syncs over the row before it, so it shows one write per changed definition; that each single canonical field is detected is held offline, registration.test.ts and canonical.test.ts)",
     pass: "test/types/pass/commands.ts",
     fail: "test/types/fail/commands.ts",
-    claims: ["InvocationType"],
+    claims: ["InvocationType", "guildId"],
     live: {
       kind: "pair",
       setup: "commands",

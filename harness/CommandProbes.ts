@@ -7,7 +7,9 @@
  * - `typed-register-*` registers a definition that compiles through the library (`Registration.sync`): `Succeeded`, or
  *   Discord's refusal as a `Rejected` (which no expectation of a typed side accepts); `typed-register-choices` also
  *   reads the command back and observes `Applied options` when Discord stores its choices, required flags and channel
- *   types as defined (R-options-typed);
+ *   types as defined (R-options-typed), compared field by field with the definition as written ({@link storedAsDefined}),
+ *   never through the canonicaliser, whose equality `Registration.sync`'s check after writing already requires (the M8
+ *   verifier: comparing canonically could never observe `Ignored`);
  * - `typed-sync-identical` first makes sure {@link baseCommand} is registered, then syncs it again; `typed-sync-<field>`
  *   syncs a definition with one canonical field of the base changed, over whatever the row before registered (every
  *   mutation differs from every other definition the catalog registers, so the guild never already holds it; M8 live:
@@ -24,10 +26,11 @@
 import { Effect, Option, Schema } from "effect"
 import { SubjectRaw } from "../src/bot/Internals.ts"
 import type { StartupFailed } from "../src/bot/Startup.ts"
-import { canonical, sameJson, StoredCommand, toDiscord } from "../src/commands/Canonical.ts"
-import type { AnyChatInputCommand } from "../src/commands/Command.ts"
+import { StoredCommand } from "../src/commands/Canonical.ts"
+import type { AnyChatInputCommand, OptionLike } from "../src/commands/Command.ts"
 import * as Registration from "../src/commands/Registration.ts"
 import { DiscordResponse } from "../src/errors/Cause.ts"
+import { channelTypes } from "../src/state/Snapshot.ts"
 import type { Transient } from "../src/errors/Transient.ts"
 import { type Answered, sendJson } from "../src/rest/Request.ts"
 import { labStepDeadline } from "./Lab.ts"
@@ -114,6 +117,42 @@ const registered = (context: ProbeContext, commands: ReadonlyArray<AnyChatInputC
     outcome._tag === "Synced" ? { observation: succeeded, raw: Outcome.ok([]), created: [] } : { observation: rejected(outcome.response), raw: Outcome.rejected(outcome.response), created: [] }
   )
 
+const isObject = (value: Schema.Json | undefined): value is Schema.JsonObject => typeof value === "object" && value !== null && !Array.isArray(value)
+
+/** A stored choice list as `name=value` lines, in order; `[]` when absent. */
+const storedChoices = (option: Schema.JsonObject): ReadonlyArray<string> => {
+  const choices = option["choices"]
+  return Array.isArray(choices) ? choices.map((choice) => (isObject(choice) ? `${String(choice["name"])}=${JSON.stringify(choice["value"])}` : "?")) : []
+}
+
+/** A stored channel-type list as a sorted set of numbers; `[]` when absent. */
+const storedKinds = (option: Schema.JsonObject): ReadonlyArray<number> => {
+  const kinds = option["channel_types"]
+  return Array.isArray(kinds) ? [...new Set(kinds.filter((kind): kind is number => typeof kind === "number"))].sort((a, b) => a - b) : []
+}
+
+/**
+ * Whether `stored` (a command as Discord's GET returns it) holds each of `options` as written: an option of the same
+ * name, `required: true` exactly when the definition says so, the same choices (names and values, in order) and the
+ * same channel types as a set (Discord's documented numbers, `Snapshot.channelTypes`). Read straight from the stored
+ * JSON, independent of `Canonical.ts` (R-options-typed's valid side).
+ */
+export const storedAsDefined = (options: ReadonlyArray<OptionLike>, stored: Schema.JsonObject): boolean => {
+  const listed = stored["options"]
+  const storedOptions = Array.isArray(listed) ? listed.filter(isObject) : []
+  if (storedOptions.length !== options.length) return false
+  return options.every((option) => {
+    const match = storedOptions.find((candidate) => candidate["name"] === option.name)
+    if (match === undefined) return false
+    const required = "required" in option && option.required === true
+    if ((match["required"] === true) !== required) return false
+    const choices = "choices" in option && option.choices !== undefined ? option.choices.map((choice) => `${choice.name}=${JSON.stringify(choice.value)}`) : []
+    if (storedChoices(match).join("\n") !== choices.join("\n")) return false
+    const kinds = option.type === "channel" && option.channelTypes !== undefined ? [...new Set(option.channelTypes.map((kind) => channelTypes[kind]))].sort((a, b) => a - b) : []
+    return storedKinds(match).join() === kinds.join()
+  })
+}
+
 /** Runs the registration probe `probe` (see the module comment). */
 export const run = (probe: RegistrationProbe, context: ProbeContext): Effect.Effect<ProbeResult, Transient, SubjectRaw | Pacing> =>
   Effect.gen(function* () {
@@ -144,13 +183,12 @@ export const run = (probe: RegistrationProbe, context: ProbeContext): Effect.Eff
       case "typed-register-choices": {
         const outcome = yield* registered(context, [baseCommand])
         if (outcome.observation._tag !== "Succeeded") return outcome
-        // the stored options, read back and compared canonically with the definition's (R-options-typed)
+        // the stored options, read back and compared field by field with the definition as written (R-options-typed)
         const listed = yield* sendJson(subject, Registration.route, "GET", Registration.pathOf(target), undefined, deadline)
         if (listed._tag === "Rejected") return yield* Effect.die(new Error(`probe: the registered commands could not be read: ${listed.response.status} ${listed.response.code}`))
         const stored = yield* Schema.decodeUnknownEffect(Schema.Array(StoredCommand))(listed.body).pipe(Effect.orDie)
         const mine = Option.fromUndefinedOr(stored.find((command) => command["name"] === labCommandName))
-        const options = (command: Schema.JsonObject): Schema.Json => canonical(command)["options"] ?? null
-        const applied = Option.isSome(mine) && sameJson(options(mine.value), options(toDiscord(baseCommand.definition)))
+        const applied = Option.isSome(mine) && storedAsDefined(baseCommand.definition.options, mine.value)
         return { observation: { _tag: applied ? "Applied" : "Ignored", field: "options" }, raw: Outcome.ok([]), created: [] }
       }
     }

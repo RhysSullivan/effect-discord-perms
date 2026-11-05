@@ -51,6 +51,18 @@ expectTypeOf<InvocationOf<typeof kinds>>().toEqualTypeOf<{
   }
 }>()
 
+// empty choices or channel kinds restrict nothing (Discord drops them, recorded before M9): the option type's value
+export const empty = Command.chatInput({
+  name: "empty",
+  description: "Empty restrictions",
+  options: [
+    { type: "string", name: "text", description: "d", required: true, choices: [], autocomplete: false },
+    { type: "integer", name: "count", description: "d", choices: [] },
+    { type: "channel", name: "where", description: "d", channelTypes: [] }
+  ]
+})
+expectTypeOf<InvocationOf<typeof empty>>().toEqualTypeOf<{ readonly options: { readonly text: string; readonly count?: number; readonly where?: GuildChannel } }>()
+
 // a command without options has an empty options object
 export const ping = Command.chatInput({ name: "ping", description: "Ping" })
 expectTypeOf<InvocationOf<typeof ping>>().toEqualTypeOf<{ readonly options: {} }>()

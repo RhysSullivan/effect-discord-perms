@@ -306,6 +306,98 @@
         "guild_id": "{guild.id}",
         "nsfw": false
       }
+    },
+    {
+      "sent": {
+        "type": 1,
+        "name": "lab-record-defaults",
+        "description": "Perms Lab: false and empty values",
+        "options": [
+          {
+            "type": 3,
+            "name": "text",
+            "description": "a string",
+            "choices": [],
+            "autocomplete": false
+          },
+          {
+            "type": 4,
+            "name": "count",
+            "description": "an integer",
+            "autocomplete": true
+          },
+          {
+            "type": 10,
+            "name": "ratio",
+            "description": "a number",
+            "choices": [],
+            "autocomplete": false
+          },
+          {
+            "type": 4,
+            "name": "pick",
+            "description": "an integer",
+            "autocomplete": false
+          },
+          {
+            "type": 10,
+            "name": "share",
+            "description": "a number",
+            "autocomplete": true
+          },
+          {
+            "type": 7,
+            "name": "where",
+            "description": "a channel",
+            "channel_types": []
+          }
+        ]
+      },
+      "stored": {
+        "id": "{command.id}",
+        "application_id": "{application.id}",
+        "version": "{version}",
+        "default_member_permissions": null,
+        "type": 1,
+        "name": "lab-record-defaults",
+        "description": "Perms Lab: false and empty values",
+        "guild_id": "{guild.id}",
+        "options": [
+          {
+            "type": 3,
+            "name": "text",
+            "description": "a string"
+          },
+          {
+            "type": 4,
+            "name": "count",
+            "description": "an integer",
+            "autocomplete": true
+          },
+          {
+            "type": 10,
+            "name": "ratio",
+            "description": "a number"
+          },
+          {
+            "type": 4,
+            "name": "pick",
+            "description": "an integer"
+          },
+          {
+            "type": 10,
+            "name": "share",
+            "description": "a number",
+            "autocomplete": true
+          },
+          {
+            "type": 7,
+            "name": "where",
+            "description": "a channel"
+          }
+        ],
+        "nsfw": false
+      }
     }
   ]
 }

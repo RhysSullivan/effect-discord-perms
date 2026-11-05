@@ -337,3 +337,13 @@ export const escalatedRules = (rules: ReadonlyArray<Rule>): ReadonlyArray<Escala
     if (rule.remainder?.kind === "escalated") out.push({ rule: rule.id, part: "remainder", question: rule.remainder.question })
     return out
   })
+
+/**
+ * The unmet Done criteria `verify:live` prints, one line per DESIGN §8 question in question order: the question and the
+ * rule parts that wait on it. LOG.md "Waiting for Rhys" holds each question's click-through checklist.
+ */
+export const unmetDoneCriteria = (escalations: ReadonlyArray<Escalation>): ReadonlyArray<string> => {
+  const byQuestion = new Map<string, Array<string>>()
+  for (const entry of escalations) byQuestion.set(entry.question, [...(byQuestion.get(entry.question) ?? []), `${entry.rule} (${entry.part})`])
+  return [...byQuestion.entries()].sort(([a], [b]) => Number(a.slice(2)) - Number(b.slice(2))).map(([question, parts]) => `${question}: ${parts.join(", ")}`)
+}
