@@ -2494,3 +2494,57 @@ Two major findings and six minor ones, each fixed (commits `812d493`, `79bca42`,
     undefined) return` (no `!posted`) fails the first;
   - the checklist's extra gateway session: the risk is now under "Waiting for Rhys" (the checklist item's "Unverified
     path"), with what a `/checklist` that gets no answer would mean and what the agent should then do.
+- **The reference bot** (`examples/reference-bot/`, commits `c8ba698`, `9154f96`, `ed86474`): `bot.ts`, a poll bot written
+  as a user writes one, importing only the package (`effect-discord-perms`, through the package's new `exports`): `!ping`
+  answered with `send` on `event.channel` (a bot's or its own ignored), READY logged, `/poll question [where]` with
+  `Permissions.require(where ?? ix.channel, ["SendMessages", "EmbedLinks"])` before it opens the poll, the poll posted
+  with Yes and No buttons whose `custom_id`s are the `vote` route, and a click (`Interactions.component`, "update" mode)
+  updating the poll message's tally from an in-memory `Polls` service; `main.ts`, the entry point, reading the subject's
+  token through `Credentials.layer` (the live lock for the bot's lifetime) and registering `/poll` in the lab guild. No
+  `orDie`, `die`, `dieMessage` or `orDieWith` anywhere in the directory. It was not run live: its requests go through its
+  own `Bot.layer`, not the harness's guarded shared client, so a run would bypass the lab guard (§5.6); README.md and
+  `main.ts` say it is run by hand only.
+- **What its test found.** `test/unit/reference-bot.test.ts` drives the bot through the real bot build (`Bot.layerWith`)
+  over a fake Discord and the fake gateway: `/poll` registered (GET, PUT, GET), a human's `!ping` answered once with
+  `{ content: "pong", allowed_mentions: { parse: [] } }` and a bot's ignored, a poll posted with its embed and the two
+  route IDs and answered privately, three clicks tallied on the poll message (a vote, another voter's, a changed vote),
+  and the refusals answered: no EmbedLinks in `app_permissions` (nothing posted), a question over the embed title's
+  256 characters, a closed poll's button. The first draft caught `"payload"` before `["permission", "state"]`, and the
+  test showed it telling a user without EmbedLinks that the question was too long: `MissingEmbedLinks` is in both
+  categories, so the order of the catches decides the answer (§2.11 notes it). Mutation checks (each applied, the test
+  failed, reverted): answering bots' `!ping`, the catches in that order, a changed vote ignored.
+- **Types and hovers.** `test/types/pass/reference-bot.ts`: each registration is exactly `Effect<void, never, BotRuntime
+  | Scope>` or with `Polls`, `Handlers` a `Layer<never, never, Polls | BotRuntime>`, `/poll`'s invocation `{ question:
+  string; where?: TextChannel | AnnouncementChannel }`, `layer` returns `Layer<never, StartupFailed | ConfigError>` and
+  `Main` is `Layer<never, StartupFailed | ConfigError | LockHeld | PlatformError>`. `test/hover/reference-bot.ts`: five
+  markers (the command as its invocation, two registrations, `layer`, `Main`), all named types. The other six hover
+  files' snapshots were unchanged by M10 (`--update` wrote only the new one).
+- **The budget** ("Design deviations", M10; §5.4): the baseline's reference bot row (12,541 types, 28,926
+  instantiations, 36 ms) and library row (72,904, 264,000, 351 ms); the per-command row's baseline kept at M9's values.
+- **The final fresh-process run.** `bun run verify:offline` exited 0 on `ed86474` (gen:errors up to date; typecheck; 1,566
+  tests in 60 files; test:types 13 pass and 13 fail fixtures, 110 diagnostics, largest gated 617 characters; hover 7
+  files, 27 markers; `rules ok 70 rule(s) (55 live pair, 0 escalated, 5 pure-typing, 10 other not-live), 13 fail
+  fixture(s), 134 live sides checked against the table, 5 event(s) with a live intent pair, flag coverage over 433
+  matrix row(s)`; budget ok on all three rows). Then `bun run verify:live` (`run --write --compare`) in a fresh process
+  on the same commit. A first attempt stopped before any scenario on the role budget (`84 role edits left ... start
+  again in about 6 minutes`; its reset and provisioning wrote nothing); after the refill, a second fresh process
+  **exited 0**: role budget 92 left (88 needed), 542 scenarios in **2,438 s**, 9,277 requests, 2,746 writes, 604 invalid
+  (401/403/429), 429s retried by dfx on 10 reactions, 3 bulk deletes, one channel edit, two command POSTs and two command
+  PUTs, no lab step retried after a 5xx, oracle available, **0 mismatches**, `compare: identical to the previous table`
+  (it wrote the same bytes, `6199bf0d...b164b6`, 669,042, the table M8 first wrote), `run ok`; the closing reset wrote 3
+  (one channel PATCH, one role PATCH, one guild-commands PUT). It printed the six unmet Done
+  criteria by question (Q-17, Q-18, Q-22). The lock was gone afterwards; the create ledger held 74 creates in its 24
+  hours. This is also the independent confirmation of M9's pacing run the M9 verifier asked for: against M9's 2,570 s
+  and 600 invalid, 2,438 s and 604 (the four more are the 429s on bulk deletes, which dfx waited out).
+- **Exit checks.** `grep -nE "Effect\.(die|dieMessage|orDie|orDieWith)" examples/reference-bot` prints nothing and exits
+  1 (this shell's `grep` searches a directory recursively; `command grep -rnE` the same); `bun run budget` is ok
+  against the committed baseline; `bun run verify:offline` and the fresh-process `bun run verify:live` (above) both
+  exited 0.
+- **Done criteria (PROMPT.md) after M10.** Met: `verify:offline` green; `verify:live` with zero mismatches across the
+  matrix, and consecutive fresh processes writing identical tables (M8's runs W, A and B, M9's validation run, and this
+  one); the reference bot in `examples/` with no `orDie`, within budget; README.md with the guarantee; this file's live
+  findings and the phase-3 checklist. Not met by an agent, by design or by decision, each recorded: the six escalated
+  remainders (Q-17, Q-18, Q-22, "Escalated rules" and "Waiting for Rhys"), which need a human's DM, command invocation
+  and clicks, with the eight phase-3 interaction rules (`phase-3-offline`) that the same checklist shows live; the
+  external emoji and sticker rules (`needs-second-guild`); the `@everyone` valid side and successful kicks and bans
+  (`forbidden-action`, resolver only); and the media channel kind, which Perms Lab cannot create.
