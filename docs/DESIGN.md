@@ -2366,7 +2366,9 @@ const ch: MessageChannel
   swapped (1,257), shared aliases for the payload-derived terms (about 1,000) and one shared send overload (about
   300). The hover snapshots and the fail fixtures' diagnostics are unchanged. The margin under the Types ceiling is
   thin (380 types): the next growth of the library's types will meet it, and the regression gates (+2%) are looser
-  than that margin.
+  than that margin. (Final cleanup, measured, LOG.md: a sixth one-option command with a handler, one new four-option
+  command with a button route, or four more error classes in the library cross it; the sixth command also crosses
+  the +2% Instantiations gate, which binds before the 250,000 ceiling.)
 - (M10, reverted) M10 first compiled the bot against declarations emitted into a git-ignored directory, mapped with
   `paths` (12,541 types, 28,926 instantiations), and gated the library's own check by regression only. No consumer
   of this package gets those declarations (nothing builds or ships them), so that measured less than any user pays,

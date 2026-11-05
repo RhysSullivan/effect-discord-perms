@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, References, Ref, Schema, Tracer } from "effect"
+import { Deferred, Duration, Effect, References, Ref, Schema, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { Command } from "../../src/commands/Command.ts"
 import { ComponentRoute } from "../../src/components/CustomId.ts"
@@ -322,23 +322,34 @@ describe("the interaction runner", () => {
     )
   )
 
-  it.effect("posts nothing for a manual handler slower than Discord's 3 s; its late answer, refused with 10062, is logged as InteractionExpired", () =>
+  it.effect("manual: Discord takes a reply within its 3 s and refuses a slower handler's with 10062; the runner posts nothing before the handler answers and logs the refusal as InteractionExpired", () =>
     withRunner(
       ({ publish, sent, logs }) =>
         Effect.gen(function* () {
-          const gate = yield* Deferred.make<void>()
-          yield* Interactions.command(ping, "manual", (ix) => Effect.andThen(Deferred.await(gate), ix.reply({ content: "too late" })))
+          const takes = yield* Ref.make(Duration.seconds(1))
+          yield* Interactions.command(ping, "manual", (ix) => Effect.andThen(Effect.flatMap(Ref.get(takes), (duration) => Effect.sleep(duration)), ix.reply({ content: "pong" })))
+          const refused = Effect.map(logs, (lines) => lines.filter((line) => line.includes("was refused")))
+          // within the window: the reply is the initial response, and Discord takes it
           yield* publish(invoke)
           yield* settle
-          yield* TestClock.adjust("4 seconds")
+          yield* TestClock.adjust("1 second")
           yield* settle
-          expect(yield* sent).toEqual([])
-          yield* Deferred.succeed(gate, undefined)
+          expect(yield* sent).toEqual([{ method: "POST", path: callback, body: { type: 4, data: { allowed_mentions: { parse: [] }, content: "pong" } } }])
+          expect(yield* refused).toEqual([])
+          // slower than 3 s: no deferral while the handler runs, then its reply arrives after the window and is refused
+          yield* Ref.set(takes, Duration.seconds(4))
+          yield* publish(invoke)
+          yield* settle
+          yield* TestClock.adjust("3 seconds")
           yield* settle
           expect(only(yield* sent)).toEqual([`POST ${callback}`])
-          expect((yield* logs).filter((line) => line.includes("was refused"))).toEqual(["Warn: discord.interaction command ping: the reply was refused: InteractionExpired (10062)"])
+          yield* TestClock.adjust("1 second")
+          yield* settle
+          expect(only(yield* sent)).toEqual([`POST ${callback}`, `POST ${callback}`])
+          expect(yield* refused).toEqual(["Warn: discord.interaction command ping: the reply was refused: InteractionExpired (10062)"])
         }),
-      (method, path) => (method === "POST" && path === callback ? { status: 404, body: { code: 10062, message: "Unknown interaction" } } : undefined)
+      // Discord's window for the initial response: a callback 3 s or more after the interaction is refused
+      (method, path, ageMs) => (method === "POST" && path === callback && ageMs >= 3000 ? { status: 404, body: { code: 10062, message: "Unknown interaction" } } : undefined)
     )
   )
 

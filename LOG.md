@@ -1535,7 +1535,10 @@ the same commit.
   `createThread`: no change or worse), a named interface for `createPost`'s argument (20 types), taking `AllErrors`
   out of the barrel (143 types in the bot's program; an explicit union saved nothing), and a category check inside the mixin
   (`withCategory` comparing its list with a declared brand: 40 to 150 types a class more, and cascading diagnostics).
-  The margin under the Types ceiling is 380 types: the next growth of the library's types will meet it.
+  The margin under the Types ceiling is 380 types: the next growth of the library's types will meet it. Measured
+  in the final cleanup (M10's last section, "How thin the Types margin is"): five more one-option commands with a
+  handler each fit and a sixth does not; one new four-option command with its handler and one button route cross it;
+  four more error classes in the library cross it.
 - **M10, after the second M10 verifier: the budget's guard checks the import's resolution** (§5.4 updated). The second
   verifier showed that the guard (the bot's program includes `src/index.ts`) would pass a `paths` mapping of the
   package to anything else whenever another file imports `src/index.ts`. `consumerResolutionProblem`
@@ -2731,3 +2734,69 @@ Two major findings and six minor ones, each fixed (commits `812d493`, `79bca42`,
     the eight phase-3 interaction rules the same checklist shows live; the external emoji and sticker rules
     (`needs-second-guild`); the `@everyone` valid side and successful kicks and bans (`forbidden-action`, resolver
     only); and the media channel kind, which Perms Lab cannot create.
+
+#### Final cleanup: the M9 and M10 verifiers' minor findings
+
+Six minor findings were left; none needed a change under `src/` or `harness/`, so no live run was needed.
+
+- **M9: modal routing by route prefix, `ChecklistRun.isDone` per item, a refused callback's continuation.** The
+  tests were added in `e7787d6` (M10's first entry above). `69989f0` changed `interactions/Runner.ts` after them, so
+  each verifier's mutant was applied again on `37173a7` and failed its test, then was reverted:
+  - without `if (routeNameOf(data.custom_id) !== route.name) return` in `modal`: 1 of 1,006 unit tests fails (the
+    two-route modal test);
+  - `isDone` with `Checklist.itemList.slice(1)`, `.slice(0, -1)` or `.filter((_, i) => i !== 5)` in place of
+    `Checklist.itemList`: each fails the per-item `isDone` test (`slice(0, -1)` also fails the simulated sitting);
+  - `if (plan.continuation === undefined) return` (no `!posted`): 1 of 1,006 fails (the refused-callback test).
+- **M9: "manual: a handler slower than 3 s fails with `InteractionExpired`, logged by the runner" (§4.14).** The
+  code behaves as designed. The test from `e7787d6` used a fake that refused every callback, so it showed that the
+  runner posts nothing and logs a refusal, but not that the refusal comes from the 3 s window. The fake of
+  `test/support/interactions.ts` now gives `answer` the interaction's age (the `Clock` time since the last
+  `publish`), and the test answers as Discord does: a callback 3 s or more after the interaction gets 404 10062. A
+  "manual" handler that takes 1 s is answered (one callback, the reply's body, no refusal); one that takes 4 s posts
+  nothing by 3 s, posts its reply at 4 s, and the runner logs exactly `Warn: discord.interaction command ping: the
+  reply was refused: InteractionExpired (10062)`. Mutation checks (each applied, failed, reverted): the runner
+  auto-deferring in "manual" (a 5 at 2.5 s), dropping a manual handler's reply after 3 s, not logging a refused
+  callback, and 10062 missing from the expired codes each fail it; so do the fake answering every callback (age
+  always large, the old fake) and no callback (age always 0).
+- **M9: the checklist's extra gateway session.** Already under "Waiting for Rhys" (the checklist item's "Unverified
+  path", from `e7787d6`): what a `/checklist` with no answer would mean, and what the agent should do then. Closed.
+- **M10: the reference bot's doc comment** said the bot was over the Types and Instantiations ceilings. It now says
+  the bot is within the ceilings, with almost no room under Types (`examples/reference-bot/bot.ts`). A grep of
+  `examples/`, `src/`, `scripts/`, `harness/`, `test/`, README.md and DESIGN.md finds no other stale over-budget line.
+- **M10: how thin the Types margin is.** Measured on `37173a7`. Each change was put into a copy of `bot.ts` before
+  `Handlers`, its handler added to `Handlers` and its command to `commands: [poll, ...]`, compiled with the budget's
+  own flags (`tsc -p examples/reference-bot/tsconfig.json --extendedDiagnostics --checkers 1`, no diagnostics), and
+  reverted; the error classes went into `src/errors/State.ts`, exported through the barrel and used nowhere. The bot
+  is at 59,620 types and 178,499 instantiations; the Types ceiling is 60,000, and the Instantiations limit that binds
+  first is the +2% gate (182,068), not the 250,000 ceiling.
+
+  | Change (each alone) | Types | Instantiations |
+  | --- | --- | --- |
+  | a `bot.on("MESSAGE_CREATE")` handler that only logs | 59,623 (+3) | 178,539 |
+  | one more option (boolean) on `/poll` | 59,654 (+34) | 178,697 |
+  | a one-option command, registered, no handler | 59,674 (+54) | 178,705 |
+  | a `bot.on` handler that sends an embed, catching permission, state and payload | 59,691 (+71) | 179,236 |
+  | a component route with an "update" handler | 59,700 (+80) | 178,894 |
+  | in the library, one more error class | 59,716 (+96) | 178,851 |
+  | a one-option command with an ephemeral handler that replies, catching payload | 59,733 (+113) | 179,328 |
+  | a second command of `/poll`'s shape, with a copy of its handler | 59,784 (+164) | 179,962 |
+  | a four-option command (string, channel, boolean, integer) whose handler requires, sends an embed or content, replies, and catches two categories | 59,927 (+307) | 181,200 |
+
+  Costs do not add up: shapes the program already has are cheaper (the copy of `/poll` costs about half the
+  four-option command). What crosses, each confirmed with `bun run budget` where named:
+  - one-option commands with a handler each: 1 to 5 give 59,735, 59,801, 59,867, 59,945 and **59,999 (`budget ok`)**;
+    **6 give 60,093**, `budget FAIL: types 60093 exceed the ceiling 60000` and `reference bot instantiations 178499 ->
+    182398 (+2.2%, tolerance 2%)`, so the sixth crosses both limits;
+  - the four-option command with the component route: **60,007**, `budget FAIL: types 60007 exceed the ceiling
+    60000`; with the small command instead, 60,033 (and 182,011 instantiations, 57 under the gate); with the embed
+    `bot.on` handler instead, 59,998 (`budget ok`, 2 types to spare); with the extra `/poll` option, 59,960;
+  - in the library, error classes: three give 59,908, **four give 60,004**.
+
+  So the budget is in practice used up: the next feature of any size in the bot (a new command with a button route),
+  or four error classes in the library, fails it. The next change should start with a cut (the method is under
+  "After the second M10 verifier" above), or Rhys decides on the ceilings; neither was done here.
+- **Exit checks.** `bun run verify:offline` exits 0: gen:errors up to date; typecheck; 1,568 tests in 60 files;
+  test:types 13 pass and 13 fail fixtures, 110 diagnostics, largest gated 617 characters; hover 7 files, 27 markers;
+  `rules ok 70 rule(s) (55 live pair, 0 escalated, 5 pure-typing, 10 other not-live)`; budget: the reference bot at
+  59,620 types and 178,499 instantiations, per command 381.8 types and 2,165.1 instantiations, `budget ok`. No live
+  run: the changes are a test, its fake, a doc comment, LOG.md and DESIGN.md; none is code a live row runs.

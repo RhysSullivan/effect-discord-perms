@@ -5,7 +5,7 @@
  */
 import { DiscordConfig, DiscordRESTMemoryLive } from "dfx"
 import { DiscordREST } from "dfx/DiscordREST"
-import { Effect, Layer, Logger, Redacted, Ref, References, Schema, type Scope } from "effect"
+import { Clock, Effect, Layer, Logger, Redacted, Ref, References, Schema, type Scope } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { BotRuntime } from "../../src/bot/Runtime.ts"
@@ -36,21 +36,24 @@ const messageBody = { id: "500000000000000001", channel_id: textId, type: 0, aut
 
 /**
  * Runs `body` with a bot runtime over a recording fake of Discord (the callback answers 204, the webhook routes a
- * message); `answer` may override an answer by method and path.
+ * message); `answer` may override an answer by method, path and the interaction's age: the milliseconds since the
+ * last `publish`, by `Clock` (so `TestClock` drives it), which is what Discord's 3 s window for the initial response
+ * is measured from.
  */
 export const withRunner = <A, E>(
   body: (world: { readonly publish: (data: unknown) => Effect.Effect<void>; readonly sent: Effect.Effect<ReadonlyArray<Sent>>; readonly logs: Effect.Effect<ReadonlyArray<string>> }) => Effect.Effect<A, E, BotRuntime | Scope.Scope>,
-  answer: (method: string, path: string) => { readonly status: number; readonly body: Schema.Json } | undefined = () => undefined
+  answer: (method: string, path: string, ageMs: number) => { readonly status: number; readonly body: Schema.Json } | undefined = () => undefined
 ) =>
   Effect.gen(function* () {
     const sent = yield* Ref.make<ReadonlyArray<Sent>>([])
     const logs = yield* Ref.make<ReadonlyArray<string>>([])
+    const publishedAt = yield* Ref.make(yield* Clock.currentTimeMillis)
     const client = HttpClient.make((request) =>
       Effect.gen(function* () {
         const path = new URL(request.url).pathname.replace(/^\/api\/v\d+/, "")
         const text = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : undefined
         yield* Ref.update(sent, (all) => [...all, { method: request.method, path, body: text === undefined ? undefined : decodeJson(text) }])
-        const given = answer(request.method, path)
+        const given = answer(request.method, path, (yield* Clock.currentTimeMillis) - (yield* Ref.get(publishedAt)))
         if (given !== undefined) return HttpClientResponse.fromWeb(request, new Response(JSON.stringify(given.body), { status: given.status, headers: { "content-type": "application/json" } }))
         if (path.endsWith("/callback") || request.method === "DELETE") return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }))
         return HttpClientResponse.fromWeb(request, new Response(JSON.stringify(messageBody), { status: 200, headers: { "content-type": "application/json" } }))
@@ -77,7 +80,11 @@ export const withRunner = <A, E>(
         events: { subscribe: dispatches.subscribe }
       })
       return yield* Effect.scoped(
-        body({ publish: (data) => dispatches.publish({ event: "INTERACTION_CREATE", data }), sent: Ref.get(sent), logs: Ref.get(logs) }).pipe(Effect.provideService(BotRuntime, runtime))
+        body({
+          publish: (data) => Effect.andThen(Effect.flatMap(Clock.currentTimeMillis, (now) => Ref.set(publishedAt, now)), dispatches.publish({ event: "INTERACTION_CREATE", data })),
+          sent: Ref.get(sent),
+          logs: Ref.get(logs)
+        }).pipe(Effect.provideService(BotRuntime, runtime))
       )
     }).pipe(Effect.provide(Layer.mergeAll(rest, Dispatches.layer)), Effect.provide(Logger.layer([collector])))
   })
