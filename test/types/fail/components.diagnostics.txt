@@ -1,30 +1,55 @@
-L13:40 TS2322
+L25:40 TS2322
 Type 'InteractiveButton' is not assignable to type 'InteractiveButton & Invalid<"an action row holds 1 to 5 buttons">'.
   Property '[InvalidId]' is missing in type 'InteractiveButton' but required in type 'Invalid<"an action row holds 1 to 5 buttons">'.
 
-L22:3 TS2322
+L34:3 TS2322
 Type '{ kind: "button"; style: "link"; label: "Docs"; url: "https://example.com/docs"; }' is not assignable to type '{ readonly kind: "button"; readonly style: "link"; readonly label: "Docs"; readonly url: "https://example.com/docs"; } & Invalid<"an action row holds 1 to 5 buttons">'.
   Property '[InvalidId]' is missing in type '{ kind: "button"; style: "link"; label: "Docs"; url: "https://example.com/docs"; }' but required in type 'Invalid<"an action row holds 1 to 5 buttons">'.
 
-L27:27 TS2322
+L39:27 TS2322
 Type 'StringSelect' is not assignable to type 'StringSelect & Invalid<"a select menu must be alone in its row">'.
   Property '[InvalidId]' is missing in type 'StringSelect' but required in type 'Invalid<"a select menu must be alone in its row">'.
 
-L27:35 TS2322
+L39:35 TS2322
 Type 'InteractiveButton' is not assignable to type 'InteractiveButton & Invalid<"a select menu must be alone in its row">'.
   Property '[InvalidId]' is missing in type 'InteractiveButton' but required in type 'Invalid<"a select menu must be alone in its row">'.
 
-L30:108 TS2322
+L42:108 TS2322
 Type 'string & Brand<"CustomId">' is not assignable to type 'string & Brand<"CustomId"> & Invalid<"link buttons have no customId">'.
   Type 'string & Brand<"CustomId">' is not assignable to type 'Invalid<"link buttons have no customId">'.
     Property '[InvalidId]' is missing in type 'String & Brand<"CustomId">' but required in type 'Invalid<"link buttons have no customId">'.
 
-L33:85 TS2322
+L45:85 TS2322
 Type '"Buy"' is not assignable to type '"Buy" & Invalid<"premium buttons have no label">'.
   Type 'string' is not assignable to type 'Invalid<"premium buttons have no label">'.
 
-L36:77 TS2353
+L48:77 TS2353
 Object literal may only specify known properties, and 'customId' does not exist in type 'LinkButtonInput'.
 
-L39:52 TS2353
+L51:52 TS2353
 Object literal may only specify known properties, and 'label' does not exist in type 'PremiumButtonInput'.
+
+L54:87 TS2322
+Type 'string & Brand<"CustomId">' is not assignable to type 'string & Brand<"CustomId"> & Invalid<"premium buttons have no customId">'.
+  Type 'string & Brand<"CustomId">' is not assignable to type 'Invalid<"premium buttons have no customId">'.
+    Property '[InvalidId]' is missing in type 'String & Brand<"CustomId">' but required in type 'Invalid<"premium buttons have no customId">'.
+
+L57:99 TS2322
+Type '"https://example.com"' is not assignable to type '"https://example.com" & Invalid<"only link buttons have a url">'.
+  Type 'string' is not assignable to type 'Invalid<"only link buttons have a url">'.
+
+L60:26 TS2345
+Argument of type '[]' is not assignable to parameter of type 'readonly [] & Invalid<"an action row holds 1 to 5 buttons, or one select menu">'.
+  Property '[InvalidId]' is missing in type '[]' but required in type 'Invalid<"an action row holds 1 to 5 buttons, or one select menu">'.
+
+L63:29 TS2345
+Argument of type 'readonly InteractiveButton[]' is not assignable to parameter of type 'readonly InteractiveButton[] & Invalid<"row takes its elements as a literal list: row([...])">'.
+  Property '[InvalidId]' is missing in type 'readonly InteractiveButton[]' but required in type 'Invalid<"row takes its elements as a literal list: row([...])">'.
+
+L67:40 TS2322
+Type '{ kind: "button"; style: "primary"; label: string; }' is not assignable to type 'RowElement'.
+  Property 'customId' is missing in type '{ kind: "button"; style: "primary"; label: string; }' but required in type 'InteractiveButton'.
+
+L70:57 TS2322
+Type '[ActionRow, ActionRow, ActionRow, ActionRow, ActionRow, ActionRow]' is not assignable to type 'readonly [ActionRow, ActionRow, ActionRow, ActionRow, ActionRow, ActionRow] & Invalid<"a message holds at most 5 action rows">'.
+  Property '[InvalidId]' is missing in type '[ActionRow, ActionRow, ActionRow, ActionRow, ActionRow, ActionRow]' but required in type 'Invalid<"a message holds at most 5 action rows">'.

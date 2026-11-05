@@ -137,11 +137,24 @@ export type KnownKeys<P, Allowed extends PropertyKey, Context extends string> = 
   ? unknown
   : { readonly [K in Exclude<keyof P, Allowed>]: P[K] & Invalid<`${K & string} is not valid when ${Context}`> }
 
+/**
+ * A message holds at most 5 action rows (H-128): a literal list of more is an error at `components` (after the final
+ * audit). A list whose type is not a tuple is not checked here; Discord refuses more than 5 with a 50035 on its
+ * `components` path, which is an unmapped defect.
+ */
+export type MessageRows<P> = P extends { readonly components: infer C extends ReadonlyArray<unknown> }
+  ? number extends C["length"]
+    ? unknown
+    : C["length"] extends 0 | 1 | 2 | 3 | 4 | 5
+      ? unknown
+      : { readonly components: C & Invalid<"a message holds at most 5 action rows"> }
+  : unknown
+
 /** Everything checked on a create payload. */
-export type CheckCreate<P> = NonEmpty<P> & V2Excludes<P> & KnownKeys<P, keyof CreateMessage | keyof CreateMessageV2, "creating a message">
+export type CheckCreate<P> = NonEmpty<P> & V2Excludes<P> & KnownKeys<P, keyof CreateMessage | keyof CreateMessageV2, "creating a message"> & MessageRows<P>
 
 /** Everything checked on an edit. */
-export type CheckEdit<P> = KnownKeys<P, keyof EditMessage, "editing a message">
+export type CheckEdit<P> = KnownKeys<P, keyof EditMessage, "editing a message"> & MessageRows<P>
 
 /**
  * A create payload argument: the payload with its checks. Signatures take `CreateArg<P>`, not the bare

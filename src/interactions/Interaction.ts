@@ -37,7 +37,7 @@ import type { PermissionDeniedUnattributed } from "../errors/Permission.ts"
 import type { InteractionExpired } from "../errors/State.ts"
 import type { Transient } from "../errors/Transient.ts"
 import type { ActionRow, CustomId, Invalid } from "../payload/Components.ts"
-import type { EditArg, EditMessage, Embed, KnownKeys, NonEmpty } from "../payload/Message.ts"
+import type { EditArg, EditMessage, Embed, KnownKeys, MessageRows, NonEmpty } from "../payload/Message.ts"
 import type { ContentTooLongIn, EditEmbedTooLargeIn, EditMessageEmptyIn, EmbedTooLargeIn, MessageEmptyIn } from "../payload/PayloadRules.ts"
 import type { GuildId, UserId } from "../Snowflake.ts"
 
@@ -92,7 +92,7 @@ export type EphemeralCheck<P, M> = P extends { readonly ephemeral: infer X }
   : unknown
 
 /** Everything checked on a reply or follow-up: a body, known keys, the mode's ephemeral state. */
-export type CheckReply<P, M> = NonEmpty<P> & KnownKeys<P, keyof ReplyPayload, "replying to an interaction"> & EphemeralCheck<P, M>
+export type CheckReply<P, M> = NonEmpty<P> & KnownKeys<P, keyof ReplyPayload, "replying to an interaction"> & EphemeralCheck<P, M> & MessageRows<P>
 
 /** A reply argument: the payload with its checks (an alias, as `CreateArg` is, so implementations relate). */
 export type ReplyArg<P, M> = P & CheckReply<P, M>

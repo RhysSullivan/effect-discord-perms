@@ -5,10 +5,12 @@
  * Layout rules are checked per element of the array `row([...])` takes, so tsc locates each error on the
  * offending element or property, in 2-3 lines whatever the row's size (rule 3 of §2.12):
  *
- * - an action row holds 1 to 5 buttons (H-128);
+ * - an action row holds 1 to 5 buttons (H-128), and a message at most 5 rows (`MessageRows`);
  * - a select menu must be alone in its row (H-128); the test is `"string-select" extends C[number]["kind"]`, so a
  *   row whose element type may be a select counts (rule 4 of §2.12);
- * - a link button has no `customId`, a premium button no `label` (H-129).
+ * - a link button has no `customId`, a premium button no `label` (H-129) and no `customId`, and only a link button has a
+ *   `url` (after the final audit: the last two compiled and were dropped from the request);
+ * - a row's elements are a literal list, so the checks can see them, and a row is not empty.
  *
  * An `ActionRow` can only come from `row`. A `customId` is a branded `CustomId`, which only a `ComponentRoute`
  * makes (`src/components/CustomId.ts`, §2.9).
@@ -74,14 +76,27 @@ type ElementCheck<X, I extends string, HasSelect extends boolean, Len extends nu
     ? X & Invalid<"an action row holds 1 to 5 buttons">
     : X extends { readonly style: "link"; readonly customId: unknown }
       ? { readonly [K in keyof X]: K extends "customId" ? X[K] & Invalid<"link buttons have no customId"> : X[K] }
-      : X extends { readonly style: "premium"; readonly label: unknown }
-        ? { readonly [K in keyof X]: K extends "label" ? X[K] & Invalid<"premium buttons have no label"> : X[K] }
-        : X
+      : X extends { readonly style: "premium"; readonly label: unknown } | { readonly style: "premium"; readonly customId: unknown }
+        ? {
+            readonly [K in keyof X]: K extends "label" ? X[K] & Invalid<"premium buttons have no label"> : K extends "customId" ? X[K] & Invalid<"premium buttons have no customId"> : X[K]
+          }
+        : X extends { readonly style: InteractiveButton["style"]; readonly url: unknown }
+          ? { readonly [K in keyof X]: K extends "url" ? X[K] & Invalid<"only link buttons have a url"> : X[K] }
+          : X
 
-/** The per-element checks of a row literal. */
-export type RowChecked<C extends ReadonlyArray<RowElement>> = {
-  readonly [I in keyof C]: ElementCheck<C[I], I & string, "string-select" extends C[number]["kind"] ? true : false, C["length"]>
-}
+/**
+ * The per-element checks of a row literal. A list whose type is not a tuple is an error on the list: its layout cannot
+ * be checked (and when an element of a literal is malformed, tsc falls back to that type, so this keeps the select and
+ * count messages off the valid elements and reports only the real problem; after the final audit). An empty row is an
+ * error too (H-128).
+ */
+export type RowChecked<C extends ReadonlyArray<RowElement>> = number extends C["length"]
+  ? Invalid<"row takes its elements as a literal list: row([...])">
+  : C["length"] extends 0
+    ? Invalid<"an action row holds 1 to 5 buttons, or one select menu">
+    : {
+        readonly [I in keyof C]: ElementCheck<C[I], I & string, "string-select" extends C[number]["kind"] ? true : false, C["length"]>
+      }
 
 /** Brands an action row: only {@link row} makes one. */
 export const RowTypeId: unique symbol = Symbol.for("effect-discord-perms/ActionRow")

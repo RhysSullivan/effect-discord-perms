@@ -343,10 +343,11 @@ export const rules: ReadonlyArray<Rule> = [
   },
   {
     id: "R-row-5-buttons",
-    statement: "an action row holds 1 to 5 buttons",
+    statement:
+      "an action row holds 1 to 5 buttons (live: 5 and 6), written as a literal list (an empty or computed row is an error); a message holds at most 5 rows (typed only, after the final audit)",
     pass: "test/types/pass/payload.ts",
     fail: "test/types/fail/components.ts",
-    claims: ["1 to 5 buttons"],
+    claims: ["1 to 5 buttons", "an action row holds 1 to 5 buttons", "row takes its elements as a literal list", "a message holds at most 5 action rows"],
     live: pair("text-send", ["typed-five-links", succeeded], ["raw-six-links", refused(400, 50035, [{ path: "components.0.components", code: "BASE_TYPE_BAD_LENGTH" }])])
   },
   {
@@ -359,10 +360,10 @@ export const rules: ReadonlyArray<Rule> = [
   },
   {
     id: "R-link-no-custom-id",
-    statement: "link buttons have no customId",
+    statement: "link buttons have no customId; only link buttons have a url (typed only, after the final audit)",
     pass: "test/types/pass/payload.ts",
     fail: "test/types/fail/components.ts",
-    claims: ["link buttons have no customId", "customId"],
+    claims: ["link buttons have no customId", "customId", "only link buttons have a url"],
     live: pair(
       "text-send",
       ["typed-five-links", succeeded],
@@ -377,10 +378,10 @@ export const rules: ReadonlyArray<Rule> = [
   },
   {
     id: "R-premium-no-label",
-    statement: "premium buttons have no label",
+    statement: "premium buttons have no label; nor a customId (typed only, after the final audit)",
     pass: "test/types/pass/payload.ts",
     fail: "test/types/fail/components.ts",
-    claims: ["premium buttons have no label", "label"],
+    claims: ["premium buttons have no label", "label", "premium buttons have no customId"],
     live: pair(
       "text-send",
       // open question 6 decided (M6 live): with a SKU the application does not own, the label's own path still appears
