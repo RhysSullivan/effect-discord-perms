@@ -190,11 +190,12 @@ budget. `bun run verify:live` runs the live matrix against a test guild and rewr
 - **The compile budget** (`bun run budget`) compiles the reference bot as a consumer of this package compiles it: by
   name, through the package's `exports`, which point at the source, so the library is checked with it (the budget
   fails if the import resolves anywhere else). The hard ceilings are 60,000 types, 250,000 instantiations and
-  1,000 ms, with +2% regression gates. The bot costs 59,620 types, 178,499 instantiations and about 245 ms, of which
-  its own code is about 3,700 types; the rest is the library. That is within budget, but only 380 types under the
-  Types ceiling: it was 76,573 types before the library's types were rewritten to cost less without changing what a
-  user sees (`docs/DESIGN.md` §2.12 rule 10). A second row holds the cost of one 25-option command with its handler
-  (about 2,200 instantiations), so superlinear growth cannot hide.
+  1,000 ms, with +2% regression gates against the committed baseline (59,620 types, 178,499 instantiations). After the
+  final audit's fixes the bot costs 59,455 types, 178,553 instantiations and about 300 ms, of which its own code is
+  about 3,700 types; the rest is the library. That is within budget, but only 545 types under the Types ceiling: it
+  was 76,573 types before the library's types were rewritten to cost less without changing what a user sees
+  (`docs/DESIGN.md` §2.12 rule 10). A second row holds the cost of one 25-option command with its handler (about 2,200
+  instantiations; 44,086 for the probe's 20, 23 under its +2% gate), so superlinear growth cannot hide.
 
 What is not verified live, and why, is in `LOG.md`: the phase-3 interaction checklist needs a human to click through
 it, the DM content and DM delivery exceptions need a human's DM, the external emoji and sticker rules need a second

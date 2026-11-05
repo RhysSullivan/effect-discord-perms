@@ -141,6 +141,13 @@ export const r12 = [
   withContent.on("MESSAGE_CREATE", (event) =>
     event.message.author === "self" ? event.message.delete().pipe(catchCategory(["permission", "state"], () => Effect.void)) : Effect.void
   ),
+  withContent.on("MESSAGE_CREATE", (event) =>
+    event.message.author === "other" ? event.message.delete().pipe(catchCategory(["permission", "state"], () => Effect.void)) : Effect.void
+  ),
+  withContent.on("MESSAGE_CREATE", (event) =>
+    event.message.author === "self" ? event.message.edit({ content: "x" }).pipe(catchCategory(["permission", "state"], () => Effect.void)) : Effect.void
+  ),
+  withContent.on("MESSAGE_CREATE", (event) => event.message.react({ origin: "unicode", name: "x" }).pipe(catchCategory(["permission", "state"], () => Effect.void))),
   withContent.on("MESSAGE_CREATE", (event) => catchCategory(event.message.delete(), ["permission", "state"], () => Effect.void)),
   withContent.on("MESSAGE_CREATE", (event) => event.message.react({ origin: "unicode", name: "x" }).pipe(Effect.catch(() => Effect.void))),
   withContent.on("MESSAGE_CREATE", (event) => Effect.suspend(() => event.message.delete()).pipe(catchCategory(["permission", "state"], () => Effect.void))),

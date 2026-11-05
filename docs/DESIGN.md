@@ -2471,7 +2471,10 @@ const ch: MessageChannel
   thin (380 types): the next growth of the library's types will meet it, and the regression gates (+2%) are looser
   than that margin. (Final cleanup, measured, LOG.md: a sixth one-option command with a handler, one new four-option
   command with a button route, or four more error classes in the library cross it; the sixth command also crosses
-  the +2% Instantiations gate, which binds before the 250,000 ceiling.)
+  the +2% Instantiations gate, which binds before the 250,000 ceiling.) (After the final audit, measured on the
+  committed baseline, which was not re-written: the message methods' shared `this`-generic types saved about 1,200
+  types, and the audit's new checks spent most of it, so the bot is at 59,455 types and 178,553 instantiations, 545
+  types under the ceiling; the per-command probe is at 44,086 instantiations, 23 under its +2% gate of 44,109.)
 - (M10, reverted) M10 first compiled the bot against declarations emitted into a git-ignored directory, mapped with
   `paths` (12,541 types, 28,926 instantiations), and gated the library's own check by regression only. No consumer
   of this package gets those declarations (nothing builds or ships them), so that measured less than any user pays,
