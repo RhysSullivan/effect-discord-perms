@@ -15,9 +15,9 @@
  *    arrives without MessageContent; Q-22: each DM event arrives under its DM intent).
  * 4. Waits until {@link isDone} (every checklist item has a verdict and the three DM events arrived), or {@link waitFor}
  *    passes.
- * 5. Opens a session with Guilds and GuildMessages but no DM intent, and waits for the canary, a message in a lab
- *    channel, sent after one more DM: a DM event that arrives before the canary means the DM intents are not needed
- *    (Q-22's absence half).
+ * 5. Opens a session with Guilds and GuildMessages but no DM intent, and waits for the canary, a message in #lab-text
+ *    ({@link isCanary}), sent after one more DM: a DM event that arrives before the canary means the DM intents are not
+ *    needed (Q-22's absence half).
  * 6. Resets the lab, which also removes `/checklist` (the subject's guild commands become none), whatever happened
  *    before: a failed or interrupted sitting still ends with the closing reset.
  */
@@ -74,7 +74,7 @@ export interface Result {
 }
 
 const DmWire = Schema.Struct({ guild_id: Schema.optionalKey(Schema.String), content: Schema.optionalKey(Schema.String) })
-const GuildWire = Schema.Struct({ guild_id: Schema.optionalKey(Schema.String) })
+const GuildMessageWire = Schema.Struct({ guild_id: Schema.optionalKey(Schema.String), channel_id: Schema.String })
 const InteractionChannelWire = Schema.Struct({ channel_id: Schema.optionalKey(Schema.String), channel: Schema.optionalKey(Schema.Struct({ id: Schema.String })) })
 
 /** The DM event a dispatch is, if it is one. */
@@ -115,11 +115,14 @@ export const labInteractionsOnly = (runtime: Runtime, isLabChannel: (channelId: 
     return { ...runtime, events: { subscribe } }
   })
 
-/** Whether a dispatch is the canary: a message in the lab guild. */
-const isCanary = (guildId: string) => (event: string, data: unknown): boolean => {
+/**
+ * Whether a dispatch is the canary: a message in #lab-text (`labText`) of the lab guild. Under the checklist's setup the
+ * subject sees every channel `lab-grant` lets it, so a message anywhere else in the guild is no canary.
+ */
+export const isCanary = (guildId: string, labText: string) => (event: string, data: unknown): boolean => {
   if (event !== "MESSAGE_CREATE") return false
-  const decoded = Schema.decodeUnknownOption(GuildWire)(data)
-  return decoded._tag === "Some" && decoded.value.guild_id === guildId
+  const decoded = Schema.decodeUnknownOption(GuildMessageWire)(data)
+  return decoded._tag === "Some" && decoded.value.guild_id === guildId && decoded.value.channel_id === labText
 }
 
 /** Waits until `check` holds, polling every 2 s, for at most `within`; whether it held. */
@@ -143,7 +146,10 @@ export const instructions = [
   "The run continues by itself when every verdict and the three DM events are in."
 ].join("\n")
 
-/** The lab at baseline, then at {@link checklistSetup}; the run's checks before any scenario write (§5.6, §5.11). */
+/**
+ * The lab at baseline, then at {@link checklistSetup}, with the run's checks before any scenario write (§5.6, §5.11);
+ * #lab-text's ID.
+ */
 const prepare = (report: IdentityReport, context: Reset.Context) =>
   Effect.gen(function* () {
     const reset = yield* Reset.run(context)
@@ -160,11 +166,14 @@ const prepare = (report: IdentityReport, context: Reset.Context) =>
     if (violations.length > 0) return yield* Effect.die(new Error(`Safety: ${violations.map((violation) => `${violation.rule}: ${violation.detail}`).join("; ")}`))
     const converged = yield* Converge.converge(desired, ids, new Set([desired.overwriteChannel]))
     if (converged._tag !== "Converged") return yield* Effect.die(new Error(`checklist: the text-messages setup did not converge (${converged._tag})`))
+    const labText = ids.channels.get("lab-text")
+    if (labText === undefined) return yield* Effect.die(new Error("checklist: no lab-text"))
     yield* Effect.sync(() => console.log(`lab: the subject holds lab-grant (${checklistSetup.grants.flatMap((grant) => grant.flags).join(", ")}) and sees #lab-text`))
+    return labText
   })
 
-/** The sitting itself: steps 2 to 5 of the module comment. */
-const sitting = (report: IdentityReport) =>
+/** The sitting itself: steps 2 to 5 of the module comment, with #lab-text's ID for the canary. */
+const sitting = (report: IdentityReport, labText: string) =>
   Effect.gen(function* () {
     const subject = yield* SubjectRaw
     const sessions = yield* Sessions
@@ -193,7 +202,7 @@ const sitting = (report: IdentityReport) =>
     const canary = yield* Effect.scoped(
       Effect.gen(function* () {
         const seen = yield* Ref.make(false)
-        const canaryOf = isCanary(report.guild.id)
+        const canaryOf = isCanary(report.guild.id, labText)
         yield* sessions.open(["Guilds", "GuildMessages"], (event, data) =>
           Effect.gen(function* () {
             if (canaryOf(event, data)) yield* Ref.set(seen, true)
@@ -221,7 +230,7 @@ export const run = (report: IdentityReport) =>
       Effect.tap((exit) => Effect.sync(() => console.log(Exit.isSuccess(exit) ? `closing reset: ${Reset.summary(exit.value)}` : "closing reset FAILED: run `bun run harness:reset` before anything else"))),
       Effect.flatMap((exit) => Ref.set(closing, Option.some(exit)))
     )
-    const result = yield* Effect.andThen(prepare(report, context), sitting(report)).pipe(Effect.ensuring(closingReset))
+    const result = yield* Effect.flatMap(prepare(report, context), (labText) => sitting(report, labText)).pipe(Effect.ensuring(closingReset))
     const reset = yield* Ref.get(closing)
     if (Option.isNone(reset)) return yield* Effect.die(new Error("checklist: the closing reset did not run"))
     yield* reset.value

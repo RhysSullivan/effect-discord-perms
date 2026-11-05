@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { type DmEvent, dmEventOf, interactionChannelOf, isDone, labInteractionsOnly, summary } from "../../harness/ChecklistRun.ts"
+import { type DmEvent, dmEventOf, interactionChannelOf, isCanary, isDone, labInteractionsOnly, summary } from "../../harness/ChecklistRun.ts"
 import { BotRuntime } from "../../src/bot/Runtime.ts"
 import * as Checklist from "../../src/interactions/Checklist.ts"
 import { textId } from "../support/guild.ts"
@@ -260,6 +260,15 @@ describe("the checklist", () => {
       })
     )
   )
+
+  it("takes only a message in #lab-text of the lab guild as the canary (the subject sees more of the guild under the checklist's setup)", () => {
+    const canary = isCanary("100000000000000000", textId)
+    expect(canary("MESSAGE_CREATE", { guild_id: "100000000000000000", channel_id: textId, content: "" })).toBe(true)
+    expect(canary("MESSAGE_CREATE", { guild_id: "100000000000000000", channel_id: "300000000000000098", content: "" })).toBe(false)
+    expect(canary("MESSAGE_CREATE", { guild_id: "100000000000000999", channel_id: textId })).toBe(false)
+    expect(canary("MESSAGE_CREATE", { channel_id: textId })).toBe(false)
+    expect(canary("MESSAGE_UPDATE", { guild_id: "100000000000000000", channel_id: textId })).toBe(false)
+  })
 
   it("reads an interaction's channel from `channel`, else `channel_id`", () => {
     expect(interactionChannelOf({ channel: { id: "1", type: 0 }, channel_id: "2" })).toBe("1")
