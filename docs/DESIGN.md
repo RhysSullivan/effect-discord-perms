@@ -547,7 +547,10 @@ Verified (`[sd:src/channels-use.ts]` §1-§6, exact `Equals`):
 - Content that may carry custom-emoji markup (any non-literal string, or a
   literal containing `<:name:id>`) has `degraded: ReadonlyArray<"UseExternalEmojis">`.
   Discord rewrites an external emoji without the permission to text (H-104);
-  the runtime detects it from the create response (§4.12).
+  the runtime detects it from the create response (§4.12). (After the final
+  audit, live on the subject's own setup: a made-up ID is rewritten to `:name:`
+  with and without the flag, an application emoji and the guild's own emoji are
+  kept with and without it; the flag's own effect needs a second guild.)
 
 **Presence is independent of mode.** Limit tags and the reply variant are keyed
 on `MayInclude`, not on whether the flag is in `PayloadFlags`. With
@@ -577,7 +580,11 @@ The runtime mirror is `requiredFlags(payload)`, computed from the same table
   carries it), `TopicTooLong` (1024, the smaller limit, a sound
   over-approximation for forum topics), `NicknameTooLong` (32) and
   `SlowmodeOutOfRange` (a number literal keeps the tag unless it is a natural of
-  at most four digits); `TimeoutTooLong` is always present for a date. The
+  at most four digits); `TimeoutTooLong` is always present for a date. (After the
+  final audit's live pairs: Discord refuses a slowmode of -1, `NUMBER_TYPE_MIN`,
+  but accepts 1.5 and stores 1, so a fraction's tag is the library's own local
+  refusal, which keeps Discord from changing the value; the empty-name side is
+  typed only, because the lab guard sends only lab-named channels and threads.) The
   limits are strings, not tuple counters, because every tuple length tsc builds
   costs a type per element (§5.4).
 - `MessageEmpty` (50006) is in the union unless every member of the payload has
@@ -633,8 +640,16 @@ size.
   constraint, reports only its own missing property, not a select message on
   every element. A message's `components` (create, edit, reply) hold at most 5
   rows when written as a literal list (`MessageRows`); a computed list of more
-  is refused by Discord with a 50035 on `components`, an unmapped defect. These
-  checks are typed only: no live probe sends them yet (LOG.md).
+  is refused by Discord with a 50035 on `components`, an unmapped defect. (After
+  the final audit's live pairs, every one of these is live but the reply's, which
+  is an interaction response: Discord refuses six rows on a create and an edit,
+  `components` `BASE_TYPE_MAX_LENGTH`, and an empty row, `components.0.components`
+  `BASE_TYPE_BAD_LENGTH`; a premium button's `custom_id` gets its own
+  `BUTTON_COMPONENT_CUSTOM_ID_SKU_MUTUALLY_EXCLUSIVE` beside the unowned SKU's
+  error; an interactive button's `url` gets
+  `BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE` on both paths, as a link
+  button's `custom_id` does; five rows, and an interactive button without a url,
+  are accepted.)
 - The largest of these diagnostics is 534 characters (an inline select with
   options) and all are 2-3 lines.
 - `linkButton(input)` and `premiumButton(input)` still give excess-property
@@ -784,7 +799,9 @@ is `OpErrors<G>[op]` plus argument-derived limit tags):
   rule's live pair is a voice channel's topic.) Another field fails on the property:
   `Type '"…"' is not assignable to type '"…" & Invalid<"topic cannot be edited on this channel kind">'.`
   A non-literal `name` adds `NameTooLong`, `topic` adds `TopicTooLong`, and a
-  non-literal `slowmodeSeconds` adds `SlowmodeOutOfRange`.
+  non-literal `slowmodeSeconds` adds `SlowmodeOutOfRange` (after the final audit,
+  so does a literal over its limit, an empty name, and a slowmode literal that is
+  not a natural under 10,000, §2.3).
 - `createThread({ name, private? })`: the flag follows the literal
   `private: true`; a non-literal name adds `NameTooLong`. On announcement
   channels `private: true` fails with
@@ -1131,7 +1148,11 @@ export declare const Command: {
   it, `choices` on a boolean option compiled and typed the handler's value as the
   choices' union, registration dropped the choices, and every invocation was
   dropped as malformed. One shared message per key keeps the cost at about 130
-  types for the reference bot and nothing measurable per command.
+  types for the reference bot and nothing measurable per command. Live
+  (`R-option-keys`, after the final audit): Discord stores every key on a type
+  that takes it as defined, and accepts each key on every type the library
+  refuses it on and drops it (the read-back command has none of them), so such a
+  key would have had no effect even if the library had sent it.
 - **A non-literal `required` may be true** (after the final audit), so an
   option with `required: someBoolean` after an optional one is the order error too.
   Duplicate option names are not checked by the types (it would cost about 25
@@ -1516,7 +1537,7 @@ so the matrix has to find it.
 | `PollTooLarge {limit}` | payload | send, createPost with a poll | preflight; 50035 inner on `poll.*` | |
 | `NameTooLong {length, limit}` | payload | createThread, createPost, channel/thread edit with a non-literal name | preflight; 50035 inner on `name` | 1..100 |
 | `TopicTooLong {length, limit}` | payload | channel edit with a non-literal topic (M6: stage channels have one, on the `voice.edit` row) | preflight; 50035 inner on `topic` | 1024 (4096 forum/media) |
-| `SlowmodeOutOfRange {seconds}` | payload | channel/thread edit with a non-literal slowmode | preflight; 50035 inner on `rate_limit_per_user` | 0..21600 |
+| `SlowmodeOutOfRange {seconds}` | payload | channel/thread edit with a slowmode that is not a literal natural under 10,000 | preflight; 50035 inner on `rate_limit_per_user` | 0..21600, whole seconds (Discord truncates a fraction; the library refuses it) |
 | `NicknameTooLong {length, limit}` | payload | setNickname with a non-literal string | preflight; 50035 inner on `nick` | 32 |
 | `TimeoutTooLong` | payload | timeout with a Date | preflight; 50035 inner on `communication_disabled_until` | 28 days (H-025) |
 | `MessagesTooOld` | payload | bulkDelete | preflight (snowflake age > 14 days); 50034 (400) | |
@@ -2133,7 +2154,13 @@ listed for the operation map; any other 50035 is a defect. dfx failure shapes
   non-mentionable role without the permission, H-101);
 - a custom-emoji token `<:name:id>` from the request that the response content
   no longer contains gives `UseExternalEmojis` (H-104). The live failing case
-  needs a second guild, so this rule is resolver-only live (§5.5);
+  needs a second guild, so this rule is resolver-only live (§5.5). (After the
+  final audit, on the subject's own setup: Discord rewrites a made-up emoji ID to
+  `:name:` with and without UseExternalEmojis, and keeps an application emoji and
+  the guild's own emoji with and without it. So the entry names the rule of the
+  feature Discord dropped, not always a missing flag: with the flag held, an
+  emoji the bot cannot use at all is reported the same way. The rows are
+  `R-payload-external-emoji`'s evidence in `test/rules.ts`);
 - any other `mode: "degrade"` rule whose effect is absent from the response is
   listed.
 
@@ -2738,6 +2765,11 @@ member), `R-must-respond` a forged response literal, `R-deferred-must-complete` 
     needs no permit and uses none, and the live call still needs its own);
   - (M4) a channel PATCH that renames a channel keeps a `lab`/`lab-*` name, and
     a new guild emoji has a `lab_` name (emoji are never edited or deleted);
+  - (after the final audit) the only application write besides the lab guild's
+    commands is a new emoji of the subject's own application with a `lab_` name
+    (`lab_app_emoji`, provisioned through the subject's client for the
+    external-emoji rows); application emojis are never edited or deleted, and no
+    other application's are written;
   - (M6) one write outside the admitted channels: a message create aimed at a
     bot's user ID (`R-ids-distinct`'s invalid side), which names no channel,
     since snowflakes are unique (Discord answers 404 10003);
