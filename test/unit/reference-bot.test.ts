@@ -193,19 +193,25 @@ describe("the reference bot", () => {
     )
   )
 
-  it.live("says why it cannot post where require fails (no EmbedLinks in app_permissions) or a question does not fit, and sends nothing; an old poll's button says it closed", () =>
+  it.live("refuses a poll where require fails (no EmbedLinks in app_permissions) before opening it, so the next poll is number 1; says when a question does not fit; an old poll's button says it closed", () =>
     withReferenceBot(({ dispatch, requests }) =>
       Effect.gen(function* () {
         yield* dispatch("INTERACTION_CREATE", pollInvocation("900000000000000001", "Lunch?", set("ViewChannel", "SendMessages")))
-        yield* until(requests, isCallback)
-        // an embed title holds 256 characters
-        yield* dispatch("INTERACTION_CREATE", pollInvocation("900000000000000002", "?".repeat(257), set("ViewChannel", "SendMessages", "EmbedLinks")))
+        const afterRefusal = yield* until(requests, isCallback)
+        expect(afterRefusal.filter(isMessagePost)).toEqual([])
+        // `require` refused before `polls.open`: without it the send's own preflight gives the same answer, but only
+        // after a poll was opened, and this one would be number 2
+        yield* dispatch("INTERACTION_CREATE", pollInvocation("900000000000000002", "Lunch?", set("ViewChannel", "SendMessages", "EmbedLinks")))
         yield* until(requests, isCallback, 2)
-        yield* dispatch("INTERACTION_CREATE", click("900000000000000003", human, 'vote:{"poll":7,"choice":"yes"}'))
-        const all = yield* until(requests, isCallback, 3)
-        expect(all.filter(isMessagePost)).toEqual([])
+        // an embed title holds 256 characters
+        yield* dispatch("INTERACTION_CREATE", pollInvocation("900000000000000003", "?".repeat(257), set("ViewChannel", "SendMessages", "EmbedLinks")))
+        yield* until(requests, isCallback, 3)
+        yield* dispatch("INTERACTION_CREATE", click("900000000000000004", human, 'vote:{"poll":7,"choice":"yes"}'))
+        const all = yield* until(requests, isCallback, 4)
+        expect(all.filter(isMessagePost).map((request) => (isObject(request.body) ? request.body["embeds"] : undefined))).toEqual([[{ title: "Lunch?" }]])
         expect(all.filter(isCallback).map((request) => request.body)).toEqual([
           { type: 4, data: { allowed_mentions: { parse: [] }, content: "I can't post the poll there (MissingEmbedLinks).", flags: 64 } },
+          { type: 4, data: { allowed_mentions: { parse: [] }, content: "Posted poll 1 (message 500000000000000100).", flags: 64 } },
           { type: 4, data: { allowed_mentions: { parse: [] }, content: "That poll does not fit in a message.", flags: 64 } },
           { type: 7, data: { allowed_mentions: { parse: [] }, content: "This poll has closed.", components: [] } }
         ])
