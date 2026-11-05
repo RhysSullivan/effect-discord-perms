@@ -1,9 +1,9 @@
 import * as fs from "node:fs"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import { documentedChannelTypes, storedAsDefined } from "../../harness/CommandProbes.ts"
+import { definedKeys, documentedChannelTypes, misplacedKeyObservation, storedAsDefined, storedKeysAsDefined } from "../../harness/CommandProbes.ts"
 import { CommandsFixture, fixturePath } from "../../harness/RecordCommands.ts"
-import { baseCommand, recordingSamples } from "../../harness/scenario/catalog/commands.ts"
+import { baseCommand, misplacedKeys, optionKeyBody, optionKeysCommand, recordingSamples } from "../../harness/scenario/catalog/commands.ts"
 import { channelTypes } from "../../src/state/Snapshot.ts"
 
 /**
@@ -67,5 +67,78 @@ describe("the options readback (storedAsDefined)", () => {
       media: 16
     })
     expect(channelTypes).toEqual(documentedChannelTypes)
+  })
+})
+
+/**
+ * R-option-keys's readbacks (after the final audit): the valid side compares every key of every option with the
+ * definition as written; an invalid side names the option types that kept a misplaced key, or observes it ignored.
+ */
+const storedKeys: Schema.JsonObject = {
+  id: "{command.id}",
+  name: optionKeysCommand.name,
+  description: "Perms Lab: every option key on its own type",
+  options: [
+    { type: 3, name: "text", description: "a string", autocomplete: true, min_length: 2, max_length: 50 },
+    { type: 3, name: "pick", description: "a string", choices: [{ name: "One", value: "one" }] },
+    { type: 4, name: "count", description: "an integer", autocomplete: true, min_value: 1, max_value: 10 },
+    { type: 4, name: "level", description: "an integer", choices: [{ name: "Five", value: 5 }] },
+    { type: 10, name: "ratio", description: "a number", autocomplete: true, min_value: 0, max_value: 1.5 },
+    { type: 10, name: "share", description: "a number", choices: [{ name: "Half", value: 0.5 }] },
+    { type: 7, name: "where", description: "a channel", channel_types: [0] },
+    // Discord's empty values for keys an option does not set
+    { type: 5, name: "flag", description: "a boolean", autocomplete: false },
+    { type: 6, name: "who", description: "a user", choices: [] },
+    { type: 8, name: "role", description: "a role" }
+  ]
+}
+
+const withStoredOption = (name: string, change: (option: Schema.JsonObject) => Schema.JsonObject): Schema.JsonObject => {
+  const options = storedKeys["options"]
+  return {
+    ...storedKeys,
+    options: Array.isArray(options) ? options.map((option) => (typeof option === "object" && option !== null && !Array.isArray(option) && option["name"] === name ? change(option) : option)) : []
+  }
+}
+
+describe("the option keys readback (storedKeysAsDefined, misplacedKeyObservation)", () => {
+  it("reads each key from the definition as written, under Discord's name", () => {
+    const [text, pick, , , ratio, , where, flag] = optionKeysCommand.definition.options
+    expect(text !== undefined && definedKeys(text)).toEqual({ autocomplete: true, min_length: 2, max_length: 50 })
+    expect(pick !== undefined && definedKeys(pick)).toEqual({ choices: [{ name: "One", value: "one" }] })
+    expect(ratio !== undefined && definedKeys(ratio)).toEqual({ autocomplete: true, min_value: 0, max_value: 1.5 })
+    expect(where !== undefined && definedKeys(where)).toEqual({ channel_types: [0] })
+    expect(flag !== undefined && definedKeys(flag)).toEqual({})
+  })
+
+  it("accepts the definition as Discord stores it, with empty values for keys an option does not set", () => {
+    expect(storedKeysAsDefined(optionKeysCommand.definition.options, storedKeys)).toBe(true)
+  })
+
+  it("observes a key dropped, changed, or added to an option that does not set it", () => {
+    expect(storedKeysAsDefined(optionKeysCommand.definition.options, withStoredOption("text", ({ min_length: _, ...option }) => option))).toBe(false)
+    expect(storedKeysAsDefined(optionKeysCommand.definition.options, withStoredOption("count", (option) => ({ ...option, max_value: 9 })))).toBe(false)
+    expect(storedKeysAsDefined(optionKeysCommand.definition.options, withStoredOption("ratio", ({ autocomplete: _, ...option }) => option))).toBe(false)
+    expect(storedKeysAsDefined(optionKeysCommand.definition.options, withStoredOption("where", (option) => ({ ...option, channel_types: [0, 5] })))).toBe(false)
+    expect(storedKeysAsDefined(optionKeysCommand.definition.options, withStoredOption("flag", (option) => ({ ...option, choices: [{ name: "One", value: "one" }] })))).toBe(false)
+    expect(storedKeysAsDefined(optionKeysCommand.definition.options, withStoredOption("role", (option) => ({ ...option, min_value: 1 })))).toBe(false)
+    expect(storedKeysAsDefined(optionKeysCommand.definition.options, { ...storedKeys, options: [] })).toBe(false)
+  })
+
+  it("posts one option of every refusing type per misplaced key, and names the types that kept it", () => {
+    for (const key of Object.keys(misplacedKeys) as ReadonlyArray<keyof typeof misplacedKeys>) {
+      const body = optionKeyBody(key)
+      const options = Array.isArray(body["options"]) ? body["options"] : []
+      expect(options.map((option) => (typeof option === "object" && option !== null && !Array.isArray(option) ? [option["name"], key in option] : []))).toEqual(misplacedKeys[key].on.map((type) => [type, true]))
+      // as POSTed: every option kept the key
+      expect(misplacedKeyObservation(key, body)).toEqual({ _tag: "Applied", field: `${key} on ${misplacedKeys[key].on.join(",")}` })
+    }
+    const body = optionKeyBody("choices")
+    const options = Array.isArray(body["options"]) ? body["options"] : []
+    const dropped = options.map((option) => (typeof option === "object" && option !== null && !Array.isArray(option) ? Object.fromEntries(Object.entries(option).filter(([key]) => key !== "choices")) : option))
+    expect(misplacedKeyObservation("choices", { ...body, options: dropped })).toEqual({ _tag: "Ignored", field: "choices" })
+    const one = dropped.map((option, index) => (index === 3 && typeof option === "object" && option !== null && !Array.isArray(option) ? { ...option, choices: [{ name: "One", value: "one" }] } : option))
+    expect(misplacedKeyObservation("choices", { ...body, options: one })).toEqual({ _tag: "Applied", field: "choices on channel" })
+    expect(misplacedKeyObservation("choices", undefined)).toEqual({ _tag: "Ignored", field: "choices" })
   })
 })

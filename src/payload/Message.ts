@@ -139,8 +139,8 @@ export type KnownKeys<P, Allowed extends PropertyKey, Context extends string> = 
 
 /**
  * A message holds at most 5 action rows (H-128): a literal list of more is an error at `components` (after the final
- * audit). A list whose type is not a tuple is not checked here; Discord refuses more than 5 with a 50035 on its
- * `components` path, which is an unmapped defect.
+ * audit). A list whose type is not a tuple is not checked here; Discord refuses more than 5 with a 50035
+ * `BASE_TYPE_MAX_LENGTH` on `components`, on a create and an edit alike (live), which is an unmapped defect.
  */
 export type MessageRows<P> = P extends { readonly components: infer C extends ReadonlyArray<unknown> }
   ? number extends C["length"]

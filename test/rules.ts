@@ -52,6 +52,12 @@ export interface Rule {
   readonly live: LivePair | NotLive
   /** A not-live or escalated remainder next to a live half (e.g. registration live, delivered values escalated). */
   readonly remainder?: NotLive
+  /**
+   * Rule rows on other setups that the rule's statement rests on, each checked against the table like a pair's side
+   * but never counted as one (after the final audit: the subject-only external-emoji rows, with and without
+   * UseExternalEmojis, of a rule that needs a second guild for its pair). A side's setup is the one its ID names.
+   */
+  readonly evidence?: ReadonlyArray<LiveSide>
 }
 
 const succeeded: Observation = { _tag: "Succeeded" }
@@ -68,6 +74,10 @@ const pair = (setup: string, valid: readonly [probe: string, expect: Observation
 })
 
 const typedSend = ["typed-send", succeeded] as const
+
+/** Further sides of a pair on its setup (`LivePair.also`): each probe of `setup` with its expectation. */
+const more = (setup: string, sides: ReadonlyArray<readonly [probe: string, expect: Observation]>): ReadonlyArray<LiveSide> =>
+  sides.map(([probe, expect]) => ({ scenario: `rule/${setup}/${probe}`, expect }))
 
 const delivered = (event: string): Observation => ({ _tag: "EventDelivered", event })
 const absent = (event: string, canary: string): Observation => ({ _tag: "EventAbsent", event, canary })
@@ -309,11 +319,18 @@ export const rules: ReadonlyArray<Rule> = [
   },
   {
     id: "R-payload-external-emoji",
-    statement: "content that may carry custom-emoji markup may degrade UseExternalEmojis",
+    statement:
+      "content that may carry custom-emoji markup may have an emoji rewritten to text, reported as UseExternalEmojis in `degraded` (live on the subject's own setup, after the final audit: a made-up emoji ID is rewritten to :name: with and without UseExternalEmojis, an application emoji and the guild's own emoji are kept with and without it; the flag's own effect needs an emoji of a second guild)",
     pass: "test/types/pass/payload.ts",
     fail: "test/types/fail/payload-flags.ts",
     claims: ["UseExternalEmojis"],
-    live: { kind: "not-live", reason: "needs-second-guild" }
+    live: { kind: "not-live", reason: "needs-second-guild" },
+    // H-104 on the subject's own setup, without and with UseExternalEmojis: the made-up ID is rewritten for a reason other
+    // than the flag (the bot can use no such emoji), and the app emoji is exempt, so neither pair shows the flag's effect
+    evidence: [
+      ...more("text-send", [["typed-emoji-made-up", ignored("content")], ["typed-emoji-app", applied("content")], ["typed-emoji-guild", applied("content")]]),
+      ...more("text-external-emoji", [["typed-emoji-made-up", ignored("content")], ["typed-emoji-app", applied("content")], ["typed-emoji-guild", applied("content")]])
+    ]
   },
   {
     id: "R-mention-everyone-degrades",
@@ -344,11 +361,21 @@ export const rules: ReadonlyArray<Rule> = [
   {
     id: "R-row-5-buttons",
     statement:
-      "an action row holds 1 to 5 buttons (live: 5 and 6), written as a literal list (an empty or computed row is an error); a message holds at most 5 rows (typed only, after the final audit)",
+      "an action row holds 1 to 5 buttons (live: 5 and 6, and an empty row), written as a literal list (a computed row is an error); a message holds at most 5 rows (after the final audit; live: 5 and 6 on a create and an edit; on an interaction reply typed only, as every interaction response is)",
     pass: "test/types/pass/payload.ts",
     fail: "test/types/fail/components.ts",
     claims: ["1 to 5 buttons", "an action row holds 1 to 5 buttons", "row takes its elements as a literal list", "a message holds at most 5 action rows"],
-    live: pair("text-send", ["typed-five-links", succeeded], ["raw-six-links", refused(400, 50035, [{ path: "components.0.components", code: "BASE_TYPE_BAD_LENGTH" }])])
+    live: {
+      ...pair("text-send", ["typed-five-links", succeeded], ["raw-six-links", refused(400, 50035, [{ path: "components.0.components", code: "BASE_TYPE_BAD_LENGTH" }])]),
+      // after the final audit: five rows of one button (also the lower bound of a row), six, an empty row; on an edit too
+      also: more("text-send", [
+        ["typed-five-rows", succeeded],
+        ["raw-six-rows", refused(400, 50035, [{ path: "components", code: "BASE_TYPE_MAX_LENGTH" }])],
+        ["raw-empty-row", refused(400, 50035, [{ path: "components.0.components", code: "BASE_TYPE_BAD_LENGTH" }])],
+        ["typed-edit-five-rows", succeeded],
+        ["raw-edit-six-rows", refused(400, 50035, [{ path: "components", code: "BASE_TYPE_MAX_LENGTH" }])]
+      ])
+    }
   },
   {
     id: "R-select-alone",
@@ -360,40 +387,65 @@ export const rules: ReadonlyArray<Rule> = [
   },
   {
     id: "R-link-no-custom-id",
-    statement: "link buttons have no customId; only link buttons have a url (typed only, after the final audit)",
+    statement: "link buttons have no customId; only link buttons have a url (after the final audit; live: an interactive button without a url is accepted, one with a url refused)",
     pass: "test/types/pass/payload.ts",
     fail: "test/types/fail/components.ts",
     claims: ["link buttons have no customId", "customId", "only link buttons have a url"],
-    live: pair(
-      "text-send",
-      ["typed-five-links", succeeded],
-      [
-        "raw-link-custom-id",
-        refused(400, 50035, [
-          { path: "components.0.components.0.custom_id", code: "BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE" },
-          { path: "components.0.components.0.url", code: "BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE" }
-        ])
-      ]
-    )
+    live: {
+      ...pair(
+        "text-send",
+        ["typed-five-links", succeeded],
+        [
+          "raw-link-custom-id",
+          refused(400, 50035, [
+            { path: "components.0.components.0.custom_id", code: "BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE" },
+            { path: "components.0.components.0.url", code: "BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE" }
+          ])
+        ]
+      ),
+      // after the final audit: an interactive button, and the same with a url
+      also: more("text-send", [
+        ["typed-interactive-button", succeeded],
+        [
+          "raw-interactive-url",
+          refused(400, 50035, [
+            { path: "components.0.components.0.custom_id", code: "BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE" },
+            { path: "components.0.components.0.url", code: "BUTTON_COMPONENT_CUSTOM_ID_URL_MUTUALLY_EXCLUSIVE" }
+          ])
+        ]
+      ])
+    }
   },
   {
     id: "R-premium-no-label",
-    statement: "premium buttons have no label; nor a customId (typed only, after the final audit)",
+    statement: "premium buttons have no label; nor a customId (after the final audit; live: the customId's own path appears beside the unowned SKU's)",
     pass: "test/types/pass/payload.ts",
     fail: "test/types/fail/components.ts",
     claims: ["premium buttons have no label", "label", "premium buttons have no customId"],
-    live: pair(
-      "text-send",
-      // open question 6 decided (M6 live): with a SKU the application does not own, the label's own path still appears
-      ["raw-premium-unlabelled", refused(400, 50035, [{ path: "components.0.components.0.sku_id", code: "BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE" }])],
-      [
-        "raw-premium-labelled",
-        refused(400, 50035, [
-          { path: "components.0.components.0.label", code: "BUTTON_COMPONENT_SKU_ID_LABEL_MUTUALLY_EXCLUSIVE" },
-          { path: "components.0.components.0.sku_id", code: "BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE" }
-        ])
-      ]
-    )
+    live: {
+      ...pair(
+        "text-send",
+        // open question 6 decided (M6 live): with a SKU the application does not own, the label's own path still appears
+        ["raw-premium-unlabelled", refused(400, 50035, [{ path: "components.0.components.0.sku_id", code: "BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE" }])],
+        [
+          "raw-premium-labelled",
+          refused(400, 50035, [
+            { path: "components.0.components.0.label", code: "BUTTON_COMPONENT_SKU_ID_LABEL_MUTUALLY_EXCLUSIVE" },
+            { path: "components.0.components.0.sku_id", code: "BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE" }
+          ])
+        ]
+      ),
+      // after the final audit: a premium button with a custom_id, against the valid side's unowned SKU alone
+      also: more("text-send", [
+        [
+          "raw-premium-custom-id",
+          refused(400, 50035, [
+            { path: "components.0.components.0.custom_id", code: "BUTTON_COMPONENT_CUSTOM_ID_SKU_MUTUALLY_EXCLUSIVE" },
+            { path: "components.0.components.0.sku_id", code: "BUTTON_COMPONENT_INVALID_SKU_UNAVAILABLE" }
+          ])
+        ]
+      ])
+    }
   },
   // ---- mentions and flags (§2.3) ----
   {
@@ -447,7 +499,8 @@ export const rules: ReadonlyArray<Rule> = [
   },
   {
     id: "R-name-length",
-    statement: "a non-literal channel, thread or post name may be too long (NameTooLong)",
+    statement:
+      "a channel, thread or post name may be refused (NameTooLong) unless it is a literal of 1 to 100 characters: a non-literal, a literal over 100 (live: 100 and 101) or the empty literal (after the final audit; typed only: the lab guard sends only lab-named channels and threads, and an empty name is none)",
     pass: "test/types/pass/channels.ts",
     fail: "test/types/fail/limits.ts",
     claims: ["NameTooLong"],
@@ -455,7 +508,7 @@ export const rules: ReadonlyArray<Rule> = [
   },
   {
     id: "R-topic-length",
-    statement: "a non-literal topic may be too long (TopicTooLong)",
+    statement: "a non-literal topic may be too long (TopicTooLong), and so may a literal over the limit; a literal within it cannot",
     pass: "test/types/pass/channels.ts",
     fail: "test/types/fail/limits.ts",
     claims: ["TopicTooLong"],
@@ -463,15 +516,23 @@ export const rules: ReadonlyArray<Rule> = [
   },
   {
     id: "R-slowmode-range",
-    statement: "a non-literal slowmode may be out of range (SlowmodeOutOfRange)",
+    statement:
+      "a slowmode may be refused (SlowmodeOutOfRange) unless it is a literal whole number of at most four digits (after the final audit; live: Discord accepts 21,600 and refuses 21,601 and -1; it accepts 1.5 and stores 1, so the library refuses a fraction before sending, rather than have Discord change the value)",
     pass: "test/types/pass/channels.ts",
     fail: "test/types/fail/limits.ts",
     claims: ["SlowmodeOutOfRange"],
-    live: pair("text-manage-channels", ["typed-slowmode-max", succeeded], ["raw-slowmode-over", refused(400, 50035, [{ path: "rate_limit_per_user", code: "NUMBER_TYPE_MAX" }])])
+    live: {
+      ...pair("text-manage-channels", ["typed-slowmode-max", succeeded], ["raw-slowmode-over", refused(400, 50035, [{ path: "rate_limit_per_user", code: "NUMBER_TYPE_MAX" }])]),
+      // after the final audit: below the range, and a fraction, which Discord accepts and truncates (a live finding)
+      also: more("text-manage-channels", [
+        ["raw-slowmode-negative", refused(400, 50035, [{ path: "rate_limit_per_user", code: "NUMBER_TYPE_MIN" }])],
+        ["raw-slowmode-fraction", applied("rate_limit_per_user 1")]
+      ])
+    }
   },
   {
     id: "R-nickname-length",
-    statement: "a non-literal nickname may be too long (NicknameTooLong); clearing one cannot",
+    statement: "a non-literal nickname may be too long (NicknameTooLong), and so may a literal over the limit; clearing one cannot",
     pass: "test/types/pass/channels.ts",
     fail: "test/types/fail/limits.ts",
     claims: ["NicknameTooLong"],
@@ -643,11 +704,7 @@ export const rules: ReadonlyArray<Rule> = [
       "Type 'number' is not assignable to type 'string'",
       "possibly 'undefined'",
       "have no overlap",
-      "Property 'createPost' does not exist",
-      "only string, integer and number options take choices",
-      "only integer and number options take minValue",
-      "only channel options take channelTypes",
-      "only string options take minLength"
+      "Property 'createPost' does not exist"
     ],
     live: pair(
       "commands",
@@ -656,6 +713,34 @@ export const rules: ReadonlyArray<Rule> = [
     ),
     // a handler receiving real option values needs a human to run the command (Q-18)
     remainder: { kind: "escalated", question: "Q-18" }
+  },
+  {
+    id: "R-option-keys",
+    statement:
+      "each option type takes only its own keys (after the final audit): choices and autocomplete only string, integer and number options, minLength and maxLength only string options, minValue and maxValue only integer and number options, channelTypes only channel options (live: every key on a type that takes it is stored as defined; each key on every type the library refuses it on is accepted and dropped, so it would have no effect)",
+    pass: "test/types/pass/commands.ts",
+    fail: "test/types/fail/commands.ts",
+    claims: [
+      "only string, integer and number options take choices",
+      "only string, integer and number options take autocomplete",
+      "only string options take minLength",
+      "only string options take maxLength",
+      "only integer and number options take minValue",
+      "only integer and number options take maxValue",
+      "only channel options take channelTypes"
+    ],
+    live: {
+      ...pair("commands", ["typed-register-option-keys", applied("option-keys")], ["raw-option-key-choices", ignored("choices")]),
+      // every other key, each on every option type the library refuses it on
+      also: more("commands", [
+        ["raw-option-key-autocomplete", ignored("autocomplete")],
+        ["raw-option-key-min-length", ignored("min_length")],
+        ["raw-option-key-max-length", ignored("max_length")],
+        ["raw-option-key-min-value", ignored("min_value")],
+        ["raw-option-key-max-value", ignored("max_value")],
+        ["raw-option-key-channel-types", ignored("channel_types")]
+      ])
+    }
   },
   {
     id: "R-registration-diff",

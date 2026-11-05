@@ -21,6 +21,17 @@ export const ruleSetups = {
     memberState: "normal",
     fixtures: ["subject-message", "harness-message", "guild-sticker"]
   }),
+  /**
+   * `text-send`'s flags and UseExternalEmojis (after the final audit): the external-emoji rows with the flag, against
+   * the same rows on `text-send` without it (H-104).
+   */
+  "text-external-emoji": new Setup({
+    channel: "text",
+    grants: [{ flags: ["ViewChannel", "SendMessages", "UseExternalEmojis"], via: "role" }],
+    removals: [],
+    memberState: "normal",
+    fixtures: []
+  }),
   /** A text channel with the flags an embed and a poll need, for the limit rows. */
   "text-rich": new Setup({ channel: "text", grants: [{ flags: ["ViewChannel", "SendMessages", "EmbedLinks", "SendPolls"], via: "role" }], removals: [], memberState: "normal", fixtures: [] }),
   /** The lab forum, with what a post needs (H-031). */
@@ -93,9 +104,9 @@ export const parseRuleScenario = (id: string): { readonly setup: RuleSetupName; 
   return decoded._tag === "Some" ? { setup, probe: decoded.value } : `${id}: no probe ${probe} in harness/scenario/Probes.ts`
 }
 
-/** Every rule side of the registry: its scenario ID and expectation, with the rule it belongs to. */
+/** Every rule side of the registry (a pair's sides and a rule's evidence rows): its scenario ID and expectation, with the rule it belongs to. */
 const sides = rules.flatMap((rule) =>
-  rule.live.kind === "pair" ? [rule.live.valid, rule.live.invalid, ...(rule.live.also ?? [])].map((side) => ({ rule: rule.id, ...side })) : []
+  [...(rule.live.kind === "pair" ? [rule.live.valid, rule.live.invalid, ...(rule.live.also ?? [])] : []), ...(rule.evidence ?? [])].map((side) => ({ rule: rule.id, ...side }))
 )
 
 const sameObservation = (a: Observation, b: Observation): boolean => JSON.stringify(a) === JSON.stringify(b)

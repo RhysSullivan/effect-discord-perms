@@ -114,7 +114,8 @@ const summary =
   `${rules.length} rule(s) (${byKind("pair")} live pair, ${byKind("escalated")} escalated, ${byKind("not-live:pure-typing")} pure-typing, ` +
   `${rules.length - byKind("pair") - byKind("escalated") - byKind("not-live:pure-typing")} other not-live; ` +
   `${remainders.length} escalated remainder(s)${remainders.length === 0 ? "" : `, waiting for Rhys (${remainderQuestions})`}), ${failFixtures.length} fail fixture(s), ` +
-  `${pairs.reduce((sum, rule) => sum + (rule.live.kind === "pair" ? 2 + (rule.live.also?.length ?? 0) : 0), 0)} live sides checked against the table, ` +
+  `${pairs.reduce((sum, rule) => sum + (rule.live.kind === "pair" ? 2 + (rule.live.also?.length ?? 0) : 0), 0)} live sides and ` +
+  `${rules.reduce((sum, rule) => sum + (rule.evidence?.length ?? 0), 0)} evidence row(s) checked against the table, ` +
   `${eventsChecked} event(s) with a live intent pair, flag coverage over ${coverageRows.length} matrix row(s)`
 if (pendingChecks.length > 0) console.log(`rules: not checked yet, because their inputs do not exist:\n- ${pendingChecks.join("\n- ")}`)
 if (problems.length > 0) {

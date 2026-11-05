@@ -19,10 +19,16 @@
  *   applied nothing for, which dfx sends again: M8 live, one PUT answered 429 then 200 was counted twice) (`Writes`,
  *   R-registration-diff);
  * - `raw-*` first makes sure {@link baseCommand} is registered, so a POST under its name is an update, then POSTs what
- *   the types forbid (`Rejected` with Discord's status, code and inner 50035 errors with their paths, or `Succeeded`).
+ *   the types forbid (`Rejected` with Discord's status, code and inner 50035 errors with their paths, or `Succeeded`);
+ * - after the final audit, R-option-keys: `typed-register-option-keys` registers {@link optionKeysCommand} (every key on
+ *   a type that takes it) and observes `Applied option-keys` when Discord stores each key as defined
+ *   ({@link storedKeysAsDefined}); each `raw-option-key-<key>` POSTs one option of every type the library refuses the
+ *   key on, carrying it, and observes Discord's refusal, or, when Discord accepts, reads the command back and observes
+ *   whether any option kept the key ({@link misplacedKeyObservation}), then POSTs the base again.
  *
  * A transient failure (no answer, a 5xx) is an infrastructure abort, never an observation.
  */
+import type { DiscordRestService } from "dfx/DiscordREST"
 import { ChannelType } from "discord-api-types/v10"
 import { Effect, Option, Schema } from "effect"
 import { SubjectRaw } from "../src/bot/Internals.ts"
@@ -38,7 +44,24 @@ import { labStepDeadline } from "./Lab.ts"
 import * as Outcome from "./Outcome.ts"
 import { Pacing, type Stats } from "./Pacing.ts"
 import type { ProbeContext, ProbeResult } from "./Probes.ts"
-import { baseCommand, labCommandName, mutatedFields, type MutatedField, mutations, nestedCommand, optionsCommand, rawBodies, type RawRegistration } from "./scenario/catalog/commands.ts"
+import { toDiscord } from "../src/commands/Canonical.ts"
+import {
+  baseCommand,
+  labCommandName,
+  type MisplacedKey,
+  misplacedKeys,
+  mutatedFields,
+  type MutatedField,
+  mutations,
+  nestedCommand,
+  optionKeyBody,
+  type OptionKeyProbe,
+  optionKeyProbes,
+  optionKeysCommand,
+  optionsCommand,
+  rawBodies,
+  type RawRegistration
+} from "./scenario/catalog/commands.ts"
 import type { Observation } from "./scenario/Dsl.ts"
 
 /** A registration probe (every command probe but the two custom_id ones, which `Probes.ts` runs). */
@@ -46,23 +69,29 @@ export type RegistrationProbe =
   | "typed-register-options"
   | "typed-register-subcommands"
   | "typed-register-choices"
+  | "typed-register-option-keys"
   | "typed-sync-identical"
   | `typed-sync-${MutatedField}`
   | RawRegistration
+  | OptionKeyProbe
 
 const registrationProbes: ReadonlySet<string> = new Set<string>([
   "typed-register-options",
   "typed-register-subcommands",
   "typed-register-choices",
+  "typed-register-option-keys",
   "typed-sync-identical",
   ...mutatedFields.map((field) => `typed-sync-${field}`),
-  ...Object.keys(rawBodies)
+  ...Object.keys(rawBodies),
+  ...Object.keys(optionKeyProbes)
 ])
 
 /** Whether `probe` is a registration probe. */
 export const isRegistrationProbe = (probe: string): probe is RegistrationProbe => registrationProbes.has(probe)
 
 const isRaw = (probe: RegistrationProbe): probe is RawRegistration => probe in rawBodies
+
+const isOptionKeyProbe = (probe: RegistrationProbe): probe is OptionKeyProbe => probe in optionKeyProbes
 
 type SyncProbe = "typed-sync-identical" | `typed-sync-${MutatedField}`
 
@@ -174,6 +203,99 @@ export const storedAsDefined = (options: ReadonlyArray<OptionLike>, stored: Sche
   })
 }
 
+/** The option keys {@link storedKeysAsDefined} compares, as Discord names them. */
+export const optionKeyNames = ["choices", "autocomplete", "min_length", "max_length", "min_value", "max_value", "channel_types"] as const
+
+/** An option key as Discord names it. */
+export type OptionKeyName = (typeof optionKeyNames)[number]
+
+/** Whether a stored key holds nothing: absent, or the empty value Discord may store for it (`false`, `[]`). */
+const unset = (value: Schema.Json | undefined): boolean => value === undefined || value === null || value === false || (Array.isArray(value) && value.length === 0)
+
+/** A key's value as compared: a channel-type list as a sorted set (Discord stores a set in its own order), anything else as written. */
+const comparable = (key: OptionKeyName, value: Schema.Json): string =>
+  key === "channel_types" && Array.isArray(value) ? JSON.stringify([...new Set(value)].sort()) : JSON.stringify(value)
+
+/**
+ * The keys `option` sets, as Discord names them, read from the definition as written (choices in order, channel kinds
+ * as Discord's documented numbers), independent of `Canonical.toDiscord` (the M8 verifier's rule for readbacks).
+ */
+export const definedKeys = (option: OptionLike): Partial<Record<OptionKeyName, Schema.Json>> => {
+  const keys: Partial<Record<OptionKeyName, Schema.Json>> = {}
+  const set = (key: OptionKeyName, value: Schema.Json | undefined) => {
+    if (value !== undefined) keys[key] = value
+  }
+  switch (option.type) {
+    case "string":
+      set("choices", option.choices?.map((choice) => ({ name: choice.name, value: choice.value })))
+      set("autocomplete", option.autocomplete)
+      set("min_length", option.minLength)
+      set("max_length", option.maxLength)
+      return keys
+    case "integer":
+    case "number":
+      set("choices", option.choices?.map((choice) => ({ name: choice.name, value: choice.value })))
+      set("autocomplete", option.autocomplete)
+      set("min_value", option.minValue)
+      set("max_value", option.maxValue)
+      return keys
+    case "channel":
+      set("channel_types", option.channelTypes?.map((kind) => documentedChannelTypes[kind]))
+      return keys
+    case "boolean":
+    case "user":
+    case "role":
+    case "subcommand":
+    case "group":
+      return keys
+  }
+}
+
+/**
+ * Whether `stored` (a command as Discord's GET returns it) holds each of `options` with exactly the keys it defines
+ * ({@link optionKeyNames}): each defined key with its value, every other key unset (R-option-keys's valid side).
+ */
+export const storedKeysAsDefined = (options: ReadonlyArray<OptionLike>, stored: Schema.JsonObject): boolean => {
+  const listed = stored["options"]
+  const storedOptions = Array.isArray(listed) ? listed.filter(isObject) : []
+  if (storedOptions.length !== options.length) return false
+  return options.every((option) => {
+    const match = storedOptions.find((candidate) => candidate["name"] === option.name)
+    if (match === undefined) return false
+    const defined = definedKeys(option)
+    return optionKeyNames.every((key) => {
+      const want = defined[key]
+      const have = match[key]
+      if (want === undefined || unset(want)) return unset(have)
+      return have !== undefined && comparable(key, have) === comparable(key, want)
+    })
+  })
+}
+
+/**
+ * What Discord stored of a raw option-key probe's misplaced `key` (R-option-keys's invalid sides): `Ignored` when no
+ * option of `stored` holds it (or `stored` has no such command), else `Applied`, naming the option types that kept it
+ * (each option is named after its type, `optionKeyBody`).
+ */
+export const misplacedKeyObservation = (key: MisplacedKey, stored: Schema.JsonObject | undefined): Observation => {
+  const listed = stored?.["options"]
+  const storedOptions = Array.isArray(listed) ? listed.filter(isObject) : []
+  const kept = misplacedKeys[key].on.filter((type) => {
+    const match = storedOptions.find((candidate) => candidate["name"] === type)
+    return match !== undefined && !unset(match[key])
+  })
+  return kept.length === 0 ? { _tag: "Ignored", field: key } : { _tag: "Applied", field: `${key} on ${kept.join(",")}` }
+}
+
+/** The subject's stored command named {@link labCommandName}, read through Discord's GET. */
+const readLabCommand = (subject: DiscordRestService, target: Registration.Target) =>
+  Effect.gen(function* () {
+    const listed = yield* sendJson(subject, Registration.route, "GET", Registration.pathOf(target), undefined, deadline)
+    if (listed._tag === "Rejected") return yield* Effect.die(new Error(`probe: the registered commands could not be read: ${listed.response.status} ${listed.response.code}`))
+    const stored = yield* Schema.decodeUnknownEffect(Schema.Array(StoredCommand))(listed.body).pipe(Effect.orDie)
+    return stored.find((command) => command["name"] === labCommandName)
+  })
+
 /** Runs the registration probe `probe` (see the module comment). */
 export const run = (probe: RegistrationProbe, context: ProbeContext): Effect.Effect<ProbeResult, Transient, SubjectRaw | Pacing> =>
   Effect.gen(function* () {
@@ -185,6 +307,18 @@ export const run = (probe: RegistrationProbe, context: ProbeContext): Effect.Eff
       return answer._tag === "Rejected"
         ? { observation: rejected(answer.response), raw: Outcome.rejected(answer.response), created: [] }
         : { observation: succeeded, raw: Outcome.ok([]), created: [] }
+    }
+    if (isOptionKeyProbe(probe)) {
+      // an update of the base under the one name; what Discord accepted is read back, then the base is POSTed again
+      // (an update, cheaper than the next row's bulk overwrite: M8 live, about one PUT every 30 s)
+      yield* ensureBase(context)
+      const key = optionKeyProbes[probe]
+      const answer: Answered<Schema.Json> = yield* sendJson(subject, Registration.route, "POST", Registration.pathOf(target), optionKeyBody(key), deadline)
+      if (answer._tag === "Rejected") return { observation: rejected(answer.response), raw: Outcome.rejected(answer.response), created: [] }
+      const observation = misplacedKeyObservation(key, yield* readLabCommand(subject, target))
+      const restored = yield* sendJson(subject, Registration.route, "POST", Registration.pathOf(target), toDiscord(baseCommand.definition), deadline)
+      if (restored._tag === "Rejected") return yield* Effect.die(new Error(`probe: Discord refused the base command's POST: ${restored.response.status} ${restored.response.code}`))
+      return { observation, raw: Outcome.ok([]), created: [] }
     }
     if (isSync(probe)) {
       const field = mutatedFieldOf(probe)
@@ -205,12 +339,17 @@ export const run = (probe: RegistrationProbe, context: ProbeContext): Effect.Eff
         const outcome = yield* registered(context, [baseCommand])
         if (outcome.observation._tag !== "Succeeded") return outcome
         // the stored options, read back and compared field by field with the definition as written (R-options-typed)
-        const listed = yield* sendJson(subject, Registration.route, "GET", Registration.pathOf(target), undefined, deadline)
-        if (listed._tag === "Rejected") return yield* Effect.die(new Error(`probe: the registered commands could not be read: ${listed.response.status} ${listed.response.code}`))
-        const stored = yield* Schema.decodeUnknownEffect(Schema.Array(StoredCommand))(listed.body).pipe(Effect.orDie)
-        const mine = Option.fromUndefinedOr(stored.find((command) => command["name"] === labCommandName))
+        const mine = Option.fromUndefinedOr(yield* readLabCommand(subject, target))
         const applied = Option.isSome(mine) && storedAsDefined(baseCommand.definition.options, mine.value)
         return { observation: { _tag: applied ? "Applied" : "Ignored", field: "options" }, raw: Outcome.ok([]), created: [] }
+      }
+      case "typed-register-option-keys": {
+        const outcome = yield* registered(context, [optionKeysCommand])
+        if (outcome.observation._tag !== "Succeeded") return outcome
+        // every key on its own type, read back and compared key by key with the definition as written (R-option-keys)
+        const mine = Option.fromUndefinedOr(yield* readLabCommand(subject, target))
+        const applied = Option.isSome(mine) && storedKeysAsDefined(optionKeysCommand.definition.options, mine.value)
+        return { observation: { _tag: applied ? "Applied" : "Ignored", field: "option-keys" }, raw: Outcome.ok([]), created: [] }
       }
     }
   })

@@ -37,7 +37,10 @@ export class TopicTooLong extends CategorizedError<TopicTooLong>()("TopicTooLong
   cause: ErrorCause
 }, ["payload"]) {}
 
-/** `rate_limit_per_user` is outside 0..21600 seconds. */
+/**
+ * `rate_limit_per_user` is outside 0..21600 seconds, or not a whole number (Discord accepts a fraction and stores it
+ * truncated, so the local check refuses it rather than send a value Discord would change; live, after the final audit).
+ */
 export class SlowmodeOutOfRange extends CategorizedError<SlowmodeOutOfRange>()("SlowmodeOutOfRange", {
   seconds: Schema.Int,
   cause: ErrorCause

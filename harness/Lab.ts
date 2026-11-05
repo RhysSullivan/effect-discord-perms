@@ -35,6 +35,9 @@
  *   or ban, and a second use of a permit, is refused;
  * - a channel PATCH that renames a channel gives it a lab name; a new guild emoji has a `lab_` name, and emoji
  *   are never edited or deleted;
+ * - the only application write outside the lab guild's commands is a new emoji of the subject's own application,
+ *   with a `lab_` name (after the final audit: the external-emoji rule rows); application emojis are never edited or
+ *   deleted, and no other application's are written;
  * - nothing creates or writes to a DM channel, leaves the guild, edits global commands, webhooks or invites, except
  *   an interaction's answers (M9, the checklist Rhys runs): its callback, and the follow-ups and original-response edits
  *   of the subject application's interaction webhook (`/webhooks/{subject's application}/{token}`). Their URLs name no
@@ -292,8 +295,15 @@ export const verdict = (state: GuardState, method: string, url: string, body: Re
       return guildWrite(state, armed, upper, route, rest, body)
     case "channels":
       return channelWrite(state, armed, upper, route, id, rest, body)
-    case "applications":
-      return rest[0] === "guilds" ? allow : refuse(`${route}: only guild commands in the lab guild`)
+    case "applications": {
+      if (rest[0] === "guilds") return allow
+      // the subject application's own emoji (the external-emoji rule rows): a create with a lab_ name, nothing else
+      if (rest[0] === "emojis" && rest.length === 1 && upper === "POST" && armed.subjectApplicationId !== undefined && id === armed.subjectApplicationId) {
+        const created = Option.flatMap(textOf(body), decodeNamed)
+        return Option.isSome(created) && isLabEmojiName(created.value.name) ? allow : refuse(`${route}: a new application emoji must have a lab_ name`)
+      }
+      return refuse(`${route}: only guild commands in the lab guild, and the subject application's lab_ emoji`)
+    }
     case "interactions":
       // an interaction's callback, `POST /interactions/{interaction.id}/{interaction.token}/callback`, once the subject's
       // application is armed (the interactions it answers are the subject's)

@@ -30,12 +30,12 @@ import { row, textDisplay } from "../src/payload/Components.ts"
 import { Limits, lengthOf } from "../src/payload/Limits.ts"
 import { type Answered, send } from "../src/rest/Request.ts"
 import type * as Schemas from "../src/rest/Schemas.ts"
-import type { ChannelId, MessageId, RoleId, StickerId } from "../src/Snowflake.ts"
+import type { ChannelId, EmojiId, MessageId, RoleId, StickerId } from "../src/Snowflake.ts"
 import { ChannelId as ChannelIdSchema } from "../src/Snowflake.ts"
 import { deadline } from "./Drivers.ts"
 import { HarnessRest, type Sessions, type TargetRest } from "./Identities.ts"
 import { LabGuard, labStep } from "./Lab.ts"
-import type * as LabIds from "./LabIds.ts"
+import * as LabIds from "./LabIds.ts"
 import type * as Materialize from "./Materialize.ts"
 import * as Outcome from "./Outcome.ts"
 import type { Observation } from "./scenario/Dsl.ts"
@@ -58,6 +58,9 @@ export interface ProbeContext {
   readonly harnessMessage: Schemas.Message | undefined
   readonly secondHarnessMessage: MessageId | undefined
   readonly stickerId: StickerId | undefined
+  /** The lab's guild emoji (`lab_emoji`) and the subject application's own emoji (`lab_app_emoji`). */
+  readonly emojiId: EmojiId | undefined
+  readonly appEmojiId: EmojiId | undefined
   /** The target member as the subject read it. */
   readonly target: Schemas.Member | undefined
   readonly now: number
@@ -69,6 +72,8 @@ export interface ProbeResult {
   /** The probe's call as the truth table's raw outcome. */
   readonly raw: RawOutcome
   readonly created: ReadonlyArray<ChannelId>
+  /** What the run log should say besides the observation (never written to the table), e.g. the content Discord kept. */
+  readonly note?: string
 }
 
 /** The name lab objects a probe creates carry (the guard admits only `lab`/`lab-*` names). */
@@ -89,6 +94,7 @@ const succeeded: Observation = { _tag: "Succeeded" }
 const Created = Schema.Struct({ id: ChannelIdSchema })
 const MessageRead = Schema.Struct({
   id: Schema.String,
+  content: Schema.String,
   flags: Schema.optionalKey(Schema.Int),
   tts: Schema.Boolean,
   mentions: Schema.Array(Schema.Struct({ id: Schema.String })),
@@ -158,6 +164,33 @@ export const asciiString = (count: number): string => "a".repeat(count)
 
 const day = 86_400_000
 
+/** A well-formed snowflake that names nothing in Perms Lab (the made-up sticker, SKU and emoji IDs). */
+export const madeUpId = "100000000000000000"
+
+/** A link button's wire form (style 5), as the raw sides send it. */
+const wireLink = { type: 2, style: 5, label: "Docs", url: "https://discord.com/developers/docs" } as const
+
+/** The library's link button, as the typed sides send it. */
+const link = { kind: "button", style: "link", label: "Docs", url: "https://discord.com/developers/docs" } as const
+
+/** `count` action rows of one link button each, in wire form. */
+const wireRows = (count: number) => Array.from({ length: count }, () => ({ type: 1 as const, components: [wireLink] }))
+
+/**
+ * The custom-emoji token an external-emoji probe sends (H-104): a made-up ID, the subject application's own emoji, or
+ * the lab's guild emoji. The name in a token is the sender's; Discord resolves the ID.
+ */
+const emojiToken = (probe: "typed-emoji-made-up" | "typed-emoji-app" | "typed-emoji-guild", context: ProbeContext): Effect.Effect<string> => {
+  switch (probe) {
+    case "typed-emoji-made-up":
+      return Effect.succeed(`<:lab_made_up:${madeUpId}>`)
+    case "typed-emoji-app":
+      return Effect.map(need(context.appEmojiId, "the subject application's emoji"), (id) => `<:${LabIds.appEmojiSpec.name}:${id}>`)
+    case "typed-emoji-guild":
+      return Effect.map(need(context.emojiId, "the lab's guild emoji"), (id) => `<:${LabIds.emojiSpec.name}:${id}>`)
+  }
+}
+
 /** Runs `probe` (see the module comment). */
 export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<ProbeResult, Transient | import("./Lab.ts").LabRequestFailed, SubjectRaw | HarnessRest | TargetRest | LabGuard | Sessions | Pacing> =>
   Effect.gen(function* () {
@@ -216,7 +249,7 @@ export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<Prob
       }
       case "raw-unknown-sticker":
         // a well-formed snowflake that names no sticker
-        return fromRaw(yield* rawCreate(here, { sticker_ids: ["100000000000000000"] }))
+        return fromRaw(yield* rawCreate(here, { sticker_ids: [madeUpId] }))
       case "raw-empty":
         return fromRaw(yield* rawCreate(here, {}))
       case "typed-cv2": {
@@ -273,14 +306,11 @@ export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<Prob
         return result(field(applied, "mention_roles"), Outcome.ok(applied ? [] : ["MentionEveryone"]))
       }
       case "typed-five-links": {
-        const link = { kind: "button", style: "link", label: "Docs", url: "https://discord.com/developers/docs" } as const
         const sent = yield* typedSend({ content: "lab rule", components: [row([link, link, link, link, link])] })
         return result(sent.observation, sent.raw)
       }
-      case "raw-six-links": {
-        const link = { type: 2, style: 5, label: "Docs", url: "https://discord.com/developers/docs" }
-        return fromRaw(yield* rawCreate(here, { content: "lab rule", components: [{ type: 1, components: [link, link, link, link, link, link] }] }))
-      }
+      case "raw-six-links":
+        return fromRaw(yield* rawCreate(here, { content: "lab rule", components: [{ type: 1, components: [wireLink, wireLink, wireLink, wireLink, wireLink, wireLink] }] }))
       case "typed-select-alone": {
         const route = ComponentRoute.make("lab-select", Schema.Struct({}))
         const customId = yield* route.customId({}).pipe(Effect.orDie)
@@ -297,10 +327,60 @@ export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<Prob
       case "raw-link-custom-id":
         return fromRaw(yield* rawCreate(here, { content: "lab rule", components: [{ type: 1, components: [{ type: 2, style: 5, label: "Docs", url: "https://discord.com/developers/docs", custom_id: "lab-link:{}" }] }] }))
       case "raw-premium-unlabelled":
-      case "raw-premium-labelled": {
-        // a well-formed SKU ID the application does not own; the differential is whether a `label` path appears (open question 6)
-        const button = { type: 2, style: 6, sku_id: "100000000000000000", ...(probe === "raw-premium-labelled" ? { label: "Buy" } : {}) }
+      case "raw-premium-labelled":
+      case "raw-premium-custom-id": {
+        // a well-formed SKU ID the application does not own; the differential is whether a `label` (open question 6) or,
+        // after the final audit, a `custom_id` path appears
+        const extra = probe === "raw-premium-labelled" ? { label: "Buy" } : probe === "raw-premium-custom-id" ? { custom_id: "lab-premium:{}" } : {}
+        const button = { type: 2, style: 6, sku_id: madeUpId, ...extra }
         return fromRaw(yield* rawCreate(here, { components: [{ type: 1, components: [button] }] }))
+      }
+      // ---- after the final audit: a message's rows, an empty row, an interactive button's url, external emoji ----
+      case "typed-five-rows": {
+        const one = row([link])
+        const sent = yield* typedSend({ content: "lab rule", components: [one, one, one, one, one] })
+        return result(sent.observation, sent.raw)
+      }
+      case "raw-six-rows":
+        return fromRaw(yield* rawCreate(here, { content: "lab rule", components: wireRows(6) }))
+      case "raw-empty-row":
+        return fromRaw(yield* rawCreate(here, { content: "lab rule", components: [{ type: 1, components: [] }] }))
+      case "typed-edit-five-rows": {
+        const own = messageHandle(runtime, { guildId, id: here, kind: "text" }, yield* need(context.subjectMessage, "subject message"))
+        if (own.author !== "self") return yield* Effect.die(new Error("probe: the subject message is not the subject's"))
+        const one = row([link])
+        const edited = yield* typed(Effect.asVoid(own.edit({ components: [one, one, one, one, one] })))
+        return result(edited.observation, edited.raw)
+      }
+      case "raw-edit-six-rows": {
+        const own = yield* need(context.subjectMessage, "subject message")
+        return fromRaw(yield* raw("/channels/{channel.id}/messages/{message.id}", "PATCH", (subject) => subject.updateMessage(here, own.id, { ...quiet, components: wireRows(6) })))
+      }
+      case "typed-interactive-button": {
+        const route = ComponentRoute.make("lab-button", Schema.Struct({}))
+        const customId = yield* route.customId({}).pipe(Effect.orDie)
+        const sent = yield* typedSend({ content: "lab rule", components: [row([{ kind: "button", style: "primary", label: "Go", customId }])] })
+        return result(sent.observation, sent.raw)
+      }
+      case "raw-interactive-url":
+        return fromRaw(
+          yield* rawCreate(here, { content: "lab rule", components: [{ type: 1, components: [{ type: 2, style: 1, label: "Go", custom_id: "lab-button:{}", url: "https://discord.com/developers/docs" }] }] })
+        )
+      case "typed-emoji-made-up":
+      case "typed-emoji-app":
+      case "typed-emoji-guild": {
+        // H-104: whether Discord keeps the token, as the harness reads the message back; the library's readback (its
+        // `degraded`) must say the same, as the mention probes' must
+        const token = yield* emojiToken(probe, context)
+        const sent = yield* typedSend({ content: `lab rule ${token}` })
+        if (sent.value === undefined) return result(sent.observation, sent.raw)
+        const message = yield* readMessage(here, sent.value.message.id)
+        const kept = message.content.includes(token)
+        const libraryDropped = sent.value.degraded.includes("UseExternalEmojis")
+        if (libraryDropped === kept) {
+          return yield* Effect.die(new Error(`probe ${probe}: the library's readback says UseExternalEmojis ${libraryDropped ? "dropped" : "kept"} the emoji, the harness reads the content ${kept ? "with" : "without"} it`))
+        }
+        return { ...result(field(kept, "content"), Outcome.ok(kept ? [] : ["UseExternalEmojis"])), note: `sent ${JSON.stringify(`lab rule ${token}`)}, read back ${JSON.stringify(message.content)}` }
       }
       case "typed-content-max": {
         const sent = yield* typedSend({ content: unitString(Limits.content) })
@@ -464,6 +544,17 @@ export const run = (probe: ProbeName, context: ProbeContext): Effect.Effect<Prob
       }
       case "raw-slowmode-over":
         return fromRaw(yield* raw(channelRoute, "PATCH", (subject) => subject.updateChannel(here, { rate_limit_per_user: Limits.slowmode.max + 1 })))
+      // after the final audit: a number literal other than a small natural keeps SlowmodeOutOfRange; below the range, and
+      // not an integer (an accepted edit changes the scenario channel's slowmode, which the next Converge restores)
+      case "raw-slowmode-negative":
+        return fromRaw(yield* raw(channelRoute, "PATCH", (subject) => subject.updateChannel(here, { rate_limit_per_user: Limits.slowmode.min - 1 })))
+      case "raw-slowmode-fraction": {
+        // when Discord accepts it, what it stored is the observation (the edited channel it answers with)
+        const answer = yield* raw(channelRoute, "PATCH", (subject) => subject.updateChannel(here, { rate_limit_per_user: 1.5 }))
+        if (answer._tag === "Rejected") return fromRaw(answer)
+        const channel = yield* decodeOrDie(ChannelRead, "the edited channel")(answer.body)
+        return result({ _tag: "Applied", field: `rate_limit_per_user ${channel.rate_limit_per_user ?? "absent"}` }, rawOf(answer))
+      }
       // ---- members ----
       case "typed-nickname-max": {
         const member = memberHandle(runtime, guildId, yield* need(context.target, "target member"))

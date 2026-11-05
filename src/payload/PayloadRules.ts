@@ -163,7 +163,9 @@ export interface StringLimits {
 
 /**
  * A number literal the types accept as in range: a non-negative integer of at most four digits (0 to 9999, inside
- * slowmode's 0 to 21600). Any other literal keeps the tag (a sound over-approximation).
+ * slowmode's 0 to 21600). Any other literal keeps the tag: a negative one or a fraction because the local check refuses
+ * it (live, after the final audit: Discord refuses -1, and accepts 1.5 but stores 1), a larger natural as a sound
+ * over-approximation.
  */
 type SmallNatural<N extends number> = `${N}` extends `${string}${"-" | "." | "e"}${string}` ? false : `${N}` extends `${infer _0}${infer _1}${infer _2}${infer _3}${infer _4}${string}` ? false : true
 

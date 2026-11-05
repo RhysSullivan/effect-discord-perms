@@ -156,6 +156,7 @@ export const checkChannelEdit = (
   if (patch.name !== undefined) out.push(...checkName(patch.name, cause))
   const topicLimit = forum ? Limits.topic.forum : Limits.topic.channel
   if (patch.topic !== undefined && lengthOf(patch.topic) > topicLimit) out.push(new TopicTooLong({ length: lengthOf(patch.topic), limit: topicLimit, cause }))
+  // a fraction too: Discord accepts 1.5 and stores 1 (live, after the final audit), which is not what was asked
   const seconds = patch.slowmodeSeconds
   if (seconds !== undefined && (!Number.isInteger(seconds) || seconds < Limits.slowmode.min || seconds > Limits.slowmode.max)) out.push(new SlowmodeOutOfRange({ seconds: Math.trunc(seconds), cause }))
   return out

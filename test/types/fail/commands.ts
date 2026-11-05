@@ -149,6 +149,13 @@ export const stringMin = Command.chatInput({ name: "x", description: "d", option
 export const stringKinds = Command.chatInput({ name: "x", description: "d", options: [{ type: "string", name: "s", description: "d", channelTypes: ["text"] }] })
 // @expect-error TS2322 only string options take minLength
 export const integerLength = Command.chatInput({ name: "x", description: "d", options: [{ type: "integer", name: "n", description: "d", minLength: 2 }] })
+// before the live pairs (after the final audit): the other three keys' messages, each on a type that refuses it
+// @expect-error TS2322 only string, integer and number options take autocomplete
+export const boolAutocomplete = Command.chatInput({ name: "x", description: "d", options: [{ type: "boolean", name: "on", description: "d", autocomplete: true }] })
+// @expect-error TS2322 only string options take maxLength
+export const numberLength = Command.chatInput({ name: "x", description: "d", options: [{ type: "number", name: "n", description: "d", maxLength: 5 }] })
+// @expect-error TS2322 only integer and number options take maxValue
+export const userMax = Command.chatInput({ name: "x", description: "d", options: [{ type: "user", name: "u", description: "d", maxValue: 3 }] })
 
 // ---- a `required` that is not a literal may be true, so it must come before every optional option too ----
 // @expect-error TS2322 required option b must come before every optional option

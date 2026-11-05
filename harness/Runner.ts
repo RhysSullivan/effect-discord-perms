@@ -229,6 +229,8 @@ interface Context {
   readonly ids: Materialize.Ids
   readonly stickerId: StickerId | undefined
   readonly emojiId: EmojiId | undefined
+  /** The subject application's emoji (the external-emoji rule rows, after the final audit). */
+  readonly appEmojiId: EmojiId | undefined
   readonly log: (line: string) => Effect.Effect<void, PlatformError>
   readonly oracleSeen: { unavailable: boolean }
   /**
@@ -402,6 +404,8 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
         harnessMessage: yield* readWire(posted.harnessMessage),
         secondHarnessMessage: posted.secondHarnessMessage,
         stickerId: context.stickerId,
+        emojiId: context.emojiId,
+        appEmojiId: context.appEmojiId,
         target: staticFacts.onTarget ? yield* readTarget : undefined,
         now
       }).pipe(Effect.catch((error) => (error._tag === "LabRequestFailed" ? Effect.fail(error) : infrastructure(`${scenario.id}: the probe`)(error))))
@@ -413,7 +417,7 @@ const execute = (scenario: Scenario, context: Context, harnessUserId: string) =>
       }
       yield* cleanup
       yield* lap("cleanup")
-      yield* context.log(`${scenario.id}: ${settled.resent.length > 0 ? `resent ${settled.resent.join(",")} for obfuscation; ` : ""}probe ${JSON.stringify(probed.observation)}; ${profile()}`)
+      yield* context.log(`${scenario.id}: ${settled.resent.length > 0 ? `resent ${settled.resent.join(",")} for obfuscation; ` : ""}probe ${JSON.stringify(probed.observation)}${probed.note === undefined ? "" : ` (${probed.note})`}; ${profile()}`)
       const row: Omit<TruthTable.Row, "agreement"> = {
         ...base,
         resolver: { required: [], missing: [], missingBeforeMasks: [], masks: [], level: "none" },
@@ -619,7 +623,7 @@ export const runOnce = (report: IdentityReport, scenarios: ReadonlyArray<Scenari
     const everyoneBaseline = everyone === undefined ? [] : Flags.toSortedNames(Flags.fromBits(BigInt(everyone.permissions)))
 
     const canned = yield* DryRun.loadCanned.pipe(Effect.provide(BunFileSystem.layer))
-    const runContext: Context = { ids, stickerId: state.sticker, emojiId: state.emoji, log, oracleSeen: { unavailable: false }, dirty: new Set(), canned, known: Converge.unknownView }
+    const runContext: Context = { ids, stickerId: state.sticker, emojiId: state.emoji, appEmojiId: state.appEmoji, log, oracleSeen: { unavailable: false }, dirty: new Set(), canned, known: Converge.unknownView }
     const ordered = order(scenarios)
     const rows: Record<string, TruthTable.Row> = {}
     const pacing = yield* Pacing

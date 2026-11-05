@@ -8,6 +8,9 @@
  *   `lab-high`, `lab-mid`, `lab-low`, the subject's managed role, the target's managed role, `lab-grant`,
  *   ..., `lab-unmentionable` (H-073). They are written only when the observed order differs, and read back.
  * - A guild sticker and a guild emoji (`lab_emoji`, for reactions with a guild emoji).
+ * - The subject application's own emoji (`lab_app_emoji`, after the final audit: the external-emoji rule rows, H-104),
+ *   created through the subject's client when the application has no emoji of that name. It belongs to the
+ *   application, not to a guild, and is never edited or deleted.
  *
  * If provisioning wrote anything, it ends with a full reset, which brings the new objects to the same
  * baseline (the target's roles, thread memberships, the system messages thread creation posts), so a reset
@@ -18,7 +21,7 @@ import type { CreateThreadRequest } from "dfx/DiscordREST/Generated"
 import { Effect, Option, Ref, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { deflateSync } from "node:zlib"
-import type { SubjectRaw } from "../src/bot/Internals.ts"
+import { SubjectRaw } from "../src/bot/Internals.ts"
 import type { GuildId, UserId } from "../src/Snowflake.ts"
 import { HarnessRest } from "./Identities.ts"
 import { LabCheckFailed, LabGuard, LabRequestFailed, labStep, labStepUnless } from "./Lab.ts"
@@ -306,7 +309,32 @@ const ensureEmoji = (run: Provisioning) =>
     yield* record(run, { created: LabIds.emojiSpec.name }, (state) => ({ ...state, emoji: emoji.id }))
   })
 
-/** Creates what is missing, sets role positions, ensures the sticker and the emoji, then resets if anything was written. */
+const AppEmojis = Schema.Struct({ items: Schema.Array(Wire.Emoji) })
+
+/**
+ * The subject application's emoji: found by name in the application's list (a stored ID is not trusted on its own), or
+ * created as a 128 x 128 PNG data URI. The ID is persisted either way.
+ */
+const ensureAppEmoji = (run: Provisioning) =>
+  Effect.gen(function* () {
+    const subject = yield* SubjectRaw
+    const application = run.context.subjectApplicationId
+    const listed = yield* subject
+      .listApplicationEmojis(application)
+      .pipe(labStep("provision: list the subject application's emojis"), Effect.flatMap(Wire.decode(AppEmojis, "listApplicationEmojis")))
+    const found = listed.items.find((emoji) => emoji.name === LabIds.appEmojiSpec.name)
+    if (found !== undefined) {
+      if ((yield* Ref.get(run.state)).appEmoji !== found.id) yield* record(run, { note: `found ${LabIds.appEmojiSpec.name}` }, (state) => ({ ...state, appEmoji: found.id }))
+      return
+    }
+    const image = `data:image/png;base64,${Buffer.from(solidPng(128, [87, 242, 135])).toString("base64")}`
+    const emoji = yield* subject
+      .createApplicationEmoji(application, { name: LabIds.appEmojiSpec.name, image })
+      .pipe(labStep("provision: create the subject application's emoji"), Effect.flatMap(Wire.decode(Wire.Emoji, "createApplicationEmoji")))
+    yield* record(run, { created: LabIds.appEmojiSpec.name }, (state) => ({ ...state, appEmoji: emoji.id }))
+  })
+
+/** Creates what is missing, sets role positions, ensures the sticker and the emojis, then resets if anything was written. */
 export const run = (context: Reset.Context): Effect.Effect<Result, LabRequestFailed | LabCheckFailed | PlatformError, HarnessRest | SubjectRaw | LabGuard | Pacing> =>
   Effect.gen(function* () {
     const pacing = yield* Pacing
@@ -324,6 +352,7 @@ export const run = (context: Reset.Context): Effect.Effect<Result, LabRequestFai
     const positions = yield* ensurePositions(provisioning)
     yield* ensureSticker(provisioning)
     yield* ensureEmoji(provisioning)
+    yield* ensureAppEmoji(provisioning)
     const written = Reset.writesBetween(before, yield* pacing.stats)
     const notes: Array<string> = [...(yield* Ref.get(provisioning.notes)), ...positions.notes]
     if (written.writes > 0) notes.push(...(yield* Reset.run(context)).notes)

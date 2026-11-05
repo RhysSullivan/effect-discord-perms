@@ -134,6 +134,44 @@ describe("registryProblems", () => {
       expect(registryProblems([pairRule], view({ ...base, table: twoSetups }))).toEqual(["R-ids-distinct: the sides ran on different setups"])
     })
   })
+
+  describe("evidence rows (after the final audit)", () => {
+    const evidenceRule: Rule = {
+      ...pureTyping,
+      id: "R-payload-external-emoji",
+      live: { kind: "not-live", reason: "needs-second-guild" },
+      evidence: [
+        { scenario: "rule/text-send/typed-emoji-made-up", expect: { _tag: "Ignored", field: "content" } },
+        { scenario: "rule/text-external-emoji/typed-emoji-made-up", expect: { _tag: "Applied", field: "content" } }
+      ]
+    }
+    const catalog = new Map([
+      ["rule/text-send/typed-emoji-made-up", "text-send"],
+      ["rule/text-external-emoji/typed-emoji-made-up", "text-external-emoji"]
+    ])
+    const row = (observation: unknown, setup: string): PairRowView => ({ setup, observation: JSON.stringify(observation) })
+    const table = new Map<string, PairRowView>([
+      ["rule/text-send/typed-emoji-made-up", row({ _tag: "Ignored", field: "content" }, "S")],
+      ["rule/text-external-emoji/typed-emoji-made-up", row({ _tag: "Applied", field: "content" }, "T")]
+    ])
+    const base = { log: "R-payload-external-emoji", ruleCatalog: catalog, table }
+
+    it("passes rows of the catalog that observe exactly their expectations, on as many setups as they name", () => {
+      expect(registryProblems([evidenceRule], view(base))).toEqual([])
+    })
+
+    it("fails a row missing from the catalog or the table, an observation that differs, and a missing table", () => {
+      expect(registryProblems([evidenceRule], view({ ...base, ruleCatalog: new Map([...catalog].slice(0, 1)) }))).toEqual([
+        "R-payload-external-emoji: the evidence 2 row rule/text-external-emoji/typed-emoji-made-up is not a scenario of harness/scenario/catalog/rules.ts"
+      ])
+      expect(registryProblems([evidenceRule], view({ ...base, table: new Map([...table].slice(1)) }))).toEqual([
+        "R-payload-external-emoji: the evidence 1 row rule/text-send/typed-emoji-made-up has no row in fixtures/truth-table.json"
+      ])
+      const flipped = new Map([...table, ["rule/text-send/typed-emoji-made-up", row({ _tag: "Applied", field: "content" }, "S")]])
+      expect(registryProblems([evidenceRule], view({ ...base, table: flipped }))[0]).toMatch(/evidence 1 row .* observed .*Applied.*, but the registry expects .*Ignored/)
+      expect(registryProblems([evidenceRule], view({ ...base, table: undefined }))).toHaveLength(2)
+    })
+  })
 })
 
 describe("coverageProblems", () => {

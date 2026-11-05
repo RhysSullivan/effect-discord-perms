@@ -155,6 +155,21 @@ describe("the guard's verdict", () => {
     expect(decide("PATCH", `/channels/${labChannel}`, json({ name: "general" }))).toBe("Refuse")
   })
 
+  it("creates only the subject application's lab_ emoji outside the guild, and never edits or deletes one (after the final audit)", () => {
+    const subjectApp = "100000000000000002"
+    const withApp: GuardState = { ...armed, armed: Option.map(armed.armed, (value) => ({ ...value, subjectApplicationId: subjectApp })) }
+    const emoji = json({ name: "lab_app_emoji", image: "data:image/png;base64,AA==" })
+    expect(decide("POST", `/applications/${subjectApp}/emojis`, emoji, withApp)).toBe("Allow")
+    expect(decide("POST", `/applications/${subjectApp}/emojis`, json({ name: "wave", image: "data:image/png;base64,AA==" }), withApp)).toBe("Refuse")
+    expect(decide("POST", `/applications/${subjectApp}/emojis`, undefined, withApp)).toBe("Refuse")
+    expect(decide("PATCH", `/applications/${subjectApp}/emojis/1`, json({ name: "lab_x" }), withApp)).toBe("Refuse")
+    expect(decide("DELETE", `/applications/${subjectApp}/emojis/1`, undefined, withApp)).toBe("Refuse")
+    // another application, or no application armed
+    expect(decide("POST", "/applications/100000000000000003/emojis", emoji, withApp)).toBe("Refuse")
+    expect(decide("POST", `/applications/${subjectApp}/emojis`, emoji)).toBe("Refuse")
+    expect(decide("GET", `/applications/${subjectApp}/emojis`, undefined, withApp)).toBe("Allow")
+  })
+
   it("creates only lab_ emoji, and never edits or deletes one", () => {
     expect(decide("POST", `/guilds/${guild}/emojis`, json({ name: "lab_emoji", image: "data:image/png;base64,AA==" }))).toBe("Allow")
     expect(decide("POST", `/guilds/${guild}/emojis`, json({ name: "wave", image: "data:image/png;base64,AA==" }))).toBe("Refuse")

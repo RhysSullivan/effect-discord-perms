@@ -127,8 +127,9 @@ describe("the run order", () => {
     expect([...ordered].map((scenario) => scenario.id).sort()).toEqual(scenarios.map((scenario) => scenario.id).sort())
     expect(order(scenarios)).toEqual(ordered)
     // M4: 68; M6 adds the rule rows, the coverage rows and their flips (77); M7's codec moves the ViewChannel flips
-    // of timed-out rows, which the obfuscation now blinds, to coverage rows (80); the intent sessions add no role state
-    expect(roleEditsOf(ordered)).toBe(80)
+    // of timed-out rows, which the obfuscation now blinds, to coverage rows (80); the intent sessions add no role state;
+    // after the final audit, the external-emoji rows with UseExternalEmojis add one (81)
+    expect(roleEditsOf(ordered)).toBe(81)
     // the M3 order (by setup alone) changed them far more often
     const bySetup = [...scenarios].sort((a, b) => (JSON.stringify(a.setup) < JSON.stringify(b.setup) ? -1 : 1))
     expect(roleEditsOf(bySetup)).toBeGreaterThan(150)

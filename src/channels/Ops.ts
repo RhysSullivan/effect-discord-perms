@@ -290,7 +290,9 @@ const sendOps: { readonly [K in MessageKind]: SendOpByKind[K] } = {
 /**
  * The flags whose effect the create response lacks (§4.12, D35), among the payload's degrade-mode features:
  * `@everyone` that did not mention everyone (H-100), a role missing from `mention_roles` (H-101), a custom emoji
- * Discord rewrote (H-104), TTS sent as a normal message (H-102).
+ * Discord rewrote (H-104), TTS sent as a normal message (H-102). A rewritten emoji is reported as `UseExternalEmojis`
+ * whatever the cause: Discord also rewrites one the bot cannot use at all, with the flag held (live, after the final
+ * audit: a made-up ID), so the entry names the dropped feature's rule, not always a missing flag.
  */
 export const degradedOf = (payload: MessagePayload, message: Schemas.Message): ReadonlyArray<PermissionFlag> => {
   const dropped = new Set<PermissionFlag>()

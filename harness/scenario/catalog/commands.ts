@@ -14,7 +14,8 @@
  * stores commands (`fixtures/commands-canonical.json`, open question 11), covering every field the library sends.
  */
 import { Schema } from "effect"
-import { type AnyChatInputCommand, Command } from "../../../src/commands/Command.ts"
+import { type AnyChatInputCommand, Command, type ValueOption } from "../../../src/commands/Command.ts"
+import type { Invalid } from "../../../src/payload/Components.ts"
 
 /** The command name the registration rows share: 32 characters, lowercase, no spaces (H-190, H-191). */
 export const labCommandName = "lab-command-name-at-the-32-limit"
@@ -337,14 +338,113 @@ export const rawBodies = {
 /** A raw registration probe. */
 export type RawRegistration = keyof typeof rawBodies
 
+// ---- the keys an option type does not take (R-option-keys, after the final audit) -----------------------------
+
+/**
+ * R-option-keys's valid side: {@link labCommandName} with every key the library declares, each on an option type that
+ * takes it (choices and autocomplete on string, integer and number options, apart, as Discord requires; a length range
+ * on a string; a value range on an integer and a number; channel types on a channel), and the three types that take
+ * none. The probe reads it back and compares each key with the definition (`CommandProbes.storedKeysAsDefined`).
+ */
+export const optionKeysCommand = Command.chatInput({
+  name: labCommandName,
+  description: "Perms Lab: every option key on its own type",
+  options: [
+    { type: "string", name: "text", description: "a string", minLength: 2, maxLength: 50, autocomplete: true },
+    { type: "string", name: "pick", description: "a string", choices: [{ name: "One", value: "one" }] },
+    { type: "integer", name: "count", description: "an integer", minValue: 1, maxValue: 10, autocomplete: true },
+    { type: "integer", name: "level", description: "an integer", choices: [{ name: "Five", value: 5 }] },
+    { type: "number", name: "ratio", description: "a number", minValue: 0, maxValue: 1.5, autocomplete: true },
+    { type: "number", name: "share", description: "a number", choices: [{ name: "Half", value: 0.5 }] },
+    { type: "channel", name: "where", description: "a channel", channelTypes: ["text"] },
+    { type: "boolean", name: "flag", description: "a boolean" },
+    { type: "user", name: "who", description: "a user" },
+    { type: "role", name: "role", description: "a role" }
+  ]
+})
+
+/** Discord's number for each value option type the library declares (`Canonical.optionTypes`, written out here). */
+export const wireOptionTypes = { string: 3, integer: 4, boolean: 5, user: 6, channel: 7, role: 8, number: 10 } as const
+
+/** A value option type, by the library's name. */
+export type WireOptionType = keyof typeof wireOptionTypes
+
+/**
+ * Each key the library's option types refuse on some types (`Command.ts`, `NotTaken`), as Discord names it, with a
+ * value of the shape it has where it is taken, and every option type the library refuses it on. A raw side POSTs one
+ * option of each of those types carrying the key (R-option-keys).
+ */
+export const misplacedKeys = {
+  choices: { value: [{ name: "One", value: "one" }], on: ["boolean", "user", "role", "channel"] },
+  autocomplete: { value: true, on: ["boolean", "user", "role", "channel"] },
+  min_length: { value: 2, on: ["integer", "number", "boolean", "user", "role", "channel"] },
+  max_length: { value: 50, on: ["integer", "number", "boolean", "user", "role", "channel"] },
+  min_value: { value: 1, on: ["string", "boolean", "user", "role", "channel"] },
+  max_value: { value: 10, on: ["string", "boolean", "user", "role", "channel"] },
+  channel_types: { value: [0], on: ["string", "integer", "number", "boolean", "user", "role"] }
+} as const satisfies Readonly<Record<string, { readonly value: Schema.Json; readonly on: ReadonlyArray<WireOptionType> }>>
+
+/** A key {@link misplacedKeys} lists. */
+export type MisplacedKey = keyof typeof misplacedKeys
+
+/** Each misplaced key's name in the library's definitions. */
+interface LibraryKeys {
+  readonly choices: "choices"
+  readonly autocomplete: "autocomplete"
+  readonly min_length: "minLength"
+  readonly max_length: "maxLength"
+  readonly min_value: "minValue"
+  readonly max_value: "maxValue"
+  readonly channel_types: "channelTypes"
+}
+
+/** The option types whose library interface types the key `L` as a message, that is, refuses it (`NotTaken`). */
+type RefusingTypes<L extends string> = {
+  readonly [T in WireOptionType]: L extends keyof Extract<ValueOption, { readonly type: T }> ? (NonNullable<Extract<ValueOption, { readonly type: T }>[L]> extends Invalid<string> ? T : never) : never
+}[WireOptionType]
+
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+
+/** Holds {@link misplacedKeys} to the library's types: each key's types are exactly the ones `Command.ts` refuses it on. */
+const misplacedKeysMatchTheTypes: { readonly [K in MisplacedKey]: Same<(typeof misplacedKeys)[K]["on"][number], RefusingTypes<LibraryKeys[K]>> } = {
+  choices: true,
+  autocomplete: true,
+  min_length: true,
+  max_length: true,
+  min_value: true,
+  max_value: true,
+  channel_types: true
+}
+void misplacedKeysMatchTheTypes
+
+/** The raw option-key probes, each with the key it misplaces. */
+export const optionKeyProbes = {
+  "raw-option-key-choices": "choices",
+  "raw-option-key-autocomplete": "autocomplete",
+  "raw-option-key-min-length": "min_length",
+  "raw-option-key-max-length": "max_length",
+  "raw-option-key-min-value": "min_value",
+  "raw-option-key-max-value": "max_value",
+  "raw-option-key-channel-types": "channel_types"
+} as const satisfies Readonly<Record<string, MisplacedKey>>
+
+/** A raw option-key probe. */
+export type OptionKeyProbe = keyof typeof optionKeyProbes
+
+/** The body a raw option-key probe POSTs: {@link labCommandName} with one option per type that refuses `key`, named after its type. */
+export const optionKeyBody = (key: MisplacedKey): Schema.JsonObject =>
+  rawCommand(misplacedKeys[key].on.map((type): Schema.JsonObject => ({ type: wireOptionTypes[type], name: type, description: `a ${type}`, [key]: misplacedKeys[key].value })))
+
 /** The command probes (`scenario/Probes.ts` lists them; `harness/CommandProbes.ts` runs them). */
 export const commandProbeNames = [
   "typed-register-options",
   "typed-register-subcommands",
   "typed-register-choices",
+  "typed-register-option-keys",
   "typed-sync-identical",
   ...mutatedFields.map((field) => `typed-sync-${field}` as const),
   ...(Object.keys(rawBodies) as ReadonlyArray<RawRegistration>),
+  ...(Object.keys(optionKeyProbes) as ReadonlyArray<OptionKeyProbe>),
   "typed-custom-id-max",
   "raw-custom-id-over"
 ] as const

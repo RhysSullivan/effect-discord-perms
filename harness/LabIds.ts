@@ -125,6 +125,13 @@ export const stickerSpec = { name: "lab-sticker", tags: "lab", description: "Per
 export const emojiSpec = { name: "lab_emoji" } as const
 
 /**
+ * The subject application's own emoji (after the final audit; H-104: application emojis are exempt from
+ * UseExternalEmojis, EMO). It belongs to the application, not to any guild: provisioning creates it through the
+ * subject's client when the application has none of this name, and never edits or deletes it.
+ */
+export const appEmojiSpec = { name: "lab_app_emoji" } as const
+
+/**
  * The roles that set ranks in the members family (H-060..H-067): the subject holds `lab-mid`; the target holds
  * nothing more (below), `lab-mid` (equal) or `lab-high` (above); a role assigned or removed is `lab-low`
  * (below the subject's highest role), `lab-mid` (its own highest role) or `lab-high` (above it).
@@ -148,6 +155,8 @@ export const LabState = Schema.Struct({
   roles: Schema.Record(Schema.String, RoleId),
   sticker: Schema.optionalKey(StickerId),
   emoji: Schema.optionalKey(EmojiId),
+  /** The subject application's emoji ({@link appEmojiSpec}). */
+  appEmoji: Schema.optionalKey(EmojiId),
   /**
    * Lab channels Discord refused to create because the kind is not available in this guild (50024 on create,
    * observed for GuildMedia in M2). Provision does not retry them; scenarios on them record

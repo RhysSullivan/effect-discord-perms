@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { commandWrites } from "../../harness/CommandProbes.ts"
-import { baseCommand, labCommandName, mutatedFields, mutations, nestedCommand, optionsCommand, rawBodies, recordingSamples } from "../../harness/scenario/catalog/commands.ts"
+import { baseCommand, labCommandName, misplacedKeys, mutatedFields, mutations, nestedCommand, optionKeyBody, optionKeysCommand, optionsCommand, rawBodies, recordingSamples } from "../../harness/scenario/catalog/commands.ts"
 import type { Stats } from "../../harness/Pacing.ts"
 import { canonical, jsonText, toDiscord } from "../../src/commands/Canonical.ts"
 import type { AnyChatInputCommand } from "../../src/commands/Command.ts"
@@ -15,7 +15,7 @@ const text = (command: AnyChatInputCommand) => jsonText(canonical(toDiscord(comm
 
 describe("the registration rows' catalog", () => {
   it("has mutations that each differ from the base, from each other and from every other registered definition", () => {
-    const registered = [baseCommand, optionsCommand, nestedCommand, ...recordingSamples]
+    const registered = [baseCommand, optionsCommand, nestedCommand, optionKeysCommand, ...recordingSamples]
     const all = [...mutatedFields.map((field) => mutations[field]), ...registered]
     expect(new Set(all.map(text)).size).toBe(all.length)
   })
@@ -30,13 +30,17 @@ describe("the registration rows' catalog", () => {
   })
 
   it("registers every typed definition under the one command name but the name mutation's", () => {
-    for (const command of [baseCommand, optionsCommand, nestedCommand, ...mutatedFields.filter((field) => field !== "name").map((field) => mutations[field])]) expect(command.name).toBe(labCommandName)
+    for (const command of [baseCommand, optionsCommand, nestedCommand, optionKeysCommand, ...mutatedFields.filter((field) => field !== "name").map((field) => mutations[field])]) expect(command.name).toBe(labCommandName)
     expect(mutations.name.name).not.toBe(labCommandName)
   })
 
   it("POSTs every raw side under the one command name, except the three whose name is what the types forbid", () => {
     const named = Object.entries(rawBodies).filter(([, body]) => body["name"] !== labCommandName).map(([probe]) => probe)
     expect(named.sort()).toStrictEqual(["raw-command-name-33", "raw-command-name-space", "raw-command-name-upper"])
+  })
+
+  it("POSTs every raw option-key side under the one command name (after the final audit)", () => {
+    for (const key of Object.keys(misplacedKeys) as ReadonlyArray<keyof typeof misplacedKeys>) expect(optionKeyBody(key)["name"]).toBe(labCommandName)
   })
 
   it("counts the command writes the base client sent, less the ones Discord answered 429 (which dfx sends again)", () => {

@@ -100,14 +100,23 @@ Property '[InvalidId]' is missing in type '[string]' but required in type 'Inval
 L151:137 TS2322
 Type 'number' is not assignable to type 'Invalid<"only string options take minLength">'.
 
-L155:185 TS2322
+L154:141 TS2322
+Type 'boolean' is not assignable to type 'Invalid<"only string, integer and number options take autocomplete">'.
+
+L156:135 TS2322
+Type 'number' is not assignable to type 'Invalid<"only string options take maxLength">'.
+
+L158:128 TS2322
+Type 'number' is not assignable to type 'Invalid<"only integer and number options take maxValue">'.
+
+L162:185 TS2322
 Type 'boolean' is not assignable to type '(false & Invalid<"required option b must come before every optional option">) | (true & Invalid<"required option b must come before every optional option">)'.
 
-L159:14 TS2322
+L166:14 TS2322
 Type '{ token: Config.Config<Redacted.Redacted<string>>; commands: never[]; }' is not assignable to type 'BotConfig'.
   Type '{ token: Config.Config<Redacted.Redacted<string>>; commands: never[]; }' is not assignable to type '{ readonly token: Config<Redacted<string>>; } & { readonly guildId: string & Brand<"GuildId">; readonly commands?: readonly AnyChatInputCommand[]; }'.
     Property 'guildId' is missing in type '{ token: Config.Config<Redacted.Redacted<string>>; commands: never[]; }' but required in type '{ readonly guildId: string & Brand<"GuildId">; readonly commands?: readonly AnyChatInputCommand[]; }'.
 
-L163:139 TS2322
+L170:139 TS2322
 Type '{ kind: "chat-input"; name: string; definition: { name: string; description: string; options: []; }; }' is not assignable to type 'AnyChatInputCommand'.
   Property '[InvocationType]' is missing in type '{ kind: "chat-input"; name: string; definition: { name: string; description: string; options: []; }; }' but required in type 'ChatInputCommand<string, unknown>'.

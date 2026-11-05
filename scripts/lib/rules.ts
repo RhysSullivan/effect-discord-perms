@@ -144,6 +144,7 @@ export const registryProblems = (rules: ReadonlyArray<Rule>, view: RepositoryVie
       problems.push(...notLiveProblems(rule, rule.live, "live", view))
     }
     if (rule.remainder !== undefined) problems.push(...notLiveProblems(rule, rule.remainder, "remainder", view))
+    problems.push(...evidenceProblems(rule, view))
     if (!isPureTyping(rule) && !mentionsToken(view.log, rule.id)) problems.push(`${rule.id}: is not pure-typing, but LOG.md has no line for it`)
   }
 
@@ -190,6 +191,22 @@ const pairProblems = (rule: Rule, pair: LivePair, view: RepositoryView): Readonl
   if (ran.length === rows.length && new Set(ran.map((row) => row.setup)).size > 1) problems.push(`${rule.id}: the sides ran on different setups`)
   return problems
 }
+
+/**
+ * A rule's evidence rows' problems (after the final audit): each is a rule row of the catalog, has a row in the committed
+ * truth table, and its observation equals its full expectation. Unlike a pair's sides, they may run on several setups.
+ */
+const evidenceProblems = (rule: Rule, view: RepositoryView): ReadonlyArray<string> =>
+  (rule.evidence ?? []).flatMap((side, index): ReadonlyArray<string> => {
+    const name = `evidence ${index + 1}`
+    if (!view.ruleCatalog.has(side.scenario)) return [`${rule.id}: the ${name} row ${side.scenario} is not a scenario of harness/scenario/catalog/rules.ts`]
+    if (view.table === undefined) return [`${rule.id}: there is no truth table (fixtures/truth-table.json) to read the ${name} row from`]
+    const row = view.table.get(side.scenario)
+    if (row === undefined) return [`${rule.id}: the ${name} row ${side.scenario} has no row in fixtures/truth-table.json`]
+    const expected = view.canonical(side.expect)
+    if (row.observation === undefined) return [`${rule.id}: the ${name} row ${side.scenario} recorded no observation`]
+    return row.observation === expected ? [] : [`${rule.id}: the ${name} row ${side.scenario} observed ${row.observation.replace(/\s+/g, " ")}, but the registry expects ${expected.replace(/\s+/g, " ")}`]
+  })
 
 // ---- flag coverage (§5.5) -------------------------------------------------------------------------------
 
