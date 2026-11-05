@@ -2545,6 +2545,7 @@ Two major findings and six minor ones, each fixed (commits `812d493`, `79bca42`,
   files' snapshots were unchanged by M10 (`--update` wrote only the new one).
 - **The budget** ("Design deviations", M10; §5.4): the baseline's reference bot row (12,541 types, 28,926
   instantiations, 36 ms) and library row (72,904, 264,000, 351 ms); the per-command row's baseline kept at M9's values.
+  Reverted after the M10 verifier (below): that measurement was a loosening.
 - **The final fresh-process run.** `bun run verify:offline` exited 0 on `ed86474` (gen:errors up to date; typecheck; 1,566
   tests in 60 files; test:types 13 pass and 13 fail fixtures, 110 diagnostics, largest gated 617 characters; hover 7
   files, 27 markers; `rules ok 70 rule(s) (55 live pair, 0 escalated, 5 pure-typing, 10 other not-live), 13 fail
@@ -2560,11 +2561,12 @@ Two major findings and six minor ones, each fixed (commits `812d493`, `79bca42`,
   criteria by question (Q-17, Q-18, Q-22). The lock was gone afterwards; the create ledger held 74 creates in its 24
   hours. This is also the independent confirmation of M9's pacing run the M9 verifier asked for: against M9's 2,570 s
   and 600 invalid, 2,438 s and 604 (the four more are the 429s on bulk deletes, which dfx waited out).
-- **Exit checks.** `grep -nE "Effect\.(die|dieMessage|orDie|orDieWith)" examples/reference-bot` prints nothing and exits
-  1 (this shell's `grep` searches a directory recursively; `command grep -rnE` the same); `bun run budget` is ok
-  against the committed baseline; `bun run verify:offline` and the fresh-process `bun run verify:live` (above) both
-  exited 0.
-- **Done criteria (PROMPT.md) after M10.** Met: `verify:offline` green; `verify:live` with zero mismatches across the
+- **Exit checks (as first reported, on `ed86474`; the budget part is withdrawn below).** `grep -nE
+  "Effect\.(die|dieMessage|orDie|orDieWith)" examples/reference-bot` prints nothing and exits 1 (this shell's `grep`
+  searches a directory recursively; `command grep -rnE` the same); `bun run budget` is ok against the committed
+  baseline; `bun run verify:offline` and the fresh-process `bun run verify:live` (above) both exited 0.
+- **Done criteria (PROMPT.md) after M10, as first reported; corrected below** (`verify:offline` green and "within
+  budget" were not met: they passed only under the declarations measurement). Met: `verify:offline` green; `verify:live` with zero mismatches across the
   matrix, and consecutive fresh processes writing identical tables (M8's runs W, A and B, M9's validation run, and this
   one); the reference bot in `examples/` with no `orDie`, within budget; README.md with the guarantee; this file's live
   findings and the phase-3 checklist. Not met by an agent, by design or by decision, each recorded: the six escalated
@@ -2572,3 +2574,54 @@ Two major findings and six minor ones, each fixed (commits `812d493`, `79bca42`,
   and clicks, with the eight phase-3 interaction rules (`phase-3-offline`) that the same checklist shows live; the
   external emoji and sticker rules (`needs-second-guild`); the `@everyone` valid side and successful kicks and bans
   (`forbidden-action`, resolver only); and the media channel kind, which Perms Lab cannot create.
+
+#### After the M10 verifier
+
+- **Major: the budget measured less than a consumer pays** (commit `2d2b20e`; "Design deviations", M10; "Waiting for
+  Rhys"). The verifier was right: the declarations that the reference bot was compiled against existed only in a
+  git-ignored directory, so that measurement was a loosening of the budget, and it was reported as a pass. I reproduced the
+  verifier's outside consumer (a project in `/tmp` linking the package and holding only a copy of `bot.ts`): it
+  resolves the package to 56 files under `src/` and costs 75,509 types and 272,295 instantiations. The budget now
+  measures the bot as such a consumer compiles it, through the package's `exports` with no `paths`, and fails if the
+  bot's program does not include that entry point (checked by mapping the package to emitted declarations: the budget
+  failed with `the reference bot's program does not include the package's entry point ...`). The `library` row is gone,
+  because the reference bot's row checks the library again. `bun run budget` now prints the bot at 76,573 types,
+  275,255 instantiations and 362 ms, and fails with exactly `instantiations 275255 exceed the ceiling 250000` and
+  `types 76573 exceed the ceiling 60000`. The ceilings are not raised. README.md, DESIGN §5.4, §1.2 and §6,
+  `scripts/budget.ts`, `scripts/lib/budget.ts` and the bot's doc comment no longer say "as a user compiles it" or
+  "within budget"; README says the budget fails today, and why.
+- **Minor: the bot's test could not see `Permissions.require`.** `channel.send`'s own preflight gives the same
+  `MissingEmbedLinks` answer, so the refusal alone did not show that require ran. The test now follows the refused
+  `/poll` with one that succeeds and expects `Posted poll 1`: the refused one never reached `polls.open` (commit
+  `2359acb`). Both of the verifier's mutants fail it, with `Posted poll 2` in place of `Posted poll 1`: require removed
+  (`const channel = where ?? ix.channel`) and require of `["SendMessages"]` only. I applied each mutant, saw the test fail,
+  and reverted it.
+- **Minor: README.md.** The quote is now marked as abridged (the `export`s, doc comments, `Polls`, `pollEmbed`, and the
+  READY and vote handlers are left out). Every one of its 41 code lines is in `bot.ts` as written, apart from a dropped
+  `export `. I checked this with a script that compares the lines. The `where` description is the bot's own, and the
+  added type comment is now prose. The verification section no longer says that every rule has a live pair. It says 55
+  of the 70 do; 5 are pure typing, 8 are phase-3 interaction rules and 2 need a second guild. Seven live pairs have a
+  part that is not live: six need a human, and one would ping `@everyone`.
+- **Exit checks after the M10 verifier.** On `2d2b20e`:
+  - `grep -nE "Effect\.(die|dieMessage|orDie|orDieWith)" examples/reference-bot` prints nothing (exit 1). **Met.**
+  - `bun run budget` exits 1 with the two ceiling lines above. **Not met.**
+  - `bun run verify:offline` exits 1 with `verify:offline FAIL at budget`. Every earlier step passes: gen:errors is up
+    to date; typecheck; 1,564 tests in 60 files; test:types 13 pass and 13 fail fixtures, 110 diagnostics; hover 7
+    files, 27 markers; rules ok, 70 rules. **Not met.**
+  - `bun run verify:live` in a fresh process. **Met.** A first attempt at 01:40 stopped before any scenario on the role
+    budget (`52 role edits left in the guild's bucket, the run needs about 88 ... start again in about 52 minutes`;
+    reset and provision wrote 0). The second, at 02:36, **exited 0**: role budget 90 left (88 needed), 542 scenarios in
+    2,588 s, 9,272 requests, 2,736 writes, 596 invalid (401/403/429). dfx waited out 429s on two command POSTs, two
+    command PUTs and six reactions. No lab step was retried after a 5xx, the oracle was available, and there were
+    **0 mismatches**. `compare: identical to the previous table`: the same bytes, `6199bf0d...b164b6`, 669,042. The
+    closing reset wrote 3, the run printed the six unmet Done criteria (Q-17, Q-18, Q-22), and the lock was released.
+- **Done criteria (PROMPT.md) after the M10 verifier.**
+  - Met: `verify:live` with zero mismatches across the matrix, and consecutive fresh processes writing identical
+    tables (M8's runs W, A and B, M9's validation run, M10's run and this one); the reference bot in `examples/` with
+    no `orDie`; README.md with the guarantee; this file's live findings and the phase-3 checklist.
+  - **Not met, waiting for Rhys's budget decision ("Waiting for Rhys", first item):** `verify:offline` green, and a
+    reference bot "that compiles within budget". Both fail on the reference bot's Types and Instantiations ceilings.
+  - Not met by an agent, by design or by decision, as before: the six escalated remainders (Q-17, Q-18, Q-22), with
+    the eight phase-3 interaction rules the same checklist shows live; the external emoji and sticker rules
+    (`needs-second-guild`); the `@everyone` valid side and successful kicks and bans (`forbidden-action`, resolver
+    only); and the media channel kind, which Perms Lab cannot create.
