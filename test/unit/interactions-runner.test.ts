@@ -527,4 +527,47 @@ describe("the interaction runner", () => {
       })
     )
   )
+
+  it.effect("answers Discord once when a handler replies twice: only the returned reply is posted, and the dropped one is logged at Error", () =>
+    withRunner(({ publish, sent, logs }) =>
+      Effect.gen(function* () {
+        // the final audit's case: it compiles, and the first reply used to be dropped silently
+        yield* Interactions.command(ping, (ix) =>
+          Effect.gen(function* () {
+            yield* ix.reply({ content: "one" })
+            return yield* ix.reply({ content: "two" })
+          })
+        )
+        yield* publish(invoke)
+        yield* settle
+        const all = yield* sent
+        expect(only(all)).toEqual([`POST ${callback}`])
+        expect(all[0]?.body).toEqual({ type: 4, data: { allowed_mentions: { parse: [] }, content: "two" } })
+        expect((yield* logs).filter((line) => line.includes("did not return"))).toEqual([
+          "Error: discord.interaction command ping: the handler made 1 response(s) (reply) it did not return; only the returned reply is posted"
+        ])
+      })
+    )
+  )
+
+  it.effect("never posts a response a continuation makes, and logs it at Error; a response never run is not counted", () =>
+    withRunner(({ publish, sent, logs }) =>
+      Effect.gen(function* () {
+        yield* Interactions.command(ping, (ix) => {
+          // built but never run: not a response the handler made
+          const unused = ix.reply({ content: "unused" })
+          return Effect.as(Effect.void, unused).pipe(Effect.andThen(ix.reply({ content: "one" }, () => ix.reply({ content: "two" }))))
+        })
+        yield* publish(invoke)
+        yield* settle
+        const all = yield* sent
+        expect(only(all)).toEqual([`POST ${callback}`])
+        expect(all[0]?.body).toEqual({ type: 4, data: { allowed_mentions: { parse: [] }, content: "one" } })
+        const errors = (yield* logs).filter((line) => line.startsWith("Error"))
+        expect(errors).toEqual([
+          "Error: discord.interaction command ping: the continuation made 1 response(s) (reply), which are never posted: the interaction was already answered (use answered.followUp)"
+        ])
+      })
+    )
+  )
 })

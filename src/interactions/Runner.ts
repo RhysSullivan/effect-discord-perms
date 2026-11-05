@@ -23,7 +23,7 @@
  *
  * Interactions outside a guild are dropped with a log: commands are registered in a guild only (D18).
  */
-import { Cause, Duration, Effect, Exit, Fiber, Option, Predicate, type Scope } from "effect"
+import { Cause, Duration, Effect, Exit, Fiber, Option, Predicate, Ref, type Scope } from "effect"
 import { type Handled, handledEffect } from "../bot/Handler.ts"
 import { BotRuntime } from "../bot/Runtime.ts"
 import type { GuildMessageKind, MessageChannel } from "../channels/Channel.ts"
@@ -112,7 +112,16 @@ export interface Session {
   readonly appPermissions: Flags.PermissionSet | undefined
   /** For logs and spans: `command ban`, `component vote`. Never the token. */
   readonly label: string
+  /** Every response this interaction's methods made, in order (a response is made when its method's Effect runs). */
+  readonly made: Ref.Ref<ReadonlyArray<Response<unknown>>>
 }
+
+/** Records a response its method just made in the session, and returns it. */
+const made = <R>(session: Session, response: Response<R>): Effect.Effect<Response<R>> => Effect.as(Ref.update(session.made, (all) => [...all, response]), response)
+
+/** A session for one interaction. */
+const sessionOf = (runtime: Runtime, wire: InteractionWire, appPermissions: Flags.PermissionSet | undefined, label: string): Effect.Effect<Session> =>
+  Effect.map(Ref.make<ReadonlyArray<Response<unknown>>>([]), (responses) => ({ runtime, wire, appPermissions, label, made: responses }))
 
 /** The defer behaviour of one registration. */
 export type DeferMode = "public" | "ephemeral" | "update" | "manual"
@@ -283,11 +292,22 @@ export const respond = <A, E, R>(session: Session, mode: DeferMode, handler: Eff
     if (Exit.isFailure(exit)) return yield* report(session.label, "the handler")(exit.cause)
     const plan = planFor(exit.value)
     if (plan === undefined) return yield* Effect.logError(`discord.interaction ${session.label}: the handler returned no response`)
+    // Discord is answered once, with the response returned; one the handler made and dropped is a bug in it
+    const made = yield* Ref.get(session.made)
+    yield* logDropped(session, made.filter((response) => response !== exit.value), `the handler made {n} it did not return; only the returned ${plan.kind} is posted`)
     const posted = deferredBy === undefined ? yield* postCallback(session, plan.callback, `the ${plan.kind}`) : deferred && (yield* deliverAfterDeferral(session, deferredBy, plan))
     if (!posted || plan.continuation === undefined) return
     const finished = yield* plan.continuation(answeredFor(session)).pipe(Effect.timeoutOption(continuationDeadline))
     if (Option.isNone(finished)) yield* Effect.logWarning(`discord.interaction ${session.label}: the continuation passed ${Duration.format(continuationDeadline)}; the token lasts 15 minutes`)
+    // a continuation cannot answer again: anything it made is never posted (follow-ups are `answered.followUp`)
+    yield* logDropped(session, (yield* Ref.get(session.made)).slice(made.length), "the continuation made {n}, which are never posted: the interaction was already answered (use answered.followUp)")
   })
+
+/** Logs, at Error, responses a handler made that the runner does not post (`{n}` in `what` names them). */
+const logDropped = (session: Session, dropped: ReadonlyArray<Response<unknown>>, what: string): Effect.Effect<void> =>
+  dropped.length === 0
+    ? Effect.void
+    : Effect.logError(`discord.interaction ${session.label}: ${what.replace("{n}", `${dropped.length} response(s) (${dropped.map((response) => response.kind).join(", ")})`)}`)
 
 /** A continuation as the runner runs it: in its span, failures logged, never escaping. */
 const continuation = <A, E, R>(session: Session, run: Effect.Effect<A, E, R>): Effect.Effect<void, never, R> =>
@@ -390,7 +410,8 @@ const repliesFor = <M extends DeferMode>(session: Session, mode: M): Replies<M> 
   function reply<A2, E2, R2>(payload: ReplyPayload, then?: (answered: Answered) => Handled<A2, E2, R2>): Effect.Effect<Response<R2>, ReplyFailure> {
     const [local] = replyFailures(payload, routes.callback.template)
     if (local !== undefined) return Effect.fail(local)
-    return Effect.succeed(
+    return made(
+      session,
       makeResponse<R2>({
         kind: "reply",
         callback: { type: CallbackType.reply, data: withFlags(payload, isEphemeral(mode, payload)) },
@@ -404,7 +425,8 @@ const repliesFor = <M extends DeferMode>(session: Session, mode: M): Replies<M> 
     then: (deferred: Answered) => HandledCompletion<A2, E2, R2>
   ): Effect.Effect<Response<R2>>
   function defer<A2, E2, R2>(options: { readonly ephemeral: boolean }, then: (deferred: Answered) => HandledCompletion<A2, E2, R2>): Effect.Effect<Response<R2>> {
-    return Effect.succeed(
+    return made(
+      session,
       makeResponse<R2>({
         kind: "defer",
         callback: options.ephemeral === true ? { type: CallbackType.defer, data: { flags: ResponseFlags.ephemeral } } : { type: CallbackType.defer },
@@ -430,10 +452,11 @@ const updatesFor = (session: Session): Updates => {
     const [local] = editFailures(patch, routes.callback.template)
     if (local !== undefined) return Effect.fail(local)
     const body = editRequest(patch)
-    return Effect.succeed(makeResponse<never>({ kind: "update", callback: { type: CallbackType.update, data: body }, afterDeferral: body, continuation: undefined }))
+    return made(session, makeResponse<never>({ kind: "update", callback: { type: CallbackType.update, data: body }, afterDeferral: body, continuation: undefined }))
   }
   const deferUpdate = <A2, E2, R2>(then: (deferred: Answered) => HandledCompletion<A2, E2, R2>): Effect.Effect<Response<R2>> =>
-    Effect.succeed(
+    made(
+      session,
       makeResponse<R2>({
         kind: "defer-update",
         callback: { type: CallbackType.deferUpdate },
@@ -445,16 +468,21 @@ const updatesFor = (session: Session): Updates => {
 }
 
 /** `showModal`. */
-const showModal = (modal: Modal): Effect.Effect<Response<never>> =>
-  Effect.map(modalData(modal), (data) => makeResponse<never>({ kind: "modal", callback: { type: CallbackType.modal, data }, afterDeferral: undefined, continuation: undefined }))
+const showModalFor =
+  (session: Session) =>
+  (modal: Modal): Effect.Effect<Response<never>> =>
+    Effect.flatMap(modalData(modal), (data) => made(session, makeResponse<never>({ kind: "modal", callback: { type: CallbackType.modal, data }, afterDeferral: undefined, continuation: undefined })))
 
 const maxChoices = 25
 
 /** `choices`: at most 25 (more is a defect: Discord refuses them). */
-const choices = <V extends string | number>(list: ReadonlyArray<{ readonly name: string; readonly value: V }>): Effect.Effect<Response<never>> =>
+const choicesFor =
+  (session: Session) =>
+  <V extends string | number>(list: ReadonlyArray<{ readonly name: string; readonly value: V }>): Effect.Effect<Response<never>> =>
   list.length > maxChoices
     ? Effect.die(new Error(`autocomplete: ${list.length} choices (at most ${maxChoices})`))
-    : Effect.succeed(
+    : made(
+      session,
       makeResponse<never>({
         kind: "choices",
         callback: { type: CallbackType.choices, data: { choices: list.map((choice) => ({ name: choice.name, value: choice.value })) } },
@@ -561,11 +589,11 @@ function command<I, A, E, R>(
       if (data.type !== 1 || data.name !== command.name) return
       const context = yield* contextOf(runtime, wire)
       const invocation = yield* invocationFor(runtime, context.guildId, command, data)
-      const session: Session = { runtime, wire, appPermissions: context.appPermissions, label }
+      const session = yield* sessionOf(runtime, wire, context.appPermissions, label)
       const base = { guildId: context.guildId, user: context.user, channel: context.channel, invocation }
       const ix: AnyCommandIx<I> =
         mode === "manual"
-          ? { ...base, ...repliesFor(session, "manual"), showModal }
+          ? { ...base, ...repliesFor(session, "manual"), showModal: showModalFor(session) }
           : mode === "ephemeral"
             ? { ...base, ...repliesFor(session, "ephemeral") }
             : { ...base, ...repliesFor(session, "public") }
@@ -596,7 +624,7 @@ function component<Name extends string, D, A, E, R>(
       const data = yield* decodeAs(ComponentData, `${label}: data`, wire.data)
       if (routeNameOf(data.custom_id) !== route.name) return
       const context = yield* contextOf(runtime, wire)
-      const session: Session = { runtime, wire, appPermissions: context.appPermissions, label }
+      const session = yield* sessionOf(runtime, wire, context.appPermissions, label)
       const decoded = route.decode(data.custom_id)
       if (Option.isNone(decoded)) return yield* expired(session, data.custom_id)
       const base = { guildId: context.guildId, user: context.user, channel: context.channel, data: decoded.value }
@@ -604,7 +632,7 @@ function component<Name extends string, D, A, E, R>(
         mode === "update"
           ? { ...base, ...updatesFor(session) }
           : mode === "manual"
-            ? { ...base, ...repliesFor(session, "manual"), ...updatesFor(session), showModal }
+            ? { ...base, ...repliesFor(session, "manual"), ...updatesFor(session), showModal: showModalFor(session) }
             : mode === "ephemeral"
               ? { ...base, ...repliesFor(session, "ephemeral") }
               : { ...base, ...repliesFor(session, "public") }
@@ -635,7 +663,7 @@ function modal<Name extends string, D, A, E, R>(
       const data = yield* decodeAs(ModalData, `${label}: data`, wire.data)
       if (routeNameOf(data.custom_id) !== route.name) return
       const context = yield* contextOf(runtime, wire)
-      const session: Session = { runtime, wire, appPermissions: context.appPermissions, label }
+      const session = yield* sessionOf(runtime, wire, context.appPermissions, label)
       const decoded = route.decode(data.custom_id)
       if (Option.isNone(decoded)) return yield* expired(session, data.custom_id)
       const base = { guildId: context.guildId, user: context.user, channel: context.channel, data: decoded.value, fields: modalFields(data) }
@@ -658,8 +686,8 @@ const autocomplete = <I, A, E, R>(
       const focused = focusedOf(data.options ?? [])
       if (focused === undefined) return yield* new Malformed({ detail: `${label}: no focused option` })
       const context = yield* contextOf(runtime, wire)
-      const session: Session = { runtime, wire, appPermissions: context.appPermissions, label }
-      const ix: AutocompleteInteraction<string | number> = { guildId: context.guildId, user: context.user, focused, choices }
+      const session = yield* sessionOf(runtime, wire, context.appPermissions, label)
+      const ix: AutocompleteInteraction<string | number> = { guildId: context.guildId, user: context.user, focused, choices: choicesFor(session) }
       yield* respond(session, "manual", handlerSpan("autocomplete", command.name, Effect.suspend(() => handlerResult(handler(ix), `discord.interaction ${label}`))))
     })
   )

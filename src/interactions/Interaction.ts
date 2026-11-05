@@ -1,9 +1,12 @@
 /**
  * The interaction state machine's types (DESIGN §2.10, phase 3; `[sd:src/interactions.ts]`).
  *
- * The state machine is **value-level**. A handler returns exactly one initial {@link Response}, which only the
- * interaction's own methods make; follow-ups exist only inside the continuation that receives {@link Answered}. So
- * answering twice, or following up before answering, cannot be written.
+ * The state machine is **value-level**. A handler returns one initial {@link Response}, which only the interaction's
+ * own methods make, and Discord is answered exactly once, with that response; follow-ups exist only inside the
+ * continuation that receives {@link Answered}, so following up before answering cannot be written. Making a second
+ * response can be written (`yield* ix.reply(a); return yield* ix.reply(b)`), but it is never posted: the runner posts
+ * the returned one and logs every response the handler made and did not return, and any a continuation made, at Error
+ * (after the final audit: the first was dropped with no log).
  *
  * - **Responses are validated locally.** `ix.reply(...)`, `ix.update(...)`, `ix.defer(...)` and `ix.showModal(...)`
  *   return `Effect<Response<R>, E>`, where `E` holds the payload's limit errors (`ContentTooLong`, `MessageEmpty`,
