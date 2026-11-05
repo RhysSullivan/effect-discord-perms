@@ -167,12 +167,19 @@ const messageBody = (payload: ReplyPayload): Readonly<Record<string, unknown>> =
   ...(payload.components === undefined ? {} : { components: payload.components.map(actionRow) })
 })
 
-/** A reply's or follow-up's flags: EPHEMERAL and SUPPRESS_NOTIFICATIONS, as set. */
-const flagsOf = (payload: ReplyPayload): number => (payload.ephemeral === true ? ResponseFlags.ephemeral : 0) | (payload.suppressNotifications === true ? ResponseFlags.suppressNotifications : 0)
+/**
+ * Whether a reply is ephemeral: as the registration mode fixes it ("ephemeral" always, "public" never, H-227), and as
+ * the payload says only in "manual" (after the final audit: a fast reply in "ephemeral" mode that omitted `ephemeral`
+ * was posted publicly, while a slow one went out after the mode's ephemeral deferral).
+ */
+const isEphemeral = (mode: DeferMode, payload: ReplyPayload): boolean => (mode === "ephemeral" ? true : mode === "manual" ? payload.ephemeral === true : false)
+
+/** A reply's or follow-up's flags: EPHEMERAL and SUPPRESS_NOTIFICATIONS. */
+const flagsOf = (payload: ReplyPayload, ephemeral: boolean): number => (ephemeral ? ResponseFlags.ephemeral : 0) | (payload.suppressNotifications === true ? ResponseFlags.suppressNotifications : 0)
 
 /** A message body with its flags (none when zero). */
-const withFlags = (payload: ReplyPayload): Readonly<Record<string, unknown>> => {
-  const flags = flagsOf(payload)
+const withFlags = (payload: ReplyPayload, ephemeral: boolean): Readonly<Record<string, unknown>> => {
+  const flags = flagsOf(payload, ephemeral)
   return flags === 0 ? messageBody(payload) : { ...messageBody(payload), flags }
 }
 
@@ -308,7 +315,7 @@ const answeredFor = (session: Session): Answered => {
     return Effect.gen(function* () {
       const [local] = replyFailures(payload, routes.followUp.template)
       if (local !== undefined) return yield* Effect.fail(local)
-      const answer = yield* session.runtime.api.sendJson(routes.followUp, webhookPath(session), withFlags(payload))
+      const answer = yield* session.runtime.api.sendJson(routes.followUp, webhookPath(session), withFlags(payload, payload.ephemeral === true))
       if (answer._tag === "Ok") return
       if (answer.response.code === 50013) {
         // attributed from the interaction's own permissions, never guessed: MissingSendMessages only when app_permissions
@@ -369,8 +376,8 @@ function handlerResult(value: Effect.Effect<unknown, unknown, unknown> | MustRes
   return Effect.isEffect(value) ? value : Effect.die(new Error(`${what}: a handler returned no Effect`))
 }
 
-/** `reply` and `defer` under mode `M`. */
-const repliesFor = <M>(session: Session): Replies<M> => {
+/** `reply` and `defer` under mode `M` (`mode`, its run-time value). */
+const repliesFor = <M extends DeferMode>(session: Session, mode: M): Replies<M> => {
   function reply<const P extends ReplyPayload, A2 = unknown, E2 = never, R2 = never>(
     payload: ReplyArg<P, M>,
     then?: (answered: Answered) => Handled<A2, E2, R2>
@@ -386,7 +393,7 @@ const repliesFor = <M>(session: Session): Replies<M> => {
     return Effect.succeed(
       makeResponse<R2>({
         kind: "reply",
-        callback: { type: CallbackType.reply, data: withFlags(payload) },
+        callback: { type: CallbackType.reply, data: withFlags(payload, isEphemeral(mode, payload)) },
         afterDeferral: messageBody(payload),
         continuation: then === undefined ? undefined : (answered) => continuation(session, Effect.suspend(() => handledEffect(then(answered), `discord.interaction ${session.label}`)))
       })
@@ -558,10 +565,10 @@ function command<I, A, E, R>(
       const base = { guildId: context.guildId, user: context.user, channel: context.channel, invocation }
       const ix: AnyCommandIx<I> =
         mode === "manual"
-          ? { ...base, ...repliesFor<"manual">(session), showModal }
+          ? { ...base, ...repliesFor(session, "manual"), showModal }
           : mode === "ephemeral"
-            ? { ...base, ...repliesFor<"ephemeral">(session) }
-            : { ...base, ...repliesFor<"public">(session) }
+            ? { ...base, ...repliesFor(session, "ephemeral") }
+            : { ...base, ...repliesFor(session, "public") }
       yield* respond(session, mode, handlerSpan("command", command.name, Effect.suspend(() => handlerResult(handler(ix), `discord.interaction ${label}`))))
     })
   )
@@ -597,10 +604,10 @@ function component<Name extends string, D, A, E, R>(
         mode === "update"
           ? { ...base, ...updatesFor(session) }
           : mode === "manual"
-            ? { ...base, ...repliesFor<"manual">(session), ...updatesFor(session), showModal }
+            ? { ...base, ...repliesFor(session, "manual"), ...updatesFor(session), showModal }
             : mode === "ephemeral"
-              ? { ...base, ...repliesFor<"ephemeral">(session) }
-              : { ...base, ...repliesFor<"public">(session) }
+              ? { ...base, ...repliesFor(session, "ephemeral") }
+              : { ...base, ...repliesFor(session, "public") }
       yield* respond(session, mode, handlerSpan("component", route.name, Effect.suspend(() => handlerResult(handler(ix), `discord.interaction ${label}`))))
     })
   )
@@ -632,7 +639,7 @@ function modal<Name extends string, D, A, E, R>(
       const decoded = route.decode(data.custom_id)
       if (Option.isNone(decoded)) return yield* expired(session, data.custom_id)
       const base = { guildId: context.guildId, user: context.user, channel: context.channel, data: decoded.value, fields: modalFields(data) }
-      const ix: AnyModalIx<D> = mode === "ephemeral" ? { ...base, ...repliesFor<"ephemeral">(session) } : { ...base, ...repliesFor<"public">(session) }
+      const ix: AnyModalIx<D> = mode === "ephemeral" ? { ...base, ...repliesFor(session, "ephemeral") } : { ...base, ...repliesFor(session, "public") }
       yield* respond(session, mode, handlerSpan("modal", route.name, Effect.suspend(() => handlerResult(handler(ix), `discord.interaction ${label}`))))
     })
   )

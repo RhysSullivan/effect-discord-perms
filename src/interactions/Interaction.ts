@@ -14,7 +14,8 @@
  *   (components only, their default) auto-defers with DEFERRED_UPDATE_MESSAGE (6) and offers `update` and
  *   `deferUpdate`; `"manual"` posts nothing (Discord's 3 s limit applies) and also offers `showModal` (and `update` on
  *   a component). A modal submit never offers `showModal`; autocomplete offers only `choices`.
- * - **Ephemeral must match the mode** (H-227: a deferral fixes it).
+ * - **Ephemeral must match the mode** (H-227: a deferral fixes it). A reply that omits `ephemeral` follows the mode:
+ *   the runner sets EPHEMERAL in "ephemeral" mode on the fast path too, so a reply is never public there.
  * - **A deferral must be completed**: its continuation succeeds with the nominal {@link Completed}, which only
  *   `editOriginal` and `giveUp` produce. The honest end of an expired token is
  *   `editOriginal(...).pipe(Effect.catchTag("InteractionExpired", deferred.giveUp))`.

@@ -35,6 +35,41 @@ describe("the interaction runner", () => {
     )
   )
 
+  it.effect("takes a fast reply's EPHEMERAL from the registration mode: a reply that omits the key is private in \"ephemeral\" mode", () =>
+    withRunner(({ publish, sent }) =>
+      Effect.gen(function* () {
+        // the final audit's case: the same reply without the key, fast, was posted publicly
+        yield* Interactions.command(ping, "ephemeral", (ix) => ix.reply({ content: "your secret" }))
+        yield* publish(invoke)
+        yield* settle
+        const all = yield* sent
+        expect(only(all)).toEqual([`POST ${callback}`])
+        expect(all[0]?.body).toEqual({ type: 4, data: { allowed_mentions: { parse: [] }, content: "your secret", flags: 64 } })
+      })
+    )
+  )
+
+  it.effect("a fast reply without the key in \"public\" mode, and one in \"manual\" mode, carry no EPHEMERAL; \"manual\" sets it only when the payload asks", () =>
+    withRunner(({ publish, sent }) =>
+      Effect.gen(function* () {
+        const word = Command.chatInput({ name: "word", description: "Word" })
+        const shout = Command.chatInput({ name: "shout", description: "Shout" })
+        yield* Interactions.command(ping, "public", (ix) => ix.reply({ content: "for everyone" }))
+        yield* Interactions.command(word, "manual", (ix) => ix.reply({ content: "manual public" }))
+        yield* Interactions.command(shout, "manual", (ix) => ix.reply({ content: "manual private", ephemeral: true }))
+        yield* publish(invoke)
+        yield* publish(interaction(2, { id: "700000000000000002", name: "word", type: 1 }))
+        yield* publish(interaction(2, { id: "700000000000000003", name: "shout", type: 1 }))
+        yield* settle
+        const bodies = (yield* sent).map((request) => request.body)
+        expect(bodies).toHaveLength(3)
+        expect(bodies).toContainEqual({ type: 4, data: { allowed_mentions: { parse: [] }, content: "for everyone" } })
+        expect(bodies).toContainEqual({ type: 4, data: { allowed_mentions: { parse: [] }, content: "manual public" } })
+        expect(bodies).toContainEqual({ type: 4, data: { allowed_mentions: { parse: [] }, content: "manual private", flags: 64 } })
+      })
+    )
+  )
+
   it.effect("never interrupts a slow handler: after 2.5 s it posts the public deferral (5), then delivers the reply as PATCH @original", () =>
     withRunner(({ publish, sent }) =>
       Effect.gen(function* () {

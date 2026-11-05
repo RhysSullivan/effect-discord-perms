@@ -62,6 +62,11 @@ expectTypeOf<Effect.Success<typeof literal>>().toEqualTypeOf<Response<never>>()
 export const dyn = ixPublic.reply({ content: dynamic })
 expectTypeOf<Effect.Error<typeof dyn>>().toEqualTypeOf<ContentTooLong | MessageEmpty>()
 
+// 1b. a reply that omits `ephemeral` compiles in every mode and follows the mode: the runner sets EPHEMERAL in
+// "ephemeral" mode however fast the reply is (after the final audit; `interactions-runner.test.ts`)
+export const c1b = Interactions.command(ban, "ephemeral", (ix) => ix.reply({ content: "your secret" }))
+expectTypeOf(c1b).toEqualTypeOf<Registered>()
+
 // 2. defer, then complete with editOriginal, giving up honestly if the token expired (no Effect.die)
 export const c2 = Interactions.command(ban, "ephemeral", (ix) =>
   ix.defer({ ephemeral: true }, (deferred) => deferred.editOriginal({ content: "ok" }).pipe(Effect.catchTag("InteractionExpired", deferred.giveUp)))
