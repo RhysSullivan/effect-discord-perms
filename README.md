@@ -2,9 +2,12 @@
 
 A typed layer over [dfx](https://github.com/tim-smart/dfx) (Effect v4) in which the compiler catches the mistakes
 Discord bots usually find at runtime: missing permissions, payload rules, intents, mixed-up IDs, and command and
-component definitions. Every compile-time rule that live Discord can show is checked against it in both directions (a
-valid case Discord accepts and an invalid case where it refuses, or drops, ignores or does not deliver something) before
-it counts; "How it is verified" says which rules cannot be, and why.
+component definitions. Every compile-time rule that live Discord can show is checked against it in both directions: a
+valid case and an invalid case run on one setup, and each side's outcome must match its recorded expectation. That is
+usually Discord accepting the valid side and, on the invalid side, refusing the request, ignoring or applying one of
+its fields, or not delivering an event, with two exceptions: `R-premium-no-label`'s valid side is refused, only because
+the test guild's application owns no SKU, and `R-registration-diff` counts registration writes (none for unchanged
+definitions, one for a changed one). "How it is verified" says which rules cannot be checked live, and why.
 
 ## The guarantee
 
@@ -99,9 +102,10 @@ In brief:
   belong to one or more categories (`permission`, `payload`, `access`, `state`, `transient`), applied by a mixin
   (`withCategory`, or `CategorizedError`, which is `Schema.TaggedError` with the mixin applied) and caught with
   `catchCategory`, which removes exactly that category's members from the type, as `catchTag` removes exactly its
-  tag. Its categories are written as literals: a category typed as a union, or a list typed wider than a tuple, is a
-  compile error, because the type would remove categories the run time does not catch (`catchTag` has the same
-  property for a tag typed as a union). There are no string checks in the public API.
+  tag. Its categories are written as literals: a category typed as a union, or a list typed wider than a tuple (or as a
+  union of tuples), is a compile error, because the type would remove categories the run time does not catch
+  (`catchTag` has the same property for a tag typed as a union; `DESIGN.md` §2.2 names the one mixed form not caught).
+  There are no string checks in the public API.
 - **The permissions come from the types.** An operation's error union is computed from one operation table and from
   the payload's type: embeds add `MissingEmbedLinks`, files `MissingAttachFiles`, a reply
   `MissingReadMessageHistory`, a poll `MissingSendPolls`; in a thread, `SendMessagesInThreads` replaces
@@ -121,12 +125,13 @@ In brief:
   Messages carry their author: `edit` exists only on the bot's own, and deleting another's adds
   `MissingManageMessages`. IDs are distinct branded snowflakes. `Permissions.require(channel, flags)` is optional: it
   narrows the calls that follow, where a checked flag lost before the request is `PermissionRevokedSinceCheck`.
-- **Intents type the events.** The intents are written as a literal list (`Bot.make({ intents: [...] })`; a list typed
-  `ReadonlyArray<Intent>` is a compile error, because the types read the intents off the list's type). `bot.on`
-  accepts only events the declared intents deliver, and `message.content` is a
-  `string` only where Discord delivers it (with MessageContent, and without it for the bot's own messages, mentions of
-  the bot and DMs); elsewhere it is the frozen `ContentUnavailable` value until `contentDelivered` narrows it. Each
-  event runs in its own fiber, scope and span, and a failing handler never stops later events.
+- **Intents type the events.** The intents are written as a literal list of literals (`Bot.make({ intents: [...] })`;
+  a list typed `ReadonlyArray<Intent>`, an element typed as a union and a conditional spread are compile errors,
+  because the types read the intents off the list's type). `bot.on` accepts only events the declared intents deliver,
+  and `message.content` is a `string` only where Discord delivers it (with MessageContent, and without it for the bot's
+  own messages, mentions of the bot and DMs); elsewhere it is the frozen `ContentUnavailable` value until
+  `contentDelivered` narrows it. Each event runs in its own fiber, scope and span, and a failing handler never stops
+  later events.
 - **Commands and components.** Command definitions are checked as written (lowercase names of 1 to 32 characters,
   required options first, at most 25, the subcommand nesting rules, at every level, and only the keys each option type
   takes: `choices` on a boolean option is an error), handler options are typed from the
@@ -142,9 +147,9 @@ In brief:
   fixed at registration, a reply's ephemeral state follows it (a reply that omits `ephemeral` is private in
   "ephemeral" mode), and the runner defers before Discord's 3-second limit without interrupting a slow handler.
 - **The handler boundary.** Handlers registered with `bot.on` and `Interactions.*` may leave only `transient` errors
-  unhandled; an error type widened to a categorised supertype (`Categorized<never>`) counts as unhandled. The compile
-  error names the categories that remain (`UnhandledErrors<"access" | "permission">`), not a wall of tags, and a
-  handler that returns no Effect says so.
+  unhandled; an error type widened to a categorised supertype (`Categorized<never>`, or `Categorized<"transient">`,
+  which may stand for an error that is also `state`) counts as unhandled. The compile error names the categories that
+  remain (`UnhandledErrors<"access" | "permission">`), not a wall of tags, and a handler that returns no Effect says so.
 
 ### `RequestTimedOut`: the outcome is unknown
 
@@ -174,7 +179,8 @@ budget. `bun run verify:live` runs the live matrix against a test guild and rewr
   fails with a snapshotted diagnostic. A diagnostic must have the expected TS code, mention the rule, fit in 4 lines and
   800 characters, contain neither `parameter of type 'never'` nor `type 'never'.`, and truncate no message type. Every
   rule that can be checked live, 55 of the 70, also has a live pair: both sides run on one identical setup, and each
-  side's outcome matches its recorded expectation. The valid side is accepted, delivered or applied, with one exception:
+  side's outcome matches its recorded expectation. The valid side is accepted, delivered or applied (for
+  `R-registration-diff`, no registration write), with one exception:
   `R-premium-no-label`'s valid side is a raw unlabelled premium button, which Discord refuses only because Perms Lab's
   application owns no SKU, with no label error. The raw invalid side shows the different outcome the rule predicts: for
   43 pairs a refusal with the expected status, code and field; for 6 a degradation (a field Discord ignored or applied:
@@ -191,11 +197,11 @@ budget. `bun run verify:live` runs the live matrix against a test guild and rewr
   name, through the package's `exports`, which point at the source, so the library is checked with it (the budget
   fails if the import resolves anywhere else). The hard ceilings are 60,000 types, 250,000 instantiations and
   1,000 ms, with +2% regression gates against the committed baseline (59,620 types, 178,499 instantiations). After the
-  final audit's fixes the bot costs 59,455 types, 178,553 instantiations and about 300 ms, of which its own code is
-  about 3,700 types; the rest is the library. That is within budget, but only 545 types under the Types ceiling: it
-  was 76,573 types before the library's types were rewritten to cost less without changing what a user sees
-  (`docs/DESIGN.md` §2.12 rule 10). A second row holds the cost of one 25-option command with its handler (about 2,200
-  instantiations; 44,086 for the probe's 20, 23 under its +2% gate), so superlinear growth cannot hide.
+  final audit's fixes (both rounds) the bot costs 59,508 types, 178,394 instantiations and about 250 ms, of which its
+  own code is about 3,700 types; the rest is the library. That is within budget, but only 492 types under the Types
+  ceiling: it was 76,573 types before the library's types were rewritten to cost less without changing what a user
+  sees (`docs/DESIGN.md` §2.12 rule 10). A second row holds the cost of one 25-option command with its handler (about
+  2,200 instantiations; 44,047 for the probe's 20, 62 under its +2% gate), so superlinear growth cannot hide.
 
 What is not verified live, and why, is in `LOG.md`: the phase-3 interaction checklist needs a human to click through
 it, the DM content and DM delivery exceptions need a human's DM, the external emoji and sticker rules need a second

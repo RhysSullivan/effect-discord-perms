@@ -470,10 +470,15 @@ categories that can still fail, and the error would escape a handler whose type
 said nothing could. `catchCategory` therefore infers the whole argument (`const C
 extends CategoryArg<Categories<E>>`) and intersects it with
 `LiteralCategories<C>`: a single category typed as a union, a list whose type is
-not a tuple, and a list element typed as a union are each a located error that
-says so. `hasCategory` takes the same check. `Effect.catchTag` has the same
-property for a tag typed as a union (`catchTag(tag as "A" | "B", ...)` removes
-both); the library does not wrap it, so that remains the caller's to avoid.
+not a tuple, a list element typed as a union and (round 2 of the final audit) a
+list typed as a union of tuples (`cond ? ["access"] as const : ["access",
+"state"] as const`) are each a located error that says so. Not caught: a union of
+a single category and a list (`cond ? "state" : ["access"] as const`), because it
+has the shape tsc gives `C` when it falls back to the constraint after rejecting
+an absent category, where the message would then be wrong. `hasCategory` takes
+the same check. `Effect.catchTag` has the same property for a tag typed as a
+union (`catchTag(tag as "A" | "B", ...)` removes both); the library does not
+wrap it, so that remains the caller's to avoid.
 
 Categories are `permission | payload | access | state | transient`. Invariant
 D6: an error in `transient` has no other category. A runtime test over
@@ -947,9 +952,12 @@ export interface ReactionAdd { readonly guildId: GuildId | undefined; readonly c
   readonly messageId: MessageId; readonly userId: UserId; readonly emoji: Emoji }
 
 type NonTransient = "permission" | "payload" | "access" | "state"
-type Unhandled<E> = Exclude<E, CategoryMarker<"transient">> | Extract<E, CategoryMarker<NonTransient>>   // D6 (final audit)
-type TagOf<E> = unknown extends E ? "unknown (fix the errors above first)" : E extends { readonly _tag: infer T extends string } ? T
-  : E extends { readonly [CategoryTypeId]: unknown } ? "a widened categorised type (keep each error's own class)" : "<untagged>"
+type Unhandled<E> = E extends CategoryMarker<"transient">   // D6 (final audit, round 2)
+  ? E extends CategoryMarker<NonTransient> ? E : E extends { readonly _tag: infer T extends string } ? (string extends T ? E : never) : E
+  : E
+type TagOf<E> = unknown extends E ? "unknown (fix the errors above first)"
+  : E extends { readonly _tag: infer T extends string } ? (string extends T ? WidenedType<E> : T) : WidenedType<E>
+type WidenedType<E> = E extends { readonly [CategoryTypeId]: unknown } ? "a widened categorised type (keep each error's own class)" : "<untagged>"
 export interface UnhandledErrors<What extends string> {
   readonly "unhandled errors: catchCategory these categories (catchTag these tags), or use Effect.orDie": What }
 export type Handled<A, E, R> = [Unhandled<E>] extends [never] ? Effect.Effect<A, E, R>
@@ -962,7 +970,7 @@ export interface Bot<I extends Intent> {
     handler: (event: EventPayloads<I>[K]) => Handled<A, E, R>) => Effect.Effect<void, never, Exclude<R, Scope.Scope> | BotRuntime | Scope.Scope>
 }
 export declare const Bot: {
-  readonly make: <const I extends ReadonlyArray<Intent>>(config: { readonly intents: I & LiteralIntents<I> }) => Bot<I[number]>   // a tuple (final audit)
+  readonly make: <const I extends ReadonlyArray<Intent>>(config: { readonly intents: I } & LiteralIntents<I>) => Bot<I[number]>   // a tuple of literals (final audit)
   readonly layerWith: <I extends Intent>(bot: Bot<I>, config: BotConfig) =>
     Layer.Layer<BotRuntime, StartupFailed | Config.ConfigError, HttpClient.HttpClient | Socket.WebSocketConstructor>
   readonly layer: <I extends Intent>(bot: Bot<I>, config: BotConfig) => Layer.Layer<BotRuntime, StartupFailed | Config.ConfigError>
@@ -994,12 +1002,19 @@ than the `Bot` only makes the types conservative.
 (After the final audit) That registration check compares the `Bot`'s run-time list with the build's, so it never
 fires when both come from one list whose *type* is wider than its value: `Bot.make({ intents: fromConfig })` with
 `fromConfig: ReadonlyArray<Intent>` typed every event as delivered and `content` as `string`, while the bot identified
-with fewer intents. `Bot.make` therefore requires the list's type to be a tuple (`LiteralIntents<I>`: otherwise
-`Invalid<"intents must be written as a literal list ...">`). An element typed as a union (`[cond ? "GuildMessages" :
-"GuildMembers"]`) still passes, and the types then assume every member is declared: checking each element cost the
-reference bot about 90 types, for a form nobody writes by accident. The harness's intent sessions, whose intents are
-a run-time value, use the internal `botWithRuntimeIntents` (not in the barrel), whose types follow every intent and
-which the sessions read as the widest payload.
+with fewer intents. `Bot.make` therefore requires the list's type to be a tuple of single literals
+(`LiteralIntents<I>`, intersected onto the whole argument): a list typed wider than a tuple is
+`Invalid<"intents must be written as a literal list ...">`, and (round 2 of the final audit) an element typed as a
+union (`[cond ? "GuildMembers" : "GuildMessages"]`, `[one]` with `one: Intent`) or a list typed as a union of tuples
+(`[..., ...(cond ? ["MessageContent"] as const : [] as const)]`, a natural way to make an intent configurable) is
+`Invalid<"each intent must be a literal, not a union or a conditional spread">`. Before round 2 both passed and the
+types assumed every member declared: a `Bot` built with the spread and `cond` false typed `content` as `string` and
+handed `ContentUnavailable`. The element check is a homomorphic mapped type tested against `ReadonlyArray<false>`
+(about 25 types in the reference bot), not indexed with `[number]` (about 85). It sits on the whole argument, not on
+the list, because tsc elaborates a union of tuples element by element and the message then named no rule. An intent
+chosen at run time is a choice between two `Bot`s, each with its literal list. The harness's intent sessions, whose
+intents are a run-time value, use the internal `botWithRuntimeIntents` (not in the barrel), whose types follow every
+intent and which the sessions read as the widest payload.
 
 **The handler boundary names categories, not tags (D1 with a change).** The
 message lists the non-transient categories that remain (at most four names) and
@@ -1013,9 +1028,14 @@ such a user error escape (`[re:src/d6-escape.ts]`, `[rt:holes/h8-transient-plus.
 `Unhandled` is defined from `transient`, not by subtracting "some category": subtracting `CategoryMarker<string>` let
 an error type widened to `Categorized<never>` or `Categorized<string>` through, because `{}` and an index-signature
 marker are assignable to it, so a handler whose send can fail with `MissingSendMessages` compiled once its error type
-was annotated that way. Such a type is now unhandled, and its message names it as a widened categorised type. A
-handler that returns no Effect at all (a number, a Promise: tsc infers `unknown` for all three of `A`, `E` and `R`)
-is `MustReturnEffect`, not the "fix the errors above" message.
+was annotated that way. Such a type is now unhandled, and its message names it as a widened categorised type.
+(Round 2 of the final audit) Subtracting `CategoryMarker<"transient">` let one more widening through: an error in
+`transient` and `state` (a user's `Flaky`; the library's own errors obey D6) annotated as `Categorized<"transient">`,
+which carries no `_tag`, passed as purely transient. A member in `transient` therefore passes only when it is a
+concrete error class, one with a literal `_tag`; the bare marker, or a marker with `_tag: string`, may stand for an
+error also in another category, so it is unhandled with the same message. A handler that returns no Effect at all (a
+number, a Promise: tsc infers `unknown` for all three of `A`, `E` and `R`) is `MustReturnEffect`, not the "fix the
+errors above" message.
 
 **DMs.** `"dm"` is a message kind. `MESSAGE_CREATE` is a union of a guild
 branch and a DM branch, and each branch exists only when its intent is
@@ -2474,7 +2494,10 @@ const ch: MessageChannel
   the +2% Instantiations gate, which binds before the 250,000 ceiling.) (After the final audit, measured on the
   committed baseline, which was not re-written: the message methods' shared `this`-generic types saved about 1,200
   types, and the audit's new checks spent most of it, so the bot is at 59,455 types and 178,553 instantiations, 545
-  types under the ceiling; the per-command probe is at 44,086 instantiations, 23 under its +2% gate of 44,109.)
+  types under the ceiling; the per-command probe is at 44,086 instantiations, 23 under its +2% gate of 44,109.) (Round 2
+  of the final audit: the widened-transient, intent-list and category-list checks cost 53 types and saved 159
+  instantiations, so the bot is at 59,508 types and 178,394 instantiations, 492 types under the ceiling; the
+  per-command probe is at 44,047, 62 under its gate.)
 - (M10, reverted) M10 first compiled the bot against declarations emitted into a git-ignored directory, mapped with
   `paths` (12,541 types, 28,926 instantiations), and gated the library's own check by regression only. No consumer
   of this package gets those declarations (nothing builds or ships them), so that measured less than any user pays,

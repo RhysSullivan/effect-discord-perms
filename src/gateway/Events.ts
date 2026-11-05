@@ -11,7 +11,9 @@
  *   messages that mention it, and DMs (H-172; a ping-on reply mentions the replied-to author, so it is the mention
  *   case). The library computes `contentDelivered` from exactly those (own, the bot in `mentions`, the intent
  *   declared, a DM) and puts a frozen {@link contentUnavailable} in `content` otherwise, so the type never lies
- *   about the runtime value: `if (m.contentDelivered)` narrows `content` to `string`. The live sessions hold the
+ *   about the runtime value: `if (m.contentDelivered)` narrows `content` to `string`. That rests on the declared
+ *   intents' type being the list the bot identifies with, which `Bot.make` enforces by taking a list of literals
+ *   (`LiteralIntents`: no widened list, union element or conditional spread). The live sessions hold the
  *   computation to what Discord delivered (`R-message-content`).
  * - **A dispatch the library cannot decode is dropped** (`Dropped`: a malformed payload, or a channel it cannot
  *   resolve), never passed on half-typed and never a failure of the event stream; `Bot.on` logs it.

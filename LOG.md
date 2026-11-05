@@ -2936,3 +2936,88 @@ gate and a `@valid` twin, and every new run-time behaviour a unit test that fail
     first item), the 2 second-guild rules, which need his decision (a second guild, or the subject-only external-emoji
     row above for `R-payload-external-emoji`), and the typed-only additions of this round, which need one `--write` run
     with their probes; the `@everyone` valid side and successful kicks and bans stay resolver only (`forbidden-action`).
+
+#### After the final audit (round 2)
+
+The final audit's second round (read-only, on `73857ce`) reported one blocker and three major findings, residuals of
+round 1. Every new type restriction has a fail fixture with a snapshotted diagnostic within the gate and a `@valid`
+twin, and each was checked by mutation: with the check reverted, `bun run test:types` fails because the fixture
+compiles.
+
+- **Blocker: Done-when bullet 3 is only partially met, and no agent can close it.** Unchanged, and not reported as met.
+  `bun run rules` still prints `rules ok 70 rule(s) (55 live pair, 0 escalated, 5 pure-typing, 10 other not-live; 6
+  escalated remainder(s), waiting for Rhys (Q-17, Q-18, Q-22))`. It waits on Rhys's checklist sitting ("Waiting for
+  Rhys", first item), his second-guild decision, and one `--write` run carrying round 1's typed-only probes (a
+  message's at most 5 rows, a premium button's `customId`, an interactive button's `url`) and the external-emoji row.
+- **Major: README's opening sentence** still said every live-checked rule has a valid case Discord accepts and an
+  invalid case where it refuses, drops, ignores or does not deliver something; round 1 corrected only the refusal part.
+  It now says each side's outcome must match its recorded expectation, usually Discord accepting the valid side and, on
+  the invalid side, refusing the request, ignoring or applying a field, or not delivering an event, and names both
+  exceptions: `R-premium-no-label`'s valid side is refused (only for the unowned SKU), and `R-registration-diff` counts
+  registration writes (none, then one). Counted from `test/rules.ts`: valid sides 42 `Succeeded`, 5 `Applied`, 1
+  `Ignored` (`R-allowed-mentions-none`), 5 `EventDelivered`, 1 `Rejected` (`R-premium-no-label`), 1 `Writes` 0
+  (`R-registration-diff`); invalid sides 43 `Rejected`, 5 `Ignored`, 1 `Applied` (`R-allowed-mentions-none`), 5
+  `EventAbsent`, 1 `Writes` 1. The verification paragraph's "accepted, delivered or applied" now notes the
+  registration rule's no-write valid side too.
+- **Major: the handler boundary let a dual-category error through once widened to `Categorized<"transient">`**
+  (`d8df48c`).
+  `Unhandled<E>` subtracted every member assignable to the transient marker, and the bare marker (no `_tag`) is, so a
+  user's transient-and-state `Flaky` annotated as `Effect<void, Categorized<"transient">>` passed `bot.on` (the
+  revision-1 h8 escape, reached through widening). `Unhandled` is now one distributive conditional: a member in
+  `transient` passes only if it is in no non-transient category and has a literal `_tag`, so the bare marker, or a
+  marker with `_tag: string`, which may stand for an error also in `state`, is unhandled and named `a widened
+  categorised type (keep each error's own class)` (`src/bot/Handler.ts`; `TagOf` names a `string` tag the same way
+  instead of printing `UnhandledErrors<string>`). Fail fixtures `widenedTransientHandler` and `stringTag`
+  (`test/types/fail/bot.ts`); `@valid` twin: a user's purely transient class `Blip` escapes; pass assertions in
+  `test/types/pass/bot.ts` §10 for both widenings and for `Blip | DiscordUnavailable`. With round 1's `Unhandled`,
+  test:types fails (both fixtures compile). Library errors were never exposed (D6 holds for them), and a concrete
+  class's own type is unaffected: the library's transient classes all have literal tags.
+- **Major: intents widened through a union element or a conditional spread** (`d8df48c`; round 1 recorded the union
+  element as not done, at about 90 types). `LiteralIntents<I>` now also rejects a list typed as a union of tuples (`IsUnion<I>`:
+  `[..., ...(cond ? ["MessageContent"] as const : [] as const)]`, which tsc infers as a union of tuples) and an element
+  typed as a union (`[cond ? "GuildMembers" : "GuildMessages"]`, `[one]` with `one: Intent`), each with
+  `Invalid<"each intent must be a literal, not a union or a conditional spread">`. The element check is a homomorphic
+  mapped type tested against `ReadonlyArray<false>`: about 25 types in the reference bot, where the same check
+  indexed with `[number]` cost about 85 (both measured). The check now sits on `Bot.make`'s whole argument (`{
+  readonly intents: I } & LiteralIntents<I>`), not on the list: on the list, tsc elaborated the union of tuples element
+  by element and printed `Type '"MessageContent" | undefined' is not assignable to ...`, which named no rule. Round 1's
+  `configured` fixture is therefore TS2345 on the argument (was TS2322 on the list), with the same message. Fail
+  fixtures `ternaryIntent`, `oneIntent`, `spreadIntent`; `@valid` twin: a choice between two `Bot`s, each with its
+  literal list; pass assertions that the inferred intents are unchanged (`noContent.intents` is
+  `ReadonlyArray<"Guilds" | "GuildMessages">`, `[]` gives `never`, an `as const` list its members). Mutation checks:
+  without the element check `ternaryIntent` and `oneIntent` compile; without `IsUnion<I>` `spreadIntent` compiles. A
+  list with an optional element (`readonly ["Guilds", "MessageContent"?]`) was already refused by the constraint
+  (`undefined` is no intent), and a rest element by the tuple check. So README's "bot.on accepts only events the
+  declared intents deliver" and Events.ts's "the type never lies about the runtime value" hold for every list
+  `Bot.make` accepts; DESIGN §2.7 no longer records an exception, and Events.ts names the check it rests on.
+- **Found in passing, fixed: `catchCategory` with a union of literal lists** (`d8df48c`). The same hole as the intents' spread:
+  `catchCategory(strict ? ["access"] as const : ["access", "state"] as const, f)` typed as removing `access` and
+  `state` while the run time, with `strict` true, catches only `access`. `LiteralCategories<C>` now rejects a list typed
+  as a union (`catchCategory needs each category as a literal, not a union`), and tests elements with the cheaper
+  mapped form; fail fixtures `unionOfLists` (data-last) and `unionOfListsDataFirst`
+  (`test/types/fail/catch-category-exact.ts`); without the check both compile. Not caught, recorded in DESIGN §2.2 and
+  `Category.ts`: a union of a single category and a list (`cond ? "state" : ["access"] as const`). It has the shape
+  tsc gives `C` when it falls back to the constraint after rejecting an absent category, so flagging it would put
+  this message on every "category the effect cannot fail with" diagnostic (tried: the three absent-category
+  diagnostics then named the wrong rule). `IsUnion` moved next to `Invalid` in `src/payload/Components.ts`, shared by
+  both checks.
+- **Budget.** Baseline not rewritten. The reference bot is at 59,508 types and 178,394 instantiations (was 59,455 and
+  178,553: the handler change +23 types and -250 instantiations, the intent checks about +27 types, the
+  `catchCategory` change about +3), 492 types under the 60,000 ceiling. The per-command probe is at 382.4 types and
+  2,202.3 instantiations a command, 44,047 for its 20 (gate 44,109, so 62 to spare). Check time about 245 ms.
+- **No live run.** Every `src/` change this round is type-level: the emitted JavaScript of the five changed files
+  (`Bot.ts`, `Handler.ts`, `Category.ts`, `Events.ts`, `Components.ts`; `Bun.Transpiler`, loader `ts`) is identical
+  to `73857ce`'s, and `harness/` did not change. So round 1's fresh-process run on `c7510dd` (0 mismatches, `compare:
+  identical to the previous table`) still covers what a live row runs at this round's HEAD, and the truth table did
+  not change.
+- **Exit checks.** `bun run verify:offline` exits 0: gen:errors up to date; typecheck; 1,573 tests in 60 files;
+  test:types 13 pass and 13 fail fixtures, 140 diagnostics, largest gated 739 characters; hover 7 files, 27 markers;
+  rules ok (the summary above); budget ok.
+- **Done criteria (PROMPT.md) after this round.** As after round 1. Met: `verify:offline` green; `verify:live` with
+  zero mismatches and consecutive fresh processes writing identical tables; the reference bot with no `orDie`, within
+  budget; README.md with the guarantee; this file's live findings and the phase-3 checklist. **Partially met: every
+  compile-time rule live in both directions** (bullet 3): the 8 phase-3 rules and the 6 escalated remainders (Q-17,
+  Q-18, Q-22) wait for Rhys's checklist sitting, the 2 second-guild rules for his decision, the typed-only probes for
+  one `--write` run, and the `@everyone` valid side and successful kicks and bans stay resolver only. This round's new
+  restrictions (intent lists, `catchCategory`'s lists, the widened transient marker) are library-side typing rules:
+  the Discord behaviour under them is already live (the intent pairs) or there is none (pure typing).
