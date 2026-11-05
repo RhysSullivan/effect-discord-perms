@@ -9,10 +9,9 @@
  * `TimeoutTooLong`, then the bulk-delete limits). They rank last: an operation fails with one only when preflight
  * finds nothing.
  *
- * The type of each operation includes a limit tag only when its value may exceed the limit (`MayExceed`, §2.3):
- * a finite literal over a limit is a bug in the calling code. The run time cannot tell a literal from a computed
- * string of the same value, so the local check fails with the limit's tag all the same, and for such a literal that
- * tag reaches the handler undeclared (§2.3).
+ * The type of each operation includes a limit tag only when its value may exceed the limit (`MayExceed`, §2.3): a
+ * finite literal within the limit omits it, and a literal over it (counted by code point, as here) carries it, so the
+ * local check never fails with a tag the type omits.
  */
 import type { ErrorCause } from "../errors/Cause.ts"
 import { ContentTooLong, EmbedTooLarge, MessageEmpty, MessagesTooOld, NameTooLong, NicknameTooLong, PollTooLarge, SlowmodeOutOfRange, TimeoutTooLong, TooManyMessagesToDelete, TopicTooLong } from "../errors/Payload.ts"

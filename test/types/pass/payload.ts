@@ -52,6 +52,27 @@ expectTypeOf<Effect.Error<typeof templated>>().toEqualTypeOf<Always | ContentToo
 const emoji = text.send({ content: "look <:party:123456789012345678>" })
 expectTypeOf<Effect.Success<typeof emoji>["degraded"]>().toEqualTypeOf<ReadonlyArray<"UseExternalEmojis">>()
 
+// 2b. a finite literal is judged by its length (after the final audit): within the limit it carries no limit tag, over
+// it it carries the tag, so a literal the local check refuses never fails with a tag its type omits. tsc counts code
+// points, as Discord does: 2000 emoji fit.
+type X10 = "xxxxxxxxxx"
+type X100 = `${X10}${X10}${X10}${X10}${X10}${X10}${X10}${X10}${X10}${X10}`
+type X1000 = `${X100}${X100}${X100}${X100}${X100}${X100}${X100}${X100}${X100}${X100}`
+type E10 = "😀😀😀😀😀😀😀😀😀😀"
+type E100 = `${E10}${E10}${E10}${E10}${E10}${E10}${E10}${E10}${E10}${E10}`
+type E1000 = `${E100}${E100}${E100}${E100}${E100}${E100}${E100}${E100}${E100}${E100}`
+declare const atLimit: `${X1000}${X1000}`
+declare const overLimit: `${X1000}${X1000}x`
+declare const emojiAtLimit: `${E1000}${E1000}`
+const fits = text.send({ content: atLimit })
+expectTypeOf<Effect.Error<typeof fits>>().toEqualTypeOf<Always>()
+const fitsEmoji = text.send({ content: emojiAtLimit })
+expectTypeOf<Effect.Error<typeof fitsEmoji>>().toEqualTypeOf<Always>()
+const over = text.send({ content: overLimit })
+expectTypeOf<Effect.Error<typeof over>>().toEqualTypeOf<Always | ContentTooLong>()
+const overOrShort = text.send({ content: Math.random() > 0.5 ? "pong" : overLimit })
+expectTypeOf<Effect.Error<typeof overOrShort>>().toEqualTypeOf<Always | ContentTooLong>()
+
 // 3. a widened payload over-approximates every error-mode feature: CreateMessage and the union MessagePayload (T1)
 type Widened = Always | ContentTooLong | MessageEmpty | MissingEmbedLinks | EmbedTooLarge | MissingAttachFiles | MissingReadMessageHistoryForReply | MissingSendPolls | PollTooLarge | MissingUseExternalStickers
 declare const built: CreateMessage

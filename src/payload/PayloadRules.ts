@@ -15,8 +15,9 @@
  *   the same samples.
  *
  * The limit types (`MayExceed`, `MayBeTooLong`, `MayBeEmpty`, `EditMayEmpty`) decide which limit tags a payload or
- * argument adds: a finite literal cannot exceed a limit (a literal over it is a bug in code, a defect at run
- * time), any other value may.
+ * argument adds: a finite literal within its limit cannot exceed it, so its tag is absent; a finite literal over it,
+ * and any other value, may, so the tag is present (after the final audit: an over-limit literal used to compile with
+ * no tag, which the local check then failed with undeclared).
  */
 import type { PermissionFlag } from "../errors/Missing.generated.ts"
 import type {
@@ -126,23 +127,71 @@ export type PayloadFlags<P> = FlagsWith<P, "error">
 /** Flags whose absence silently drops part of a message with payload `P` (reported in `degraded`). */
 export type DegradableFlags<P> = FlagsWith<P, "degrade">
 
-/** May a value of this type exceed a limit? Strings: unless a finite literal; numbers: unless a literal; dates: always. */
-export type MayExceed<V> = [V] extends [undefined | null]
+type X10 = "xxxxxxxxxx"
+type X100 = `${X10}${X10}${X10}${X10}${X10}${X10}${X10}${X10}${X10}${X10}`
+type X1000 = `${X100}${X100}${X100}${X100}${X100}${X100}${X100}${X100}${X100}${X100}`
+
+/**
+ * Whether the finite literal `S` (or a member of a union of them) is longer than the string `Lim`. tsc splits a literal
+ * by code point, as Discord counts (`Limits.unit`). Both are peeled ten characters at a time, `S` first, so a generic
+ * `S` defers at once, the recursion stays far under tsc's depth limit, and a short literal costs one step; the limit
+ * is a string, not a tuple counter, because every tuple length tsc builds costs it a type per element (compile
+ * budget, DESIGN §5.4).
+ */
+type LongerThan<S extends string, Lim extends string> = S extends `${infer _0}${infer _1}${infer _2}${infer _3}${infer _4}${infer _5}${infer _6}${infer _7}${infer _8}${infer _9}${infer Rest}`
+  ? Lim extends `${X10}${infer LimRest}`
+    ? LongerThan<Rest, LimRest>
+    : true
+  : Lim extends `${X10}${string}`
+    ? false
+    : FewLongerThan<S, Lim>
+
+/** `LongerThan` once both have fewer than ten characters left: one at a time. */
+type FewLongerThan<S extends string, Lim extends string> = S extends `${string}${infer Rest}` ? (Lim extends `${string}${infer LimRest}` ? FewLongerThan<Rest, LimRest> : true) : false
+
+/** The string limits of `Limits`, as strings of that many characters (`test/types/pass/payload.ts` holds each to its value). */
+export interface StringLimits {
+  /** Message content: 2000. */
+  readonly content: `${X1000}${X1000}`
+  /** Channel, thread and post names: 1 to 100 (the 1 is `MayExceed`'s `Min`). */
+  readonly name: X100
+  /** Channel topics: 1024 (4096 on forum and media channels; the smaller one is a sound over-approximation there). */
+  readonly topic: `${X1000}${X10}${X10}xxxx`
+  /** Nicknames: 32. */
+  readonly nickname: `${X10}${X10}${X10}xx`
+}
+
+/**
+ * A number literal the types accept as in range: a non-negative integer of at most four digits (0 to 9999, inside
+ * slowmode's 0 to 21600). Any other literal keeps the tag (a sound over-approximation).
+ */
+type SmallNatural<N extends number> = `${N}` extends `${string}${"-" | "." | "e"}${string}` ? false : `${N}` extends `${infer _0}${infer _1}${infer _2}${infer _3}${infer _4}${string}` ? false : true
+
+/**
+ * May a value of this type exceed its limit? Distributes over a union, so test it with `true extends`. Strings: unless
+ * a finite literal of at most `Max["length"]` characters that is not `Min` (`""` where a value may not be empty);
+ * numbers: unless a literal natural under 10,000; dates: always.
+ */
+export type MayExceed<V, Max extends string, Min extends string = never> = V extends undefined | null
   ? false
-  : [Exclude<V, undefined | null>] extends [string]
-    ? IsFiniteLiteral<Exclude<V, undefined | null>> extends true
-      ? false
-      : true
-    : [Exclude<V, undefined | null>] extends [number]
-      ? number extends Exclude<V, undefined | null>
+  : V extends string
+    ? {} extends Record<V, 1>
+      ? true
+      : V extends Min
         ? true
-        : false
+        : LongerThan<V, Max>
+    : V extends number
+      ? number extends V
+        ? true
+        : SmallNatural<V> extends true
+          ? false
+          : true
       : true
 
 type ContentOf<P> = P extends { readonly content?: infer C } ? C : undefined
 
 /** The content may be over the limit (distributes over `P`). */
-export type MayBeTooLong<P> = P extends unknown ? MayExceed<ContentOf<P>> : never
+export type MayBeTooLong<P> = P extends unknown ? MayExceed<ContentOf<P>, StringLimits["content"]> : never
 
 /** A required key whose type excludes the empty value: `"" extends string` may be empty, `"" extends "pong"` cannot. */
 type Definitely<P, K extends PropertyKey, Empty> = K extends keyof P ? ({} extends Pick<P, K> ? false : [Empty] extends [never] ? true : Empty extends P[K] ? false : true) : false
@@ -179,7 +228,7 @@ export type EmbedTooLargeIn<P> = MayInclude<P, "embeds"> extends true ? EmbedToo
 /** `PollTooLarge` when payload `P` may carry a poll, else nothing. */
 export type PollTooLargeIn<P> = MayInclude<P, "poll"> extends true ? PollTooLarge : never
 /** `NameTooLong` when the name `N` may be over the limit, else nothing. */
-export type NameTooLongIn<N> = MayExceed<N> extends true ? NameTooLong : never
+export type NameTooLongIn<N> = true extends MayExceed<N, StringLimits["name"], ""> ? NameTooLong : never
 /** `EmbedTooLarge` when edit `P` sets embeds that are not `[]`, else nothing. */
 export type EditEmbedTooLargeIn<P> = P extends { readonly embeds: infer E } ? (E extends readonly [] ? never : EmbedTooLarge) : never
 /** `MessageEmpty` when edit `P` may empty the message, else nothing. */
@@ -187,13 +236,13 @@ export type EditMessageEmptyIn<P> = EditMayEmpty<P> extends true ? MessageEmpty 
 /** `NameTooLong` when channel patch `P` sets a name that may be over the limit, else nothing. */
 export type PatchNameTooLongIn<P> = P extends { readonly name: infer N } ? NameTooLongIn<N> : never
 /** `TopicTooLong` when channel patch `P` sets a topic that may be over the limit, else nothing. */
-export type PatchTopicTooLongIn<P> = P extends { readonly topic: infer T } ? (MayExceed<T> extends true ? TopicTooLong : never) : never
+export type PatchTopicTooLongIn<P> = P extends { readonly topic: infer T } ? (true extends MayExceed<T, StringLimits["topic"]> ? TopicTooLong : never) : never
 /** `SlowmodeOutOfRange` when channel patch `P` sets a slowmode that may be out of range, else nothing. */
-export type PatchSlowmodeOutOfRangeIn<P> = P extends { readonly slowmodeSeconds: infer S } ? (MayExceed<S> extends true ? SlowmodeOutOfRange : never) : never
+export type PatchSlowmodeOutOfRangeIn<P> = P extends { readonly slowmodeSeconds: infer S } ? (true extends MayExceed<S, ""> ? SlowmodeOutOfRange : never) : never
 /** `NicknameTooLong` when the nickname `N` may be over the limit, else nothing. */
-export type NicknameTooLongIn<N> = MayExceed<N> extends true ? NicknameTooLong : never
+export type NicknameTooLongIn<N> = true extends MayExceed<N, StringLimits["nickname"]> ? NicknameTooLong : never
 /** `TimeoutTooLong` when the timeout's end `U` may be too far ahead, else nothing. */
-export type TimeoutTooLongIn<U> = MayExceed<U> extends true ? TimeoutTooLong : never
+export type TimeoutTooLongIn<U> = true extends MayExceed<U, ""> ? TimeoutTooLong : never
 
 // ---- the runtime side ---------------------------------------------------------------------------------
 

@@ -155,7 +155,24 @@ expectTypeOf<Effect.Error<typeof post>>().toEqualTypeOf<
 >()
 expectTypeOf<Effect.Success<typeof post>>().toEqualTypeOf<PublicThread<never>>()
 
-// argument limits: a dynamic name, topic or slowmode may be out of range; a literal cannot
+// argument limits: a dynamic name, topic or slowmode may be out of range; a literal within its limit cannot, and one
+// outside it may (after the final audit): an empty or 101-character name, a 1025-character topic, a slowmode of
+// 99999, -1 or 1.5 (a literal of five digits or more keeps the tag: a sound over-approximation)
+type N101 = "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+type T1024 = `${N101}${N101}${N101}${N101}${N101}${N101}${N101}${N101}${N101}${N101}tttttttttttttt`
+declare const longName: N101
+declare const longTopic: `${T1024}t`
+const overName = text.createThread({ name: longName })
+expectTypeOf<Effect.Error<typeof overName>>().toEqualTypeOf<OpErrors<never>["channel.createThread.public"] | NameTooLong>()
+const emptyName = text.createThread({ name: "" })
+expectTypeOf<Effect.Error<typeof emptyName>>().toEqualTypeOf<OpErrors<never>["channel.createThread.public"] | NameTooLong>()
+const topicAtLimit: T1024 = `${longName}${longName}${longName}${longName}${longName}${longName}${longName}${longName}${longName}${longName}tttttttttttttt`
+const fitsTopic = text.edit({ topic: topicAtLimit, slowmodeSeconds: 9999 })
+expectTypeOf<Effect.Error<typeof fitsTopic>>().toEqualTypeOf<OpErrors<never>["channel.edit"]>()
+const outside = text.edit({ name: longName, topic: longTopic, slowmodeSeconds: 99999 })
+expectTypeOf<Effect.Error<typeof outside>>().toEqualTypeOf<OpErrors<never>["channel.edit"] | NameTooLong | TopicTooLong | SlowmodeOutOfRange>()
+expectTypeOf<Effect.Error<ReturnType<typeof text.edit<{ readonly slowmodeSeconds: -1 }>>>>().toEqualTypeOf<OpErrors<never>["channel.edit"] | SlowmodeOutOfRange>()
+expectTypeOf<Effect.Error<ReturnType<typeof text.edit<{ readonly slowmodeSeconds: 1.5 }>>>>().toEqualTypeOf<OpErrors<never>["channel.edit"] | SlowmodeOutOfRange>()
 const dynamicEdit = text.edit({ name: dynamic, topic: dynamic, slowmodeSeconds: seconds })
 expectTypeOf<Effect.Error<typeof dynamicEdit>>().toEqualTypeOf<OpErrors<never>["channel.edit"] | NameTooLong | TopicTooLong | SlowmodeOutOfRange>()
 const literalEdit = text.edit({ name: "lab-text", topic: "a topic", slowmodeSeconds: 10 })
@@ -183,6 +200,14 @@ expectTypeOf<Effect.Success<typeof ownEdit>>().toEqualTypeOf<OwnMessage<"text">>
 declare const member: GuildMember
 const nick = member.setNickname(dynamic)
 expectTypeOf<Effect.Error<typeof nick>>().toEqualTypeOf<
+  MissingManageNicknames | TargetAboveInHierarchy | NicknameTooLong | PermissionDeniedUnattributed | CommunicationDisabled | UnknownMember | Transient
+>()
+const nickAtLimit = member.setNickname("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk")
+expectTypeOf<Effect.Error<typeof nickAtLimit>>().toEqualTypeOf<
+  MissingManageNicknames | TargetAboveInHierarchy | PermissionDeniedUnattributed | CommunicationDisabled | UnknownMember | Transient
+>()
+const nickOver = member.setNickname("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk")
+expectTypeOf<Effect.Error<typeof nickOver>>().toEqualTypeOf<
   MissingManageNicknames | TargetAboveInHierarchy | NicknameTooLong | PermissionDeniedUnattributed | CommunicationDisabled | UnknownMember | Transient
 >()
 const timeout = member.timeout(new Date())

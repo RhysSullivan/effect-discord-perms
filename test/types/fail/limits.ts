@@ -1,6 +1,6 @@
 // Length and range limits are typed errors only where the value may exceed them (DESIGN §2.3, §2.4, §2.6): a
-// finite literal adds no limit tag, so catching one on it is a compile error; each @valid twin with a dynamic
-// value carries the tag. Users never brand strings.
+// finite literal within its limit adds no limit tag, so catching one on it is a compile error; each @valid twin with a
+// dynamic value, or a literal over its limit, carries the tag. Users never brand strings.
 import { Effect } from "effect"
 import type { TextChannel } from "../../../src/channels/Channel.ts"
 import type { GuildMember } from "../../../src/members/Member.ts"
@@ -9,11 +9,18 @@ declare const text: TextChannel
 declare const member: GuildMember
 declare const dynamic: string
 declare const seconds: number
+type X10 = "xxxxxxxxxx"
+type X100 = `${X10}${X10}${X10}${X10}${X10}${X10}${X10}${X10}${X10}${X10}`
+type X1000 = `${X100}${X100}${X100}${X100}${X100}${X100}${X100}${X100}${X100}${X100}`
+declare const overLimit: `${X1000}${X1000}x`
 const handled = () => Effect.void
 
 // @valid
 export const ok = [
   text.send({ content: dynamic }).pipe(Effect.catchTag("ContentTooLong", handled)),
+  text.send({ content: overLimit }).pipe(Effect.catchTag("ContentTooLong", handled)),
+  text.createThread({ name: "" }).pipe(Effect.catchTag("NameTooLong", handled)),
+  text.edit({ slowmodeSeconds: 99999 }).pipe(Effect.catchTag("SlowmodeOutOfRange", handled)),
   text.send({ content: "hi", embeds: [{ title: "t" }] }).pipe(Effect.catchTag("EmbedTooLarge", handled)),
   text.send({ poll: { question: "q", answers: ["a"], durationHours: 1 } }).pipe(Effect.catchTag("PollTooLarge", handled)),
   text.createThread({ name: dynamic }).pipe(Effect.catchTag("NameTooLong", handled)),
