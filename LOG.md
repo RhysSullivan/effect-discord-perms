@@ -2805,3 +2805,134 @@ Six minor findings were left; none needed a change under `src/` or `harness/`, s
   `rules ok 70 rule(s) (55 live pair, 0 escalated, 5 pure-typing, 10 other not-live)`; budget: the reference bot at
   59,620 types and 178,499 instantiations, per command 381.8 types and 2,165.1 instantiations, `budget ok`. No live
   run: the changes are a test, its fake, a doc comment, LOG.md and DESIGN.md; none is code a live row runs.
+
+#### After the final audit (round 1)
+
+The final audit (read-only, on `d2924e5`) reported one blocker, ten major findings and fourteen minor ones. Each
+fix below has its own commit; every new type restriction has a fail fixture with a snapshotted diagnostic within the
+gate and a `@valid` twin, and every new run-time behaviour a unit test that fails with the fix reverted.
+
+- **Blocker: Done-when bullet 3 is not fully met, and no agent can close it.** Unchanged, and not reported as met:
+  15 of the 70 rules have no live pair (5 pure typing, 8 phase-3 interaction rules, 2 needing a second guild), and
+  7 live pairs have a part that is not live (6 escalated remainders, Q-17, Q-18 and Q-22, which `verify:live` prints
+  as unmet Done criteria, and the `@everyone` valid side). They wait for Rhys's checklist sitting ("Waiting for Rhys",
+  first item) and his decision on the two second-guild rules. `bun run rules` now prints the escalated remainders
+  too: `0 escalated, 5 pure-typing, 10 other not-live; 6 escalated remainder(s), waiting for Rhys (Q-17, Q-18, Q-22)`
+  (`fb515b0`; the summary counted only `rule.live`).
+- **Major: README's verification paragraph (two findings).** It said Discord accepts every valid side and refuses
+  every raw invalid side with a status, code and field. It now says each side matches its recorded expectation: the
+  valid side is accepted, delivered or applied, except `R-premium-no-label`'s raw unlabelled premium button, refused
+  only for the unowned SKU; the invalid side is a refusal for 43 pairs, a degradation for 6 (`Ignored` or `Applied`:
+  TTS, the two mention rules, the two create-only flags, message content), an absent event before a canary for the 5
+  intent rules, and a registration write for `R-registration-diff` (counted from `test/rules.ts`). Its opening
+  sentence made the same claim and is corrected too (`c7510dd`).
+- **Major: the handler boundary accepted an error type widened to `Categorized<never>` or `Categorized<string>`**
+  (`66f35cc`). `Unhandled<E>` is now `Exclude<E, CategoryMarker<"transient">> | Extract<E, CategoryMarker<NonTransient>>`
+  (D6, defined from `transient`); the message names such a type as `a widened categorised type (keep each error's own
+  class)`. Fail fixtures for both widenings (`test/types/fail/bot.ts`). With the old definition both compile.
+- **Major: `catchCategory` with an argument typed wider than its value** (`03a5a80`). It now infers the whole
+  argument and intersects it with `LiteralCategories<C>`: a category typed as a union, a list typed `readonly [Cat,
+  ...Cat[]]` and a list element typed as a union are each a located error (`catchCategory needs each category as a
+  literal, not a union`, `... the categories as a literal list`); `hasCategory` takes the same check. Four fail
+  fixtures, data-last and data-first (`test/types/fail/catch-category-exact.ts`). DESIGN §2.2 notes that
+  `Effect.catchTag` has the same property for a tag typed as a union. The minor finding on a dead catch is fixed with
+  it: an effect with no categorised error gives `Argument of type 'string' is not assignable to parameter of type
+  'Invalid<"this effect cannot fail with any category: remove the catch">'`.
+- **Major: intents widened through a variable** (`66f35cc`). `Bot.make` requires the list's type to be a tuple
+  (`intents must be written as a literal list: Bot.make({ intents: [...] })`; fail fixture). Not done: an element typed
+  as a union of intents still passes (checking each element cost the reference bot about 90 types); DESIGN §2.7 records
+  it. The harness's intent sessions, whose intents are a run-time value, and the bot-events tests' build use the
+  internal `botWithRuntimeIntents` (not in the barrel).
+- **Major: an over-limit finite literal had no limit tag** (`61af481`). `MayExceed<V, Max, Min>` now measures a finite
+  literal: `LongerThan` peels ten characters at a time from the literal and from a string of the limit's length (tsc
+  splits by code point, as Discord counts), so a literal over its limit carries `ContentTooLong`, `NameTooLong` (and an
+  empty name), `TopicTooLong` or `NicknameTooLong`, and a number literal keeps `SlowmodeOutOfRange` unless it is a
+  natural of at most four digits. Pass fixtures at each boundary (2,000 and 2,001 characters, 2,000 emoji, 100 and 101,
+  32 and 33, 1,024 and 1,025, slowmode 9,999, 99,999, -1 and 1.5; `test/types/pass/payload.ts`, `channels.ts`) and
+  `@valid` twins catching the tag on an over-limit literal. README:104, the `R-content-length` statement, DESIGN §2.3
+  and `Limits.ts` say what is now true. The first form, with tuple counters, cost the reference bot 3,500 types (every
+  tuple length tsc builds costs a type per element); the string counter and a distributive `MayExceed` cost about
+  nothing in types and about 2,000 instantiations.
+- **Major: a reply that omitted `ephemeral` in "ephemeral" mode was public when fast** (`9c153af`). The runner takes
+  EPHEMERAL from the registration mode on the fast path (`isEphemeral`: always in "ephemeral", never in "public", as
+  the payload says in "manual"). Runner tests for each mode; with the flag taken from the payload again the first
+  fails. Pass fixture `c1b` for the omitted key.
+- **Major: choices (and other keys) on option types that cannot have them** (`92faad1`). Every option interface
+  declares the keys it does not take as optional message types, one message per key (`only string, integer and number
+  options take choices`, `... take minValue`, `only channel options take channelTypes`, `only string options take
+  minLength`); five fail fixtures in `test/types/fail/commands.ts`. `Wire.ts` and `harness/CommandProbes.ts` now read
+  `choices` only from the option types that have them.
+- **Major: replying twice dropped the first reply with no log** (`5c97ae8`). Each interaction's session records every
+  response its methods made (when the method's Effect runs); the runner posts the returned one and logs at Error every
+  other one the handler made, and any a continuation made. Two runner tests (the audit's two forms, and a response
+  built but never run, which is not counted); with the recording removed both fail. `Interaction.ts`, DESIGN §2.10 and
+  README no longer say a second answer cannot be written: Discord is answered once, and a dropped response is logged.
+- **Major: methods other than `send` on a union of message handles gave a union of Effects** (`61b63cb`). `delete`,
+  `edit`, `react`, `pin`, `unpin`, `createThread` and `crosspost` are shared method types with a generic `this`
+  (`MessageReceiver`: kind and author), as `SendMethod` is; the error union distributes over the handles. Pass
+  fixtures for each of the audit's eight programs (received-message unions, send then delete, data-first
+  `catchCategory`, `Effect.catch`, `Effect.suspend`, crosspost; `test/types/pass/bot.ts` §12), with each union's exact
+  rows. The hover snapshots did not change, and the reference bot's compile fell by about 1,200 types.
+- **Minor, fixed:**
+  - README's "no `never`": it now names the banned forms (`c7510dd`);
+  - the unit tests' temporary directories are removed when each test finishes (`onTestFinished`, `280f573`); the
+    7,389 left in `/tmp` by earlier runs are outside this workspace and were not touched;
+  - a handler that returns no Effect gets `MustReturnEffect` ("a handler must return an Effect"), not "fix the errors
+    above" (`66f35cc`; two fail fixtures);
+  - a malformed row element names only its own missing property: `RowChecked` skips the layout checks when the list's
+    type is not a tuple, and a computed list is an error on the list (`row takes its elements as a literal list`);
+    an empty row is an error; a premium button's `customId` and an interactive button's `url` are errors; a literal
+    list of more than 5 rows on a create, an edit or a reply is an error (`d9f29bb`; six fail fixtures);
+  - two registrations of one command or route on one bot die at the second (the build's `BotRuntime` keeps the names
+    for each registration's scope), route names must be literals, and a non-literal `required` is treated as possibly
+    required in the order check (`0b6e67b`, `92faad1`; a runner test and fail fixtures);
+  - the receivers' trust assumption (`SendReceiver`, `MessageReceiver`: `this` is trusted, not branded) is documented
+    in `Channel.ts`, `Message.ts` and DESIGN §2.4 (`66a6284`);
+  - the Live finding's citation of `pins/public-thread/pin/read-history/absent/timed-out`, a development-run row, now
+    cites `pins/archived-thread/pin/read-history/absent/timed-out`, which the committed table holds;
+  - the crosspost pacing notes say 8 publishes per full run, from about half way through, so at most one full run (or
+    one `message/**` and `flip/**` run) an hour, and the role-budget note leads with the current 88 edits and 1.2 hours
+    (all checked against the latest run log: the 8 publishes are at lines 267 to 401 of 552);
+  - README's design summary: the per-call deadline wraps each dfx call (`src/rest/Request.ts`) and only the coded-429
+    interceptor is in the base `HttpClient`; the matrix covers every payload variant Perms Lab can exercise, external
+    emoji and stickers excepted.
+- **Minor, not fixed:**
+  - `R-payload-external-emoji`'s live row on the subject's own setup (an app emoji, and a made-up custom emoji ID,
+    with and without UseExternalEmojis, H-104). It is a new matrix row: it changes the truth table, so it needs a
+    `--write` run and a confirming run that writes the same bytes, which this round's single `run --compare` does not
+    allow. The class stays `needs-second-guild` until that run; it is the next live addition.
+  - Duplicate option names in one definition are not a type error: a check per option against every other costs about
+    25 conditionals an option, against a per-command gate with 23 instantiations to spare. Discord refuses them at
+    registration, which is `StartupFailed("command-rejected")` naming the field (DESIGN §2.8).
+- **Typed only, not yet live** (new restrictions inside existing rules, each statement in `test/rules.ts` saying so):
+  a message's at most 5 rows, a premium button's `customId` and an interactive button's `url`. Each is one more probe
+  on the existing `text-send` setup for the same `--write` run as the external-emoji row. The empty row is the lower
+  bound of `R-row-5-buttons`'s "1 to 5", whose live pair sends 5 and 6. The option keys, route names, intent lists and
+  `catchCategory`'s literals are library-side typing rules: the Discord behaviour they rest on is already live
+  (`R-options-typed`, `R-custom-id-routing`, the intent pairs) or there is none (pure typing).
+- **Budget.** The baseline was not re-written. The reference bot is at 59,455 types and 178,553 instantiations
+  (baseline 59,620 and 178,499; ceiling 60,000 types, so 545 to spare); the per-command probe at 382.6 types and
+  2,204.3 instantiations a command, 44,086 for its 20 (baseline 43,245, +1.9%; the +2% gate is 44,109, so 23 to spare).
+  The next type-level check on a command option, or on every send, must start with a cut.
+- **The fresh-process live run.** The fixes change code live rows run (the message handles' methods in
+  `channels/Ops.ts`, the bot build's runtime in `bot/Internals.ts`, `catchCategory`'s run time, the harness's intent
+  sessions and command probes), so `bun --no-env-file harness/main.ts run --compare` ran on `c7510dd`, the last code
+  commit before it; the commits after it change only a pass fixture, docs and a local variable's name in
+  `interactions/Runner.ts`, which only the checklist reaches. It **exited 0**: role budget 99 left (88 needed), 542
+  scenarios in 2,788 s, 9,288 requests, 2,741 writes, 601 invalid (401/403/429); dfx waited out 429s on one command
+  POST, two command PUTs, one bulk delete and eleven reaction PUTs; no lab step was retried after a 5xx; the oracle
+  was available; **0 mismatches**; `compare: identical to the previous table`, so `fixtures/truth-table.json` did not
+  change; the closing reset wrote 3; it printed the six unmet Done criteria (Q-17, Q-18, Q-22), and the lock was
+  released.
+- **Exit checks.** `bun run verify:offline` exits 0 (gen:errors up to date; typecheck; 1,573 tests in 60 files;
+  13 pass and 13 fail fixtures, 133 diagnostics, largest gated 617 characters; hover 7 files, 27 markers; rules ok;
+  budget ok).
+- **Done criteria (PROMPT.md) after this round.**
+  - Met: `verify:offline` green; `verify:live` with zero mismatches and consecutive fresh processes writing identical
+    tables (this run's compare among them); the reference bot with no `orDie`, within budget; README.md with the
+    guarantee; this file's live findings and the phase-3 checklist.
+  - **Partially met: every compile-time rule live in both directions** (bullet 3). Not met by an agent: the 8 phase-3
+    rules, the 6 escalated remainders (Q-17, Q-18, Q-22), which need Rhys's checklist sitting ("Waiting for Rhys",
+    first item), the 2 second-guild rules, which need his decision (a second guild, or the subject-only external-emoji
+    row above for `R-payload-external-emoji`), and the typed-only additions of this round, which need one `--write` run
+    with their probes; the `@everyone` valid side and successful kicks and bans stay resolver only (`forbidden-action`).
