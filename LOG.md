@@ -9,29 +9,36 @@ milestone appends its entries.
 
 ## Waiting for Rhys
 
-- **Q-17, the DM content exception (`R-message-content`'s remainder; an unmet Done criterion until decided).** PROMPT
-  asks for the message-content exceptions to be verified live; M7's sessions verify the mention, ping-on reply and
-  own-message exceptions with bots, but a DM needs a human: a bot cannot DM another bot (H-158), and the harness
-  never DMs Rhys. Rhys decides: send the subject a DM himself once (the subject would identify with DirectMessages
-  and without MessageContent and must receive the content), or accept the DM branch as typed and unit-tested
-  (`test/unit/bot-events.test.ts` drives it through a fake gateway) without a live row. Nothing else waits on it.
+- **The phase-3 checklist (M9; never run by an agent alone).** It shows the eight phase-3 rules' behaviour live and
+  answers open question 8 (whether `app_permissions` agrees with the guild state, item `app-permissions`), and Q-17,
+  Q-18 and Q-22 below, whose rule parts `verify:live` prints as unmet Done criteria until it is done or Rhys decides
+  otherwise. One sitting of about ten minutes, with an agent at the minisforum terminal:
+  1. The agent runs `bun --no-env-file harness/main.ts checklist` (it takes the live lock; nothing else live runs then).
+  2. In Perms Lab, in #lab-text, start typing `/checklist`, type a few letters in its `search` option and check that a
+     suggestion `search: <your letters>` appears; then run it with any choice, any member and #lab-text.
+  3. The bot replies with what it decoded and posts ten buttons, each with a line saying what should happen. Click each
+     button, compare, and click "As expected" or "Not as expected" under its answer (and under the /checklist reply).
+  4. Open a DM with Perms Subject: send any message, add a reaction to it, and type for a few seconds.
+  5. When the terminal says "Now without the DM intents", DM it once more (message, reaction, typing), then post any
+     message in #lab-text.
+  6. Paste the "checklist results" block the terminal prints back to the agent, who records it here.
+
+  The alternative for each question below is to accept that part as typed and unit-tested only.
+
+- **Q-17, the DM content exception (`R-message-content`'s remainder).** A bot cannot DM another bot (H-158) and the
+  harness never DMs Rhys, so only Rhys's own DM shows Discord delivering a DM's content without MessageContent: step 4
+  of the checklist (the result line "DM events with the DM intents" must show `MESSAGE_CREATE (content delivered)`).
+  Typed and unit-tested through the fake gateway (`test/unit/bot-events.test.ts`) meanwhile.
 
 - **Q-18, handler-side delivery of option values and component clicks (`R-options-typed` and `R-custom-id-routing`'s
-  remainder; unmet Done criteria until decided; M8).** The bot-only halves are live: Discord refuses a definition the
-  types reject and stores the typed one's choices, required options and channel types as defined (the options
-  readback), and a `custom_id` a route built at 100 characters is stored, read back and decoded to the same data while
-  101 is refused. A handler receiving a real invocation (the option values) or a real button click needs a human to
-  run the command and click. Rhys decides: run a test command and click a test button in Perms Lab once (M9's
-  `checklist` command will post them), or accept the handler side as typed and unit-tested (M9 decodes interaction
-  payloads offline). Nothing else waits on it.
+  remainder).** The bot-only halves are live (M8). A handler receiving a real invocation and a real click needs Rhys to
+  run the command and click: steps 2 and 3 of the checklist (items `option-values` and `click-data`). Decoded offline
+  meanwhile (`test/unit/interactions-wire.test.ts`, `test/unit/interactions-runner.test.ts`).
 
 - **Q-22, DM delivery under the DM intents (`R-intent-guild-messages`, `R-intent-reactions` and `R-intent-typing`'s
-  remainder; an unmet Done criterion until decided; the M7 verifier).** `bot.on("MESSAGE_CREATE")` compiles with
-  DirectMessages, `MESSAGE_REACTION_ADD` with DirectMessageReactions and `TYPING_START` with DirectMessageTyping, but the
-  live intent pairs verify only the guild intents: a bot cannot DM another bot (H-158) and the harness never DMs Rhys.
-  Rhys decides: message, react and type in a DM with the subject once (the subject would identify with the three DM
-  intents and must receive each event, and without them must not), or accept the DM half as typed and unit-tested
-  through the fake gateway (`test/unit/bot-events.test.ts`). The same DM would answer Q-17. Nothing else waits on it.
+  remainder).** Each DM event must arrive with its DM intent and not without: steps 4 and 5 of the checklist (the result
+  lines must show `MESSAGE_CREATE`, `MESSAGE_REACTION_ADD` and `TYPING_START` with the intents, and none without them
+  before the canary). Typed and unit-tested through the fake gateway meanwhile.
 
 - **GuildMedia channels (decision, not blocking).** Perms Lab cannot have a media channel: creating one
   (`POST /guilds/{guild.id}/channels`, type 16) answers 400 50024 "Cannot execute action on this channel type",
@@ -1377,6 +1384,56 @@ the same commit.
   - **`verify:live` prints the unmet Done criteria by question** (`rules.unmetDoneCriteria`): one line per Q with the
     rule parts waiting on it, pointing at "Waiting for Rhys", whose checklists M9 rewrites around its `checklist`
     command.
+
+- **M9: `Response<R>` and `Completed` are nominal by a non-exported symbol** (§2.10 updated). The prototype's
+  `Response` was a structural record with its continuation, so `{ _tag: "Response", kind: "reply" }` would have passed
+  as one. Its phantom key, like `ChatInputCommand`'s, is a symbol `Interaction.ts` does not export, so an object
+  literal fails with `MustRespond` (a fail directive, `R-must-respond`), and the runner posts only a value
+  `makeResponse` registered in a `WeakMap`, so a forged object is no response at run time either. `Completed` is one
+  frozen value under its own non-exported symbol, made only by `editOriginal` and `giveUp`.
+- **M9: a modal has text inputs, and the modes per entry are as Discord allows** (§2.10 updated). The prototype's
+  `Modal` was `{ customId, title }`; Discord requires one to five text inputs, so `Modal` has
+  `inputs: [TextInput, ...TextInput[]]`, and a submit's `fields` map their values by `custom_id`. A title or label over
+  45 characters is a defect (they are literals in the code). `Interactions.modal(route[, mode])` takes "public" or
+  "ephemeral" (`ModalMode`), and `autocomplete` has no mode or deferral (Discord has none for it); its interaction is
+  `AutocompleteInteraction<string | number>`, since an integer or number option's suggestions are numbers.
+- **M9: `followUp` adds `PermissionDeniedUnattributed`** (§2.10 updated). The design listed
+  `PermissionErrors["SendMessages"]`; whether Discord refuses a follow-up with 50013 at all is not known (follow-ups go
+  through the interaction's webhook), and attributing one to SendMessages without evidence would be a guess. A 50013 is
+  `MissingSendMessages` only when the interaction's `app_permissions` lacks the flag, else unattributed.
+- **M9: the app-permissions basis is built** (§4.7 updated). M6 had the `basis` field but preflight always read the
+  guild state. A handle from an interaction now carries the parsed `app_permissions`, its operations' `Recompute.Target`
+  does too, and `Ops.decisionOf` resolves with `Resolver.fromAppPermissions` (Discord's computation for every stage up to
+  the timeout, no blind mask; the guild state's timeout and thread facts when it has them). `channelHandle`'s fourth
+  parameter is the app permissions (it was the basis, which no caller passed). `test/unit/interactions-runner.test.ts`:
+  a send from a channel whose state grants SendMessages but whose `app_permissions` do not fails preflight with
+  `MissingSendMessages` on the `app-permissions` basis, and nothing is sent; `interactions-wire.test.ts`: a channel
+  option's handle reads its resolved channel's `permissions`.
+- **M9: interaction calls go through `DiscordApi.sendJson`** (§4.14 updated), not dfx's typed `createInteractionResponse`
+  and webhook methods: the callback's and messages' bodies are the library's own JSON (as registration's are, M8), and the
+  call is still bounded, made under its declared route (the token is a path segment, which the route check and the span
+  never show) and classified. 10062, 10015 and 50027 are `InteractionExpired`, 50006 `MessageEmpty`, anything else an
+  unmapped defect.
+- **M9: INTERACTION_CREATE through the build's dispatch stream** (§4.14 updated): `Dispatches.DispatchName` adds it
+  beside `bot.on`'s events (it needs no intent, so it is not in `EventIntents`, whose events each need a live intent
+  pair). Each registration subscribes on its own, as `bot.on` does. Interactions outside a guild are dropped with a log.
+- **M9: `handledEffect` moved to `bot/Handler.ts`**, shared by `bot.on` and the runner; the runner's own
+  `handlerResult`, `completion`, `planFor`, `invocationFor` and `withMode` attach precise types to wide implementations
+  by overloads with a `SAFETY` comment (rule 7 of §2.12): an entry point's implementation accepts a handler of any
+  interaction type (`(ix: never) => ...`, the supertype of every overload's), and `withMode` states the invariant that the
+  runner builds the interaction of the mode the caller registered.
+- **M9: context-menu commands are still not built** (§2.8 updated): §6's M9 scope does not list them, their registration
+  is a live row (types 2 and 3) that offline M9 cannot run, and a rule on their names needs its own live pair.
+- **M9: the lab guard admits the subject's interaction answers** (§5.6 updated), for the checklist Rhys runs: an
+  interaction's callback and the subject application's interaction webhook (a follow-up, the original response's edit or
+  delete), once the identity checks arm the guard with the subject's application ID. Any other webhook stays refused;
+  `test/unit/lab-guard.test.ts` holds both (the earlier assertion that an unarmed callback is refused still holds).
+- **M9: the per-command budget row is re-baselined deliberately** (§5.4 updated), as M8 planned: each probe command's
+  handler is now registered with `Interactions.command` and replies, and both probes import `Interactions`. 381.2 types
+  and 2,162.3 instantiations a command (7,624 and 43,245 for 20; M8's stand-in 362.3 and 2,105.1). A finding for M10:
+  importing the runtime modules raises the probes' base from 31,518 to 64,824 types, and importing `Bot` alone gives
+  66,891, above the reference bot's hard ceiling of 60,000 types (§5.4), so M10's bot will meet that ceiling whatever
+  its handlers cost; the ceiling is not raised here.
 
 ## Escalated rules
 

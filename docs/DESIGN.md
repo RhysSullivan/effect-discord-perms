@@ -205,6 +205,7 @@ src/
   interactions/
     Interaction.ts *             CommandInteraction, ManualCommandInteraction, *ComponentInteraction, ModalSubmitInteraction,
                                  AutocompleteInteraction, Response<R>, Answered, Completed (nominal)
+    Wire.ts                      (M9) INTERACTION_CREATE decoding; the invocation decoded against the command's definition
     Runner.ts                    INTERACTION_CREATE routing, auto-defer (fork + timed join), posting, continuations
     Checklist.ts                 the phase-3 `checklist` command that posts prompts for a human
   config/
@@ -1035,8 +1036,9 @@ export declare const Command: {
   - `Type '"group"' is not assignable to type '"subcommand"'.`
 - Context-menu (USER and MESSAGE) commands have their own constructor without
   name-case rules (H-192). It reuses the same machinery and is not separately
-  prototyped. (M8: not built yet; M9 brings it with the interactions that deliver
-  their targets.)
+  prototyped. (M8: not built yet. M9 did not build it either: §6's M9 scope does not
+  list it, its registration is a live row (types 2 and 3) that offline M9 cannot run,
+  and a rule on its names needs its own live pair; it waits for a bot that needs it.)
 
 (M8, as built in `src/commands/`.) A command carries its `definition` (name,
 description, options as written), which registration sends. The phantom
@@ -1183,6 +1185,28 @@ Rules and their one-line diagnostics (`[sd:fail-diagnostics.txt]`):
 `InteractionExpired` is `state` and appears in every continuation call, so the
 handler must deal with it, by `giveUp` in a deferral or by catching it
 elsewhere. This is the honest consequence of Discord's 15-minute token.
+
+(M9, as built in `src/interactions/`: `Interaction.ts` the types, `Runner.ts` the entry points and the runner,
+`Wire.ts` the INTERACTION_CREATE decoding, `Checklist.ts` the checklist.) Every diagnostic in the table above is the
+snapshot's (`test/types/fail/interactions.diagnostics.txt`), and the `ephemeral` one prints `Type 'true' is not
+assignable to type 'true & Invalid<"ephemeral must match the registration mode public">'`. Where the build differs:
+
+- **`Response<R>` is nominal.** Its phantom key is a symbol `Interaction.ts` does not export (as `ChatInputCommand`'s
+  is), so an object literal is no `Response` (`MustRespond` names it), and the runner posts only a value `makeResponse`
+  registered (a `WeakMap` of plans, so a forged object is no response at run time either). `Completed` is the same: a
+  non-exported symbol and one frozen value, made only by `editOriginal` and `giveUp`.
+- **A modal has inputs**: `Modal` is `{ customId, title, inputs: [TextInput, ...TextInput[]] }` (Discord requires one
+  to five text inputs); a title or label over 45 characters is a defect (literals in the code), and the submit's
+  `fields` map their values by `custom_id`.
+- **Modes per entry**: `modal(route[, mode])` takes `"public"` (default) or `"ephemeral"` (`ModalMode`: a submit cannot
+  open a modal, so no "manual"); `autocomplete(command, handler)` has no mode and no deferral (Discord has none for it);
+  its `ix` is `AutocompleteInteraction<string | number>`, whose `focused` is `{ name, value }`.
+- **`followUp`'s union adds `PermissionDeniedUnattributed`**: a 50013 on a follow-up is `MissingSendMessages` only when
+  the interaction's `app_permissions` lacks SendMessages, else unattributed (never a guess, §3).
+- **The interaction's channel** is a handle with basis `"app-permissions"`, whose preflight reads the interaction's
+  `app_permissions` (§4.7, as built there); a channel option's handle reads its resolved channel's `permissions`.
+- **Interactions outside a guild are dropped** with a log (commands are guild commands, D18; a button on a DM message
+  is out of scope).
 
 ### 2.11 End-to-end example (`[sd:src/example.ts]`, compiled with exact registration types)
 
@@ -1662,6 +1686,11 @@ takes the row's flags and state checks plus the payload flags and returns the
 ordered failure list of §3.2. The basis is GuildState for gateway-obtained
 handles, or the interaction's `app_permissions` (and resolved channels'
 `app_permissions`) for handles from an interaction (`basis: "app-permissions"`).
+(M9, as built: the handle's core carries the parsed `app_permissions`, and so does the operation's `Recompute.Target`;
+preflight then resolves with `Resolver.fromAppPermissions`: Discord's own computation stands for every stage up to the
+timeout, no blind mask applies, and the guild state's resolution of the channel, when it holds one, still gives the
+timeout, the thread's state, voice and the required tag. A 50013 after it goes to the recompute over the refreshed
+guild state as for any handle. Open question 8 decides whether `app_permissions` already reflects a timeout.)
 `Preflight.decide` is pure and shared by the library and the offline replay.
 What counts as a problem (M3):
 
@@ -2014,6 +2043,16 @@ orchestrator sets that flag, and §4.4 reads it back.
   defect.)
 - The `checklist` command posts the phase-3 prompts. It is registered and
   tested offline only.
+- (M9, as built in `interactions/Runner.ts`.) Each registration subscribes to INTERACTION_CREATE on the build's own
+  dispatch stream (`Dispatches.DispatchName` adds INTERACTION_CREATE, which needs no intent, beside `bot.on`'s events),
+  as `bot.on` does, so a command or route is registered once; each interaction runs in its own fiber and scope, in a
+  `discord.interaction.<kind>` span applied before any recovery. The runner waits with `Fiber.await(fiber).pipe(
+  Effect.timeoutOption(2500 millis))` (an await, so the timeout never interrupts the handler) and logs a handler's
+  transient failure, a defect, an invocation that does not fit the command's definition (`Wire.Malformed`: every
+  required option, each value of its option's type, the choices and channel kinds checked) and a refused post; none
+  escapes. The callback and the webhook calls go through `DiscordApi.sendJson` (bounded, under the declared route, in a
+  `discord.rest` span whose route template hides the token); 10062, 10015 and 50027 are `InteractionExpired`, 50006
+  `MessageEmpty`, anything else an unmapped defect. `harness/main.ts checklist` runs the checklist for Rhys (LOG.md).
 
 ### 4.15 Obfuscation codec (D20, G7)
 
@@ -2227,6 +2266,10 @@ const ch: MessageChannel
   42,102 instantiations over the probe without commands (362.3 types and 2,105.1 instantiations a
   command, against the design's estimate of about 2.2k). Until M9 a probe command's handler is a
   function of its invocation that reads its options; M9 re-baselines it with `Interactions.command`.
+- (M9) Re-baselined deliberately with each command's handler registered by `Interactions.command` (and both probes
+  importing `Interactions`): 7,624 types and 43,245 instantiations for the 20 commands, 381.2 types and 2,162.3
+  instantiations a command. Importing the runtime modules raises the probes' base from about 31.5k types to 64.8k;
+  importing `Bot` alone gives 66.9k, above the reference bot's 60,000-type ceiling, which M10 must face (LOG.md).
 
 ### 5.5 Rule registry (G10; `[sd:src/verify.ts]`)
 
@@ -2387,6 +2430,12 @@ verifier): the name rules' live sides are the command's and a subcommand's name;
 33 characters) has its own fail directives, which the rules claim, and `R-registration-diff` also claims the fail
 directive of `commands` without a `guildId`.)
 | must-respond, modal-before-answer, followup-after-answer, autocomplete-choices, no-modal-from-modal, deferred-must-complete, ephemeral-matches-mode, reply-nonempty | phase-3-offline |
+
+(M9, as built: the eight are `R-<name>` in `test/rules.ts`, on `test/types/{pass,fail}/interactions.ts`. Each fail
+directive is claimed by one: `R-modal-before-answer` also claims that `ix` stays typed under `Effect.fn` (an unknown
+member), `R-must-respond` a forged response literal, `R-deferred-must-complete` a forged completion,
+`R-ephemeral-matches-mode` a deferral's ephemeral state and "update" offering only `update` and `deferUpdate`, and
+`R-reply-nonempty` an unhandled dynamic reply's limits.)
 | handler-boundary, catch-tag-exact, catch-category-exact, require-narrows, transient-only-escapes | pure-typing |
 
 ### 5.6 Live harness: identities, safety and the lock
@@ -2404,6 +2453,10 @@ directive of `commands` without a `guildId`.)
   target is an admitted lab object. Nothing is written before the identity
   checks arm it. Each write asserts the following, and any violation is a
   defect that aborts the run before the request is sent:
+  - (M9) an interaction's callback and the subject application's interaction webhook (a follow-up, or the original
+    response's edit or delete) are admitted once the identity checks arm the guard with the subject's application ID:
+    they answer only interactions the subject received, which come from the lab, where its commands and buttons are
+    (the checklist Rhys runs, `harness/main.ts checklist`); any other webhook stays refused;
   - the guild is `DISCORD_TEST_GUILD_ID` (reads too, for guild routes);
   - the channel or role is in the provisioned lab set (by stored ID, admitted
     after the harness read or created it and checked its `lab`/`lab-*` name)
@@ -3386,6 +3439,12 @@ Live milestones run serially, under the lock.
     then a fresh `--compare` run exits 0;
   - `bun run verify:offline`.
 
+- (M9, as built) Beyond the listed scope: `Wire.ts` (the INTERACTION_CREATE decoding and the invocation against the
+  definition), `DiscordApi.sendJson`, the app-permissions preflight (§4.7), `harness/main.ts checklist` with the DM checks
+  of open questions 17 and 22 and the lab guard's admission of the subject's interaction answers (§5.6), the
+  per-command budget row re-baselined with `Interactions.command` (§5.4), and the M7 and M8 verifiers' minor findings
+  (§5.11's pacing at 10/s, the orchestrator's decision).
+
 - (M8) Beyond the listed scope: `Request.sendJson` (registration through `rest.httpClient`, a dfx
   deviation: `ChannelTypes` lacks GuildMedia), `BotConfig.commands` and startup check 5, the per-day
   create counter as `harness/CommandBudget.ts` in the shared client (a rolling 24-hour ledger in
@@ -3547,7 +3606,8 @@ fails if a constant disagrees with the table.
 8. **Is `app_permissions` exact, including timeouts (H-026)?** Interaction
    preflight uses it. If it is not exact, the recompute still attributes the
    right tag; only the preflight is less early. Verifying this needs a human, so
-   it goes on the phase-3 checklist.
+   it goes on the phase-3 checklist. (M9: item `app-permissions` of
+   `harness/main.ts checklist`, LOG.md "Waiting for Rhys".)
 9. **Does the permission endpoint exist, and does it apply timeouts or masks
    for bots (H-240, H-241)?** It is compared with `missingBeforeMasks`
    (implicit=false). If it reflects timeouts, `OracleScope.includesTimeout` adds
@@ -3594,12 +3654,15 @@ fails if a constant disagrees with the table.
     Verifying it needs a human DM. Escalated to Rhys through `LOG.md` and the
     orchestrator; the rule's remainder is `escalated` (§5.5), shown as an unmet
     Done criterion until Rhys decides (a human DM, or accepting resolver-only
-    coverage).
+    coverage). (M9: step 4 of the checklist, `harness/main.ts checklist`, LOG.md
+    "Waiting for Rhys".)
 18. **Handler-side delivery of option values and component clicks (phase 2).**
     The bot-only halves are live (registration readback with a rejected
     mistyped choice; the custom_id round trip through a create response). A
     handler receiving a real invocation or click needs a human. Offline tests
-    decode recorded interaction payloads. Escalated like 17.
+    decode recorded interaction payloads. Escalated like 17. (M9: items
+    `option-values` and `click-data` of the checklist; offline,
+    `test/unit/interactions-wire.test.ts` and `interactions-runner.test.ts`.)
 19. **Reaction removal and overwrite editing.** Out of phase-1 scope in this
     design (§2.4). If Rhys wants them in phase 1, they are new table rows with
     their own families (H-144, H-070).
@@ -3621,7 +3684,8 @@ fails if a constant disagrees with the table.
     criterion until Rhys decides (a human DM session, or accepting the DM branch as
     typed and unit-tested through the fake gateway). The alternative, dropping the
     DM intents from `EventIntents` until they are verified, would make a DM bot
-    impossible to write.
+    impossible to write. (M9: steps 4 and 5 of the checklist, with the DM intents and
+    without them before a canary.)
 
 ---
 
