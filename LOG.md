@@ -3131,7 +3131,7 @@ what Discord did. Code on `1afd0ba`, DESIGN on `059dce6`, the table on `b6a617d`
   is `..._CUSTOM_ID_SKU_...`; its provisioning created `lab_app_emoji`), `rule/text-*/typed-emoji-*` (6, 151 s, 1: the
   made-up emoji is rewritten with the flag too), `rule/text-manage-channels/raw-slowmode-*` (3, 131 s, 1: the fraction is
   accepted), `rule/commands/*option-key*` (8, 176 s, 0; two POST 429s of 17 and 18 s waited out), and
-  `rule/text-manage-channels/raw-slowmode-fraction` again once the probe read the stored value back (1, 128 s). The
+  `rule/text-manage-channels/raw-slowmode-fraction` again once the probe took the stored value from the PATCH response body (1, 128 s). The
   expectations in `test/rules.ts` are what these showed, and the write run below confirmed every one.
 - **Live findings** ("Live findings", after the final audit): six rows and an empty row are refused on their own paths;
   a premium button's `custom_id` and an interactive button's `url` get their own mutual-exclusion codes; every option key
@@ -3183,3 +3183,25 @@ what Discord did. Code on `1afd0ba`, DESIGN on `059dce6`, the table on `b6a617d`
   `R-payload-external-emoji`'s pair and `R-payload-external-sticker` (a second guild: Rhys's decision; the emoji rule now
   has its subject-only evidence), the 8 phase-3 rules and the 6 escalated remainders (Q-17, Q-18, Q-22: Rhys's checklist
   sitting), the `@everyone` valid side and successful kicks and bans (resolver only).
+
+#### After the probes verifier
+
+The probes verifier accepted the round (fresh-process `run --compare` on `8310922`: 566 scenarios, 0 mismatches,
+identical table) with three minor findings.
+
+- **`R-option-keys`' invalid sides could read `Ignored` for the wrong reason.** `misplacedKeyObservation` returned
+  `Ignored` when the GET had no probe command, or lacked an option the probe POSTed, so a dropped option or command
+  looked like a dropped key. It now returns `Option.none()` in both cases, and the probe dies naming the probe and key
+  (after POSTing the base back), so only a stored option without the key reads `Ignored`. New cases in
+  `test/unit/command-probes.test.ts` (no command, one option missing, no options); with the missing-option check
+  removed, the test fails. Live: `run --only 'rule/commands/*option-key*'` on the change, 8 scenarios in 171 s, 303
+  requests, 2 invalid (two command-POST 429s of 18 s, retried by dfx), mismatches 0, run ok. Every POSTed option was
+  stored, so the committed rows' observations stand; the table is unchanged.
+- **`degraded` lists `UseExternalEmojis` when the flag is held** (a made-up emoji is rewritten either way). Left as
+  documented in `degradedOf`, DESIGN §2.3 and §4.12, README and the rule's statement: the entry names the dropped
+  feature's rule. Separating "flag missing" from "emoji unusable" would change `SentDegradable`'s type and the six
+  emoji evidence rows, so it needs a `--write` run and a confirming run, and the compile budget has almost no room for a
+  new type. It is a decision for Rhys, recorded here.
+- **Wording.** README's slowmode sentence said "a fraction of a second"; the probe sends 1.5 s, so it now says a
+  slowmode that is not a whole number of seconds. The exploration bullet above now says the probe took the stored value
+  from the PATCH response body, as the "Live findings" entry already did.

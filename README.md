@@ -196,8 +196,8 @@ budget. `bun run verify:live` runs the live matrix against a test guild and rewr
   part that is not live: six wait for Rhys (a DM, a real command invocation, a click: Q-17, Q-18 and Q-22), and one
   would ping `@everyone`. Two checks inside live pairs are typed only: an interaction reply's at most 5 action rows (an
   interaction needs a human) and an empty name (the lab guard sends only lab-named channels and threads). For a
-  fraction of a second of slowmode the library is stricter than Discord on purpose: Discord accepts 1.5 and stores 1, so
-  the library refuses it before sending (`LOG.md` records each).
+  slowmode that is not a whole number of seconds the library is stricter than Discord on purpose: Discord accepts 1.5 and
+  stores 1, so the library refuses it before sending (`LOG.md` records each).
 - **Hover snapshots** check that the editor shows named types (`CommandInteraction<{ readonly options: {...} },
   "ephemeral">`, `Effect<Sent, MissingViewChannel | ...>`), never the internal machinery.
 - **The compile budget** (`bun run budget`) compiles the reference bot as a consumer of this package compiles it: by

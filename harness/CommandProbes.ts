@@ -274,17 +274,18 @@ export const storedKeysAsDefined = (options: ReadonlyArray<OptionLike>, stored: 
 
 /**
  * What Discord stored of a raw option-key probe's misplaced `key` (R-option-keys's invalid sides): `Ignored` when no
- * option of `stored` holds it (or `stored` has no such command), else `Applied`, naming the option types that kept it
- * (each option is named after its type, `optionKeyBody`).
+ * option of `stored` holds it, else `Applied`, naming the option types that kept it (each option is named after its
+ * type, `optionKeyBody`). `None` when `stored` has no such command or lacks an option the probe posted: a dropped
+ * option or command says nothing about the key (the final probes verifier).
  */
-export const misplacedKeyObservation = (key: MisplacedKey, stored: Schema.JsonObject | undefined): Observation => {
-  const listed = stored?.["options"]
+export const misplacedKeyObservation = (key: MisplacedKey, stored: Schema.JsonObject | undefined): Option.Option<Observation> => {
+  if (stored === undefined) return Option.none()
+  const listed = stored["options"]
   const storedOptions = Array.isArray(listed) ? listed.filter(isObject) : []
-  const kept = misplacedKeys[key].on.filter((type) => {
-    const match = storedOptions.find((candidate) => candidate["name"] === type)
-    return match !== undefined && !unset(match[key])
-  })
-  return kept.length === 0 ? { _tag: "Ignored", field: key } : { _tag: "Applied", field: `${key} on ${kept.join(",")}` }
+  const matches = misplacedKeys[key].on.map((type) => ({ type, match: storedOptions.find((candidate) => candidate["name"] === type) }))
+  if (matches.some(({ match }) => match === undefined)) return Option.none()
+  const kept = matches.filter(({ match }) => match !== undefined && !unset(match[key])).map(({ type }) => type)
+  return Option.some(kept.length === 0 ? { _tag: "Ignored", field: key } : { _tag: "Applied", field: `${key} on ${kept.join(",")}` })
 }
 
 /** The subject's stored command named {@link labCommandName}, read through Discord's GET. */
@@ -315,10 +316,11 @@ export const run = (probe: RegistrationProbe, context: ProbeContext): Effect.Eff
       const key = optionKeyProbes[probe]
       const answer: Answered<Schema.Json> = yield* sendJson(subject, Registration.route, "POST", Registration.pathOf(target), optionKeyBody(key), deadline)
       if (answer._tag === "Rejected") return { observation: rejected(answer.response), raw: Outcome.rejected(answer.response), created: [] }
-      const observation = misplacedKeyObservation(key, yield* readLabCommand(subject, target))
+      const observed = misplacedKeyObservation(key, yield* readLabCommand(subject, target))
       const restored = yield* sendJson(subject, Registration.route, "POST", Registration.pathOf(target), toDiscord(baseCommand.definition), deadline)
       if (restored._tag === "Rejected") return yield* Effect.die(new Error(`probe: Discord refused the base command's POST: ${restored.response.status} ${restored.response.code}`))
-      return { observation, raw: Outcome.ok([]), created: [] }
+      if (Option.isNone(observed)) return yield* Effect.die(new Error(`probe: the stored command lacks the command or an option ${probe} posted, so ${key} cannot be observed`))
+      return { observation: observed.value, raw: Outcome.ok([]), created: [] }
     }
     if (isSync(probe)) {
       const field = mutatedFieldOf(probe)

@@ -1,5 +1,5 @@
 import * as fs from "node:fs"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { definedKeys, documentedChannelTypes, misplacedKeyObservation, storedAsDefined, storedKeysAsDefined } from "../../harness/CommandProbes.ts"
 import { CommandsFixture, fixturePath } from "../../harness/RecordCommands.ts"
@@ -131,14 +131,17 @@ describe("the option keys readback (storedKeysAsDefined, misplacedKeyObservation
       const options = Array.isArray(body["options"]) ? body["options"] : []
       expect(options.map((option) => (typeof option === "object" && option !== null && !Array.isArray(option) ? [option["name"], key in option] : []))).toEqual(misplacedKeys[key].on.map((type) => [type, true]))
       // as POSTed: every option kept the key
-      expect(misplacedKeyObservation(key, body)).toEqual({ _tag: "Applied", field: `${key} on ${misplacedKeys[key].on.join(",")}` })
+      expect(misplacedKeyObservation(key, body)).toEqual(Option.some({ _tag: "Applied", field: `${key} on ${misplacedKeys[key].on.join(",")}` }))
     }
     const body = optionKeyBody("choices")
     const options = Array.isArray(body["options"]) ? body["options"] : []
     const dropped = options.map((option) => (typeof option === "object" && option !== null && !Array.isArray(option) ? Object.fromEntries(Object.entries(option).filter(([key]) => key !== "choices")) : option))
-    expect(misplacedKeyObservation("choices", { ...body, options: dropped })).toEqual({ _tag: "Ignored", field: "choices" })
+    expect(misplacedKeyObservation("choices", { ...body, options: dropped })).toEqual(Option.some({ _tag: "Ignored", field: "choices" }))
     const one = dropped.map((option, index) => (index === 3 && typeof option === "object" && option !== null && !Array.isArray(option) ? { ...option, choices: [{ name: "One", value: "one" }] } : option))
-    expect(misplacedKeyObservation("choices", { ...body, options: one })).toEqual({ _tag: "Applied", field: "choices on channel" })
-    expect(misplacedKeyObservation("choices", undefined)).toEqual({ _tag: "Ignored", field: "choices" })
+    expect(misplacedKeyObservation("choices", { ...body, options: one })).toEqual(Option.some({ _tag: "Applied", field: "choices on channel" }))
+    // a dropped command or option says nothing about the key: no observation, not Ignored
+    expect(misplacedKeyObservation("choices", undefined)).toEqual(Option.none())
+    expect(misplacedKeyObservation("choices", { ...body, options: dropped.slice(1) })).toEqual(Option.none())
+    expect(misplacedKeyObservation("choices", { ...body, options: [] })).toEqual(Option.none())
   })
 })
