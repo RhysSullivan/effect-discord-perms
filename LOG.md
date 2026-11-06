@@ -3155,6 +3155,14 @@ what Discord did. Code on `1afd0ba`, DESIGN on `059dce6`, the table on `b6a617d`
   previous table` in exactly the 24 new rows, so the command exited 1 by design: a JSON comparison of the committed and
   the new table found every one of the 542 earlier rows and the `env` block identical. The table was written and
   committed (`b6a617d`).
+- **Run C** (`bun --no-env-file harness/main.ts run --compare`, a fresh process, on `a901ce6`, which changes only docs
+  after run W's code; started 15:48, 2 h 44 min after run W, so its crossposts were more than an hour apart): role budget
+  128 left (89 needed), **566 scenarios in 2,610 s**, 9,632 requests, 2,834 writes, 601 invalid (401/403/429); dfx waited
+  out 429s on four command POSTs, three command PUTs, one bulk delete and seven reaction PUTs; no lab step was retried
+  after a 5xx; the oracle was available; **0 mismatches**; **`compare: identical to the previous table`**, so
+  `fixtures/truth-table.json` (`b6a617d`) did not change; the closing reset wrote 3; it printed the six unmet Done
+  criteria (Q-17, Q-18, Q-22); **exited 0** (`run ok`). Its log has the same read-backs as run W's (the made-up emoji
+  as `lab rule :lab_made_up:` on both setups, the fractional slowmode stored as 1).
 - **Counts.** `bun run rules`: `rules ok 71 rule(s) (56 live pair, 0 escalated, 5 pure-typing, 10 other not-live; 6
   escalated remainder(s), waiting for Rhys (Q-17, Q-18, Q-22)), 13 fail fixture(s), 152 live sides and 6 evidence row(s)
   checked against the table, 5 event(s) with a live intent pair, flag coverage over 433 matrix row(s)` (was 70 rules,
@@ -3166,6 +3174,11 @@ what Discord did. Code on `1afd0ba`, DESIGN on `059dce6`, the table on `b6a617d`
 - **Exit checks.** `bun run verify:offline` exits 0: gen:errors up to date; typecheck; 1,605 tests in 60 files;
   test:types 13 pass and 13 fail fixtures, 143 diagnostics, largest gated 739 characters; hover 7 files, 27 markers;
   rules ok (above); budget ok.
+- **Done criteria (PROMPT.md) after this round.** As after round 2, with this round's typed-only restrictions now live
+  except the two named below. Met: `verify:offline` green; `verify:live` with zero mismatches and consecutive fresh
+  processes writing identical tables (runs W and C); the reference bot with no `orDie`, within budget; README.md with the
+  guarantee; this file's live findings and the phase-3 checklist. **Partially met: every compile-time rule live in both
+  directions** (bullet 3), for the reasons below, none of which an agent can close.
 - **Still not live.** An empty name (the lab guard), more than 5 rows on an interaction reply (phase 3),
   `R-payload-external-emoji`'s pair and `R-payload-external-sticker` (a second guild: Rhys's decision; the emoji rule now
   has its subject-only evidence), the 8 phase-3 rules and the 6 escalated remainders (Q-17, Q-18, Q-22: Rhys's checklist
